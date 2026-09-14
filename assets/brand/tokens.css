@@ -1,0 +1,27 @@
+/* SPDX-FileCopyrightText: Ruben Talstra */
+/* SPDX-License-Identifier: BUSL-1.1 */
+/* FerroSMART brand tokens, the "Bronze & Iron" palette. Import this file, or
+   copy the values. The family site copies the two hue values verbatim into
+   its own tokens.css, so a change here is a change there. */
+:root {
+  /* Core palette */
+  --ferrosmart-bronze: #78350F;        /* primary mark and accents; text on light */
+  --ferrosmart-bronze-light: #FBBF24;  /* the same voice on a dark ground; highlights in the mark */
+  --ferrosmart-ink: #0F172A;          /* text on light */
+  --ferrosmart-mist: #F1F5F9;         /* text on dark */
+  --ferrosmart-tile: #0B1020;         /* dark tile background */
+  --ferrosmart-surface: #F8FAFC;      /* light surface background */
+
+  /* Roles */
+  --ferrosmart-brand: var(--ferrosmart-bronze);
+  --ferrosmart-brand-2: var(--ferrosmart-bronze-light);
+  --ferrosmart-fg: var(--ferrosmart-ink);
+  --ferrosmart-bg: var(--ferrosmart-surface);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ferrosmart-brand: var(--ferrosmart-bronze-light);
+    --ferrosmart-fg: var(--ferrosmart-mist);
+    --ferrosmart-bg: var(--ferrosmart-tile);
+  }
+}
