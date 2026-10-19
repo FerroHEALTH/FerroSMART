@@ -13,6 +13,10 @@ on:
   pull_request:
     branches: [main]
   merge_group:
+  schedule:
+    # Mondays 06:00 UTC: does the SMART on openEHR draft still stand at its pin?
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 permissions: {}
 
@@ -29,3 +33,21 @@ jobs:
           persist-credentials: false
       - name: Every pin agrees with docs/VERSIONS.md and every vendored byte with its provenance
         run: bash scripts/checks/versions.sh
+
+  # The SMART on openEHR specification is a DEVELOPMENT draft, pinned and
+  # tracked: this job reads the newest upstream commit touching its tree and
+  # fails when the pin is behind it, so a change upstream becomes a decision
+  # here (docs/architecture.md section 3.9) and never silent drift.
+  smart-on-openehr-upstream:
+    name: smart-on-openehr-upstream
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The SMART on openEHR draft still stands at its pin
+        run: bash scripts/vendor/smart-on-openehr.sh --upstream

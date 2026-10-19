@@ -9,6 +9,9 @@
 #   1. SMART App Launch  the PROVENANCE.md names the pinned version and
 #                        commit, and the package and repository trees still
 #                        hash to the digests it records.
+#   1b. SMART on openEHR the PROVENANCE.md names the pinned commit, declares
+#                        the DEVELOPMENT status the design assumes, and the
+#                        tree still hashes to the digest it records.
 #   2. the RFCs          every `RFC NNNN` row's sha256 is the sha256 of the
 #                        vendored text, which the PROVENANCE.md repeats.
 #   3. OpenID Connect    the vendored Discovery document hashes to the row's
@@ -88,6 +91,27 @@ if [ -f "$smart/PROVENANCE.md" ]; then
   ok "SMART App Launch $version at $commit, both trees at their digests"
 else
   fail "$smart/PROVENANCE.md is missing"
+fi
+
+# ---- 1b. SMART on openEHR ---------------------------------------------------
+soe="docs/specs/smart-on-openehr"
+if [ -f "$soe/PROVENANCE.md" ]; then
+  commit="$(corpus_pin_commit "$(corpus_pin_cell "SMART on openEHR source")")"
+  status="$(awk '{ print $1; exit }' <<< "$(corpus_pin_cell "SMART on openEHR")")"
+  got_commit="$(provenance_line "$soe/PROVENANCE.md" Pin)"
+  [ "${got_commit%% (*}" = "commit $commit" ] ||
+    fail "$soe/PROVENANCE.md names '$got_commit', docs/VERSIONS.md pins commit $commit"
+  declared="$(sed -n 's/^:spec_status: *//p' "$soe/docs/smart_app_launch/manifest_vars.adoc" | head -n1 | tr -d '[:space:]')"
+  [ "$declared" = "$status" ] ||
+    fail "$soe declares spec_status '$declared', docs/VERSIONS.md records $status; the design assumes a development draft"
+  grep -qF "**Status: $status.**" "$soe/PROVENANCE.md" ||
+    fail "$soe/PROVENANCE.md does not state the $status status"
+  want="$(provenance_digest "$soe/PROVENANCE.md" "Tree digest")"
+  got="$(corpus_tree_digest "$soe")"
+  [ "$got" = "$want" ] || fail "$soe hashes to $got, its PROVENANCE.md records ${want:-nothing}"
+  ok "SMART on openEHR at $commit, status $status, tree at its digest"
+else
+  fail "$soe/PROVENANCE.md is missing"
 fi
 
 # ---- 2. the RFCs ------------------------------------------------------------

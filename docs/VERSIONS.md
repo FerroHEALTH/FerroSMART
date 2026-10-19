@@ -21,6 +21,7 @@ records why the value is what it is.
 | SMART App Launch | 2.2.0 (STU 2.2, on FHIR R4 4.0.1) | `docs/architecture.md` §2, `docs/specs/smart-app-launch/PROVENANCE.md` |
 | OAuth 2.0 and JOSE | the sixteen RFCs of the table below | `docs/architecture.md` §2, `docs/specs/rfc/PROVENANCE.md` |
 | OpenID Connect Discovery 1.0 | incorporating errata set 2 (2023-12-15) | `docs/architecture.md` §2, `docs/specs/openid-connect-discovery/PROVENANCE.md` |
+| SMART on openEHR | DEVELOPMENT (the ITS-REST draft at its amendment record 1.1.0, 2025-05-20, pinned by commit below; never a release) | `docs/architecture.md` §2 and §3.9, `docs/specs/smart-on-openehr/PROVENANCE.md` |
 
 ## Corpora and machine-readable inputs
 
@@ -34,6 +35,7 @@ hashes the vendored bytes again, failing when either disagrees with its row.
 |---|---|---|
 | SMART App Launch package | 2.2.0 registry sha1 `2e5b7caacf87523082507f6af2efdf25c24ad3d8` (`hl7.fhir.uv.smart-app-launch` from packages.fhir.org, FHIR 4.0.1, CC-BY-4.0) | `scripts/vendor/smart-app-launch.sh`, `docs/specs/smart-app-launch/PROVENANCE.md` |
 | SMART App Launch source | `HL7/smart-app-launch` tag `2.2.0` commit `13449f93ba52d401d29ca9e72e8a4cbced8d6424` (the page sources the STU 2.2 publication renders) | `scripts/vendor/smart-app-launch.sh`, `docs/specs/smart-app-launch/PROVENANCE.md` |
+| SMART on openEHR source | `openEHR/specifications-ITS-REST` commit `9d25ea783f790512e05f908ef743626b4f7e8d2c` (the default branch head on 2026-10-16) path `docs/smart_app_launch` last change `5183c1f9274ed84096b29ea2b3977bc2e2b26247` (status DEVELOPMENT; `scripts/vendor/smart-on-openehr.sh --upstream` fails when the default branch has a newer commit touching the path) | `scripts/vendor/smart-on-openehr.sh`, `docs/specs/smart-on-openehr/PROVENANCE.md`, the `smart-on-openehr-upstream` job of `.github/workflows/specs.yml` |
 | OpenID Connect Discovery 1.0 document | `openid-connect-discovery-1_0-errata2.html` sha256 `0401a07b35de50e914e195aa2c3c64cc4f6542464381c885d24a2623fbf75ec2` (the edition `openid-connect-discovery-1_0.html` serves) | `scripts/vendor/openid-connect-discovery.sh`, `docs/specs/openid-connect-discovery/PROVENANCE.md` |
 
 ### The RFCs
@@ -78,8 +80,9 @@ first-party file.
 
 Vendored material keeps its upstream terms, recorded beside each vendored tree
 in its `PROVENANCE.md`: CC BY 4.0 for the SMART App Launch package and page
-sources, the IETF Trust Legal Provisions for the RFCs, and the OpenID
-Foundation's notice for the Discovery specification.
+sources, the IETF Trust Legal Provisions for the RFCs, Apache License 2.0
+for the SMART on openEHR source, and the OpenID Foundation's notice for the
+Discovery specification.
 
 ## The toolchain and the crate
 

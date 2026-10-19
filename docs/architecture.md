@@ -18,7 +18,8 @@ of moves.
 Citation style: `rfc6749 §4.4` is `docs/specs/rfc/rfc6749.txt` section 4.4;
 `smart conformance` is `docs/specs/smart-app-launch/repository/input/pages/conformance.md`
 (rendered as `conformance.html` under the STU 2.2 publication); `discovery
-§4.3` is section 4.3 of `docs/specs/openid-connect-discovery/`.
+§4.3` is section 4.3 of `docs/specs/openid-connect-discovery/`; `soe
+master08` is `docs/specs/smart-on-openehr/docs/smart_app_launch/master08-scopes.adoc`.
 
 ## 0. The picture
 
@@ -85,10 +86,11 @@ with the matrix.
 | SMART App Launch | 2.2.0 (STU 2.2, on FHIR R4 4.0.1) | The registry's `latest` on 2026-10-19 and the current 2.x publication; the 2.x line is where the `cruds` scope grammar, the `.well-known/smart-configuration` document and the asymmetric client profile live. Vendored as the package `hl7.fhir.uv.smart-app-launch` 2.2.0 and the page sources at the release tag. |
 | OAuth 2.0 and JOSE | RFC 6749, 6750, 7515, 7517, 7519, 7523, 7617, 7662, 8414, 8725, 9068, 9700, 8707, 7638, 9449, 8705 | None is obsoleted (the vendor script refuses an obsoleted pin). RFC 9700 updates 6749 and 6750 and RFC 8725 updates 7519, so each is read with its update. RFC 8707 is the `resource` parameter the client credentials client sends and RFC 7638 the thumbprint that names the product's own JWK. Three are in the set for reference: RFC 7662, because section 6 says why introspection is not the default, and RFC 9449 (DPoP) and RFC 8705 (mutual TLS), the sender-constraining mechanisms that stay product-specific (section 9). |
 | OpenID Connect Discovery 1.0 | incorporating errata set 2 (2023-12-15) | The edition the unversioned URL serves; RFC 9068 §4 names it as the alternative to RFC 8414 for publishing keys and the issuer. |
+| SMART on openEHR | DEVELOPMENT (the ITS-REST draft, `openEHR/specifications-ITS-REST` at commit `9d25ea78…`, its tree last changed at `5183c1f9…`, amendment record 1.1.0 of 2025-05-20) | The one specification of openEHR scopes, which FerroEHR, FerroFED and FerroBRIDGE reach. It is a draft the ITS-REST release does not stabilise, so it is pinned by commit, its status is checked on every vendor run, and a weekly job fails when upstream moves (3.9). |
 
 What is deliberately outside the pinned set: RFC 9396 (authorization
-details, which SMART marks experimental) and the ITS-REST SMART on openEHR
-draft. This document makes no claim about the content of either.
+details, which SMART marks experimental). This document makes no claim
+about its content.
 
 ## 3. The components
 
@@ -547,7 +549,111 @@ mounts it. The rules the builder keeps:
   and launch modes the issuer's metadata supports, and what the product adds
   by configuration.
 
-The route stays public: a client reads it before it holds a token.
+The route stays public: a client reads it before it holds a token. For an
+openEHR surface the builder adds the `services` map and the openEHR
+capabilities of 3.9, from the product's declaration of its base URLs.
+
+### 3.9 The SMART on openEHR grammar
+
+FerroEHR, FerroFED and FerroBRIDGE all reach openEHR resources: the first two
+serve the ITS-REST surface, and FerroBRIDGE requests openEHR scopes for its
+own CDR token. The crate therefore parses and enforces the SMART on openEHR
+scope grammar beside the FHIR grammar of 3.4. The source is the ITS-REST
+"SMART on openEHR" document, status DEVELOPMENT, vendored at
+`docs/specs/smart-on-openehr/docs/smart_app_launch/` and cited here as
+`soe master08` for `master08-scopes.adoc` and so on.
+
+**The grammar** (`soe master08`, Resource Scopes): `<compartment>/<resource>.<permissions>`,
+the compartment one of `patient`, `user` and `system` with the same meaning
+as in 3.4, the resource one of three families with a pattern,
+`template-<templateId>`, `composition-<templateId>` and `aql-<queryName>`,
+and the permissions the letters `c`, `r`, `u`, `d` and `s`, with `s` "Search
+or execute (e.g., for AQL queries)". A pattern is an exact id, `*::Name.v0`
+(one name in any namespace), `Namespace::*` (any id in one namespace), or
+`*` for "All available templates or queries"; `*` and `**` are both named
+as wildcards. **The launch context** (`soe master07`, Context Selection):
+`launch/patient` asks for "both FHIR `Patient` resource and corresponding
+openEHR `EHR` instance", and the token response then carries `ehrId`, "the
+unique identifier of the openEHR `EHR` instance"; `launch/episode` and
+`episodeId` are experimental (`soe master09`). **The discovery document**
+(`soe master04`): served relative to the platform base URL, with the FHIR
+members unchanged, a `services` map keyed by reverse domain name in which
+`org.openehr.rest` with its `baseUrl` is required and `org.fhir.rest`
+recommended, and the capabilities `context-openehr-ehr`,
+`openehr-permission-v1`, `launch-base64-json` and, experimentally,
+`context-openehr-episode`.
+
+**The parser is `openehr-sdt`'s.** The published `openehr-sdt` crate
+carries `smart_scopes`, a total parser of this grammar (`SmartScope`,
+`ResourceScope`, `Compartment`, `ResourceFamily`, `Pattern`, `Permissions`),
+which FerroFED consumes today. The crate consumes it behind an `openehr`
+feature and models nothing of the grammar itself: a second copy of a
+published parser would fork the grammar between the products, which is the
+drift one crate exists to close. What the crate adds is the enforcement: a `Requirement::OpenEhr {
+family, permission, resource }` the product's classifier names per route,
+checked against the token's parsed scopes.
+
+**Where the draft is silent, these rules are ours**, carried over from
+FerroFED's `auth/permission/grant.rs`, which moves into the crate with
+FerroFED's migration:
+
+- The permission letters are read in any order: the draft lists the five
+  letters and fixes no order, unlike SMART App Launch, so `.rs` and `.sr`
+  are one grant. A letter outside the five grants nothing.
+- `*` matches within one `::`-delimited segment and `**` across segments;
+  a bare `*` or `**` matches every id. The draft's table shows the four
+  forms and no more, so this is the one reading under which every row of
+  the table holds.
+- A resource with no family of its own (the `EHR`, its `EHR_STATUS`, its
+  `DIRECTORY`, a `CONTRIBUTION`) is held to the `composition-` family with
+  the operation's permission over every template, because they are the EHR's
+  data and the draft names no other family for them. The DEMOGRAPHIC API has
+  no family either and no scope covers it: only a client the product lists
+  by `client_id` reaches it.
+- Where the product cannot see which resource a request addresses (an ad hoc
+  AQL query, a composition whose template only the node knows, an upload
+  whose template is in its body), only a pattern covering every resource,
+  `*` or `**`, covers it; a specific pattern cannot be shown to match.
+- `system/aql-*` counts only for a client the product lists as a backend
+  client, because the draft's own note says it "would grant access to all
+  registered and ad-hoc AQL queries system-wide".
+- A `patient/` grant reaches only the EHR of the launch context: the `ehrId`
+  the draft places in the token response, read from an `ehrId` claim in the
+  token when the issuer carries it there (the same convention as `patient`
+  in 3.3, our own design), and it "means nothing outside the platform that
+  issued it", so a product honours it only for an issuer it binds to its own
+  EHR space. It reaches EHR data alone: a `composition-` grant or an `aql-`
+  search, never a `template-` grant.
+- The FHIR v1 suffixes (`.read`, `.write`) are not applied to this grammar;
+  the draft defines none.
+- The two grammars coexist in one `scope` claim: each parser reads the
+  whole claim and keeps its own grants, and a token may carry both
+  `system/Observation.rs` and `system/composition-*.rs`. A scope string that
+  parses in neither grammar grants nothing in either.
+
+**Which grammar applies to which route is the product's declaration**, not
+the listener's: the classifier of section 5 names a `Requirement` per route, and the
+requirement carries the grammar. `Requirement::Fhir { permission,
+resource_type }` is checked against the 3.4 grants and
+`Requirement::OpenEhr { family, permission, resource }` against this
+section's, so a product that serves both surfaces under one listener
+(FerroFED's facade beside a FHIR endpoint, FerroEHR's ITS-REST beside its own
+FHIR surface) mixes them route by route, and a product that serves one
+grammar declares one. Neither grammar is a configuration switch; the route
+table is the declaration, and a route with no requirement is refused (3.7).
+
+**The development status is handled by pinning and tracking.** The draft is
+vendored at a commit, `scripts/vendor/smart-on-openehr.sh` refuses a tree
+whose `manifest_vars.adoc` no longer declares DEVELOPMENT, and its
+`--upstream` mode, run weekly by the `smart-on-openehr-upstream` job of
+`.github/workflows/specs.yml`, fails when the repository's default branch
+has a newer commit touching the tree. A change upstream is then re-vendored
+and recorded as a decision in section 9, naming what changed and what the
+crate does about it; nothing in the crate follows the draft silently, and a
+rule above that the draft later settles differently is changed with its
+tests and its decision row, never by drift. The crate's tests cite the
+section names of the vendored draft, so a re-vendor that moves a section
+fails a citation before it fails a behaviour.
 
 ## 4. The configuration model
 
@@ -657,7 +763,7 @@ the core.
 | FerroBRIDGE | `src/auth/{discovery,jwks,token,scope}.rs`, the token and scope halves of `guard.rs`, the audit line, `smart.rs` (the discovery document), `src/cdr/oauth/` whole | `compartment.rs` (the patient-to-EHR mapping), the route table `CLASSIFIED`, the `OperationOutcome` bodies, the operator scope and the operations it admits, the `[auth]` loader over the shared section |
 | FerroTERM | `src/smart/{discovery,jwks}.rs`, the token checks and the challenge rendering of `mod.rs`, the scope parser of `scopes.rs`, the discovery document | the write-route classification, the admin listener's requirement, the per-version audience list, the `CapabilityStatement` security block, the `OperationOutcome` bodies |
 | FerroEHR | `authn/jwt.rs` (the remote key source, the claim checks), `authn/basic.rs` (Argon2id and the enumeration defence), the challenge rendering, `service/terminology/oauth2.rs` (the client credentials client) | the RBAC and ABAC gate (`authz/`, Cedar), the assurance gate (`acr`, step-up challenge), the professional and acting-for claims, the ATNA audit, the committer identity |
-| FerroFED | `auth/keys.rs`, `auth/fetch.rs`, the RFC 9068 checks of `auth/mod.rs`, the challenge rendering of `auth/refusal.rs` | the trust list and per-issuer policy, RFC 7662 introspection for opaque tokens, the edge mode, the IUA and contact-point claims, purpose of use, the SMART on openEHR grammar and permission table, the FAPI 2.0, mTLS, DPoP and token-exchange onward grants, the HMAC references of the security log |
+| FerroFED | `auth/keys.rs`, `auth/fetch.rs`, the RFC 9068 checks of `auth/mod.rs`, the challenge rendering of `auth/refusal.rs`, the openEHR grant rules of `auth/permission/grant.rs` (3.9) | the trust list and per-issuer policy, RFC 7662 introspection for opaque tokens, the edge mode, the IUA and contact-point claims, purpose of use, the ITS-REST operation table (the classifier, `auth/permission/table.rs`) with its demographic and backend client lists, the FAPI 2.0, mTLS, DPoP and token-exchange onward grants, the HMAC references of the security log |
 
 Two of FerroFED's verifiers do not fit the library's one verifier and plug in
 beside it: the introspecting verifier for a token that is not a JWS
@@ -806,7 +912,9 @@ four agree on and settles each difference:
 | `jti` is read, not tracked; DPoP (`rfc9449`) and mutual TLS (`rfc8705`) stay product-specific, in FerroFED, for now | `rfc9700 §4.9.3` names sender-constraining as the countermeasure; both RFCs are vendored for reference (owner decision 2026-10-19) | none |
 | `resource` is the RFC 8707 resource indicator, sent when configured; `audience` has no specification and is sent only when configured | `rfc8707 §2`; FerroBRIDGE sends both today | none |
 | The `kid` of the product's own JWK is configured, or defaults to the RFC 7638 SHA-256 thumbprint | `rfc7638 §3`; the default is our own design | none |
-| SMART on openEHR stays in FerroFED | it is an ITS-REST DEVELOPMENT draft the release does not stabilise, and only FerroFED reads it | none |
+| The crate parses (through `openehr-sdt`) and enforces the SMART on openEHR grammar beside the FHIR grammar; the product's route table declares which applies per route | owner decision 2026-10-19; `soe master07`, `master08`; the rules the draft leaves open are listed in 3.9 as our own design | none |
+| SMART on openEHR is DEVELOPMENT: pinned by commit, its status checked on every vendor run, upstream read weekly, and every upstream change re-vendored and recorded here as a decision naming what changed | the draft's `manifest_vars.adoc`; no release stabilises it | none yet: the draft last changed on 2026-07-19 (amendment record 1.1.0) |
+| The `ehrId` of the launch context is read from an `ehrId` claim when the issuer carries it in the token | our own design, as `patient` in 3.3; the draft places it in the token response (`soe master07`, Context Selection) | none |
 
 ## 10. Verification
 
