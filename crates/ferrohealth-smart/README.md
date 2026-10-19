@@ -3,14 +3,15 @@
 
 # ferrohealth-smart
 
-The shared SMART App Launch 2.x and OAuth 2.0 resource-server crate of the
-FerroHEALTH products. It is a library, never an authorization server: it
-issues no token and holds no key that signs one. Each deployment points it at
-its own standards-compliant authorization server.
+SMART for the openEHR ecosystem, FHIR included: the shared SMART App Launch
+2.x and OAuth 2.0 resource-server crate of the FerroHEALTH products. It is a
+library, never an authorization server: it issues no token and holds no key
+that signs one. Each deployment points it at its own standards-compliant
+authorization server.
 
 ```toml
 [dependencies]
-ferrohealth-smart = { version = "=0.1.0", features = ["axum"] }
+ferrohealth-smart = { version = "=0.1.0", features = ["axum", "openehr"] }
 ```
 
 ## What it does
@@ -23,9 +24,15 @@ ferrohealth-smart = { version = "=0.1.0", features = ["axum"] }
   The `Caller` it returns carries the subject, the client, the scopes, the
   `patient` launch context and the raw claims. `IssuerSet` routes tokens of
   several issuers; `Verifier` is the seam for another kind of check.
-- **`scope`**: SMART v2 scopes, `patient/`, `user/` and `system/` with
-  `cruds`, and `Caller::reach`, which answers `Compartment::Any`,
+- **`openehr`** (feature `openehr`): the SMART on openEHR scopes, parsed by
+  `openehr-sdt` and enforced with `openehr::granted` over the `template-`,
+  `composition-` and `aql-` families, the product's `Honoured` flags per
+  issuer or client, and `Caller::ehr_id` for the launch context's EHR.
+- **`scope`**: the SMART on FHIR scopes, `patient/`, `user/` and `system/`
+  with `cruds`, and `Caller::reach`, which answers `Compartment::Any`,
   `Compartment::Patient(id)` or `None` for a permission on a resource type.
+  Both grammars coexist in one `scope` claim; the route table declares
+  which one a route is checked against.
 - **`basic`** and **`client`**: HTTP Basic against Argon2id hashes and sent
   outgoing, and the client credentials grant (`TokenSource`) with a cache,
   `client_secret_basic`, `client_secret_post` or `private_key_jwt`, and
@@ -62,9 +69,12 @@ async fn read(access: Access) -> String {
 
 fn classify(_method: &Method, uri: &Uri, _extensions: &Extensions) -> Option<Target> {
     let resource_type = uri.path().trim_start_matches("/fhir/").split('/').next()?;
+    let requirement = Requirement::Fhir {
+        permission: Permission::Read,
+        resource_type: resource_type.to_owned(),
+    };
     Some(
-        Target::new("read", Requirement::Permissions(vec![Permission::Read]))
-            .on(Some(resource_type.to_owned()))
+        Target::new("read", requirement)
             .route("/fhir/{resource_type}/{id}")
             .target(uri.path().trim_start_matches("/fhir/")),
     )
@@ -81,10 +91,12 @@ let app = Router::new()
 # }
 ```
 
-A handler holds a `patient/` token to its patient with
-`Compartment::admits`; a product scope the SMART grammar does not cover is
-read with `Access::has_scope`; a product rule that needs more reads
-`Access::claims`.
+An openEHR route declares `Requirement::OpenEhr { family, permission,
+resource }` instead, checked against the SMART on openEHR grants with the
+`Honoured` flags `Gate::with_honoured` reads for the caller. A handler holds
+a `patient/` token to its patient with `Compartment::admits`, or to its EHR
+with `Access::ehr_id`; a product scope neither grammar covers is read with
+`Access::has_scope`; a product rule that needs more reads `Access::claims`.
 
 ## Calling an upstream
 

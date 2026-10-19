@@ -786,6 +786,7 @@ async fn the_smart_configuration_republishes_the_issuer() -> Result<(), Box<dyn 
         scopes_supported: vec![String::from("system/Condition.rs")],
         capabilities: vec![String::from("launch-ehr")],
         granular: false,
+        ..SmartOptions::default()
     };
     let document = server.smart_configuration(&options);
     assert_eq!(serde_json::json!(issuer.uri()), document["issuer"]);

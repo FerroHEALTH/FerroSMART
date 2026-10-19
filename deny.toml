@@ -41,6 +41,8 @@ confidence-threshold = 0.9
 # The project's own crate is BUSL-1.1 (LICENSE).
 exceptions = [
   { allow = ["BUSL-1.1"], crate = "ferrohealth-smart" },
+  # The family's own openEHR crate, the SMART on openEHR grammar.
+  { allow = ["BUSL-1.1"], crate = "openehr-sdt" },
 ]
 
 [bans]

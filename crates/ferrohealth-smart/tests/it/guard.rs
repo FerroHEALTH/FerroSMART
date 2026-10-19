@@ -69,30 +69,31 @@ fn classify(_method: &Method, uri: &Uri, extensions: &Extensions) -> Option<Targ
         "/fhir/{resource_type}/$check" => Target::new(
             "operation",
             Requirement::Either(
-                Box::new(Requirement::Permissions(vec![Permission::Create])),
+                Box::new(fhir(Permission::Create, first.clone())),
                 Box::new(Requirement::Scope(String::from("__operator"))),
             ),
         )
-        .on(first.clone())
         .target(format!("{}/$check", first.unwrap_or_default())),
-        "/fhir/{resource_type}/{id}" => {
-            Target::new("read", Requirement::Permissions(vec![Permission::Read]))
-                .on(first.clone())
-                .target(format!(
-                    "{}/{}",
-                    first.unwrap_or_default(),
-                    second.unwrap_or_default()
-                ))
-        }
-        "/fhir/{resource_type}" => {
-            Target::new("create", Requirement::Permissions(vec![Permission::Create]))
-                .on(first.clone())
-                .target(first.unwrap_or_default())
-        }
+        "/fhir/{resource_type}/{id}" => Target::new("read", fhir(Permission::Read, first.clone()))
+            .target(format!(
+                "{}/{}",
+                first.unwrap_or_default(),
+                second.unwrap_or_default()
+            )),
+        "/fhir/{resource_type}" => Target::new("create", fhir(Permission::Create, first.clone()))
+            .target(first.unwrap_or_default()),
         "/health" => return None,
         _ => Target::new("unclassified", Requirement::Refused),
     };
     Some(target.route(template))
+}
+
+/// Returns the FHIR requirement of `permission` on `resource_type`.
+fn fhir(permission: Permission, resource_type: Option<String>) -> Requirement {
+    Requirement::Fhir {
+        permission,
+        resource_type: resource_type.unwrap_or_default(),
+    }
 }
 
 /// Renders a refusal over a text body naming its reason, as a product's own

@@ -4,8 +4,9 @@
 
 [![License: BUSL-1.1](https://img.shields.io/badge/License-BUSL--1.1-blue.svg)](LICENSE)
 
-The shared SMART App Launch and OAuth 2.0 resource-server crate of the
-FerroHEALTH products, in pure Rust: `ferrohealth-smart` on crates.io.
+SMART for the openEHR ecosystem, FHIR included: the shared SMART App Launch
+and OAuth 2.0 resource-server crate of the FerroHEALTH products, in pure
+Rust, `ferrohealth-smart` on crates.io.
 
 FerroSMART is a library, never an authorization server. It issues no token
 and holds no key that signs one; each deployment points it at its own
@@ -18,9 +19,19 @@ smart-auth). What it does for every product:
   under RFC 9068: the signature with an asymmetric algorithm only, `iss`,
   `aud`, `exp` and `nbf` within a clock skew. A refused token is one generic
   `401` that names no claim.
-- **SMART v2 scopes.** `patient/`, `user/` and `system/` with the `cruds`
-  permissions, the patient compartment from the token's launch context, and
-  a `403` that names no scope.
+- **SMART on openEHR scopes**, through the `openehr` feature: the
+  `template-`, `composition-` and `aql-` families with their `::` patterns
+  under `patient/`, `user/` and `system/`, parsed by `openehr-sdt` (the one
+  parser every product reads the grammar with) and enforced here: a
+  `system/aql-*` grant only for a listed backend client, a `patient/` grant
+  only for a bound issuer and only on the EHR of the launch context's
+  `ehrId`, and the `services` map and openEHR capabilities of a platform's
+  discovery document.
+- **SMART on FHIR scopes**, beside them: `patient/`, `user/` and `system/`
+  with the `cruds` permissions, the patient compartment from the token's
+  launch context, and a `403` that names no scope. A product's route table
+  declares which grammar each route is checked against, and both grammars
+  coexist in one `scope` claim.
 - **Machine authentication, in exactly two modes.** HTTP Basic, verified
   against Argon2id hashes and sent outgoing, and the OAuth 2.0 client
   credentials grant, a token client with a cache and one renewal on a `401`,
@@ -41,13 +52,15 @@ record of both.
 
 ```toml
 [dependencies]
-ferrohealth-smart = { version = "=0.1.0", features = ["axum"] }
+ferrohealth-smart = { version = "=0.1.0", features = ["axum", "openehr"] }
 ```
 
 The crate documentation on docs.rs is the integration guide; the design, the
 configuration model and the migration path of each product are in
 [`docs/architecture.md`](docs/architecture.md). The specifications the crate
-implements are vendored under [`docs/specs/`](docs/specs/) at the versions
+implements, SMART App Launch 2.2.0, the SMART on openEHR draft, the OAuth
+2.0 and JOSE RFCs and OpenID Connect Discovery 1.0, are vendored under
+[`docs/specs/`](docs/specs/) at the versions
 [`docs/VERSIONS.md`](docs/VERSIONS.md) pins.
 
 ## Build and test

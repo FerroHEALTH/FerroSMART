@@ -6,13 +6,14 @@
 //!
 //! The product tells the layer what each route is ([`Classify`]): the
 //! interaction it records, what it requires of the caller
-//! ([`Requirement`]), the resource type the path names, the matched route
-//! template and the target name for the audit line. A request without a
-//! valid credential answers `401`, one whose credential grants no
-//! permission for the interaction `403` (RFC 6750 §3.1), and the body of
-//! either is the product's ([`Render`]). What a scope reaches inside a type
-//! (the patient compartment) is checked by the handler, which reads the
-//! [`Access`] the layer leaves on the request.
+//! ([`Requirement`]), which grammar that requirement is checked against
+//! (SMART on FHIR or SMART on openEHR), the matched route template and the
+//! target name for the audit line. A request without a valid credential
+//! answers `401`, one whose credential grants no permission for the
+//! interaction `403` (RFC 6750 §3.1), and the body of either is the
+//! product's ([`Render`]). What a scope reaches inside a type (the patient
+//! compartment, the launch context's EHR) is checked by the handler, which
+//! reads the [`Access`] the layer leaves on the request.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -41,6 +42,7 @@ use crate::refusal::Refusal;
 use crate::refusal::Schemes;
 use crate::resource::Access;
 use crate::resource::Caller;
+use crate::resource::Honoured;
 use crate::resource::Rejection;
 use crate::resource::Verifier;
 use crate::scope::Permission;
@@ -54,13 +56,35 @@ pub enum Requirement {
     Public,
     /// A valid credential, whatever it grants.
     Caller,
-    /// A valid credential granting one of these permissions on the resource
-    /// type the target names; a target naming no type meets it never, so a
-    /// classifier that wants any caller says [`Requirement::Caller`].
-    Permissions(Vec<Permission>),
+    /// A valid credential granting `permission` on `resource_type` under the
+    /// SMART on FHIR grammar (SMART App Launch 2.2.0, Scopes and Launch
+    /// Context).
+    Fhir {
+        /// The permission the interaction needs.
+        permission: Permission,
+        /// The FHIR resource type the route addresses.
+        resource_type: String,
+    },
+    /// A valid credential granting `permission` on a resource of `family`
+    /// under the SMART on openEHR grammar (`master08 §Resource Scopes`);
+    /// `resource` is the template id or query name the route addresses, or
+    /// `None` for an operation only a bare `*` or `**` covers.
+    #[cfg(feature = "openehr")]
+    OpenEhr {
+        /// The resource family the route addresses.
+        family: openehr_sdt::smart_scopes::ResourceFamily,
+        /// The permission the operation needs.
+        permission: openehr_sdt::smart_scopes::Permission,
+        /// The resource the route names, when the product can see it.
+        resource: Option<String>,
+    },
     /// A valid credential whose `scope` claim names this scope verbatim (a
     /// product's own operator or admin scope).
     Scope(String),
+    /// A valid credential of a client the product lists by `client_id`,
+    /// which is how a surface no scope covers (the DEMOGRAPHIC API) is
+    /// reached (no specification governs this: our own design).
+    Client(Vec<String>),
     /// Either requirement.
     Either(Box<Requirement>, Box<Requirement>),
     /// No caller is admitted: a route the product mounted without a
@@ -69,19 +93,39 @@ pub enum Requirement {
 }
 
 impl Requirement {
-    /// Returns whether `access` meets this requirement on `resource_type`.
+    /// Returns whether `access` meets this requirement, `honoured` saying
+    /// what the product honours for the caller beyond a `user/` grant.
     #[must_use]
-    pub fn met_by(&self, access: &Access, resource_type: Option<&str>) -> bool {
+    pub fn met_by(&self, access: &Access, honoured: Honoured) -> bool {
         match self {
             Self::Public | Self::Caller => true,
-            Self::Permissions(permissions) => resource_type.is_some_and(|resource_type| {
-                permissions
-                    .iter()
-                    .any(|permission| access.reach(*permission, resource_type).is_some())
-            }),
+            Self::Fhir {
+                permission,
+                resource_type,
+            } => access.reach(*permission, resource_type).is_some(),
+            #[cfg(feature = "openehr")]
+            Self::OpenEhr {
+                family,
+                permission,
+                resource,
+            } => {
+                access.caller().is_some_and(|caller| {
+                    crate::openehr::granted(
+                        &caller.openehr_scopes(),
+                        *family,
+                        *permission,
+                        resource.as_deref(),
+                        honoured,
+                    )
+                }) || matches!(access, Access::Open)
+            }
             Self::Scope(scope) => access.has_scope(scope),
+            Self::Client(clients) => access
+                .caller()
+                .and_then(Caller::client_id)
+                .is_some_and(|client| clients.iter().any(|listed| listed == client)),
             Self::Either(left, right) => {
-                left.met_by(access, resource_type) || right.met_by(access, resource_type)
+                left.met_by(access, honoured) || right.met_by(access, honoured)
             }
             Self::Refused => false,
         }
@@ -95,8 +139,6 @@ pub struct Target {
     interaction: &'static str,
     /// What the route requires.
     requirement: Requirement,
-    /// The resource type the path names, which a permission is checked on.
-    resource_type: Option<String>,
     /// The matched route template the audit line records.
     route: Option<String>,
     /// The product's name for what was addressed, which the audit line
@@ -111,17 +153,9 @@ impl Target {
         Self {
             interaction,
             requirement,
-            resource_type: None,
             route: None,
             addressed: None,
         }
-    }
-
-    /// Returns this target naming `resource_type`.
-    #[must_use]
-    pub fn on(mut self, resource_type: Option<String>) -> Self {
-        self.resource_type = resource_type;
-        self
     }
 
     /// Returns this target under the matched `route` template.
@@ -132,7 +166,7 @@ impl Target {
     }
 
     /// Returns this target addressing `target`, the product's name for it
-    /// (`Condition/c-1`).
+    /// (`Condition/c-1`, `ehr/…/composition`).
     #[must_use]
     pub fn target(mut self, target: impl Into<String>) -> Self {
         self.addressed = Some(target.into());
@@ -149,12 +183,6 @@ impl Target {
     #[must_use]
     pub const fn requirement(&self) -> &Requirement {
         &self.requirement
-    }
-
-    /// Returns the resource type the path names.
-    #[must_use]
-    pub fn resource_type(&self) -> Option<&str> {
-        self.resource_type.as_deref()
     }
 
     /// Returns the matched route template.
@@ -211,9 +239,13 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnsweredAs(pub &'static str);
 
+/// What a product honours for a caller, read from its issuer or client
+/// lists once the credential holds.
+type Honours = Arc<dyn Fn(&Caller) -> Honoured + Send + Sync>;
+
 /// The credentials a layer checks against: a verifier for bearer tokens,
 /// the password store for Basic, or neither on an open surface.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Gate {
     /// The verifier of bearer tokens, when they are admitted.
     bearer: Option<Arc<dyn Verifier>>,
@@ -221,6 +253,19 @@ pub struct Gate {
     basic: Option<Arc<PasswordStore>>,
     /// The protection space the challenges name (RFC 6750 §3, RFC 7617 §2).
     realm: Option<String>,
+    /// What the product honours for a caller.
+    honours: Honours,
+}
+
+impl Default for Gate {
+    fn default() -> Self {
+        Self {
+            bearer: None,
+            basic: None,
+            realm: None,
+            honours: Arc::new(|_caller| Honoured::default()),
+        }
+    }
 }
 
 impl std::fmt::Debug for Gate {
@@ -229,7 +274,7 @@ impl std::fmt::Debug for Gate {
             .field("bearer", &self.bearer.is_some())
             .field("basic", &self.basic)
             .field("realm", &self.realm)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -261,6 +306,18 @@ impl Gate {
         self
     }
 
+    /// Returns this gate reading what the product honours for a caller
+    /// from `honours`: whether the caller is a listed backend client and
+    /// whether its issuer is bound to the product's EHR space.
+    #[must_use]
+    pub fn with_honoured(
+        mut self,
+        honours: impl Fn(&Caller) -> Honoured + Send + Sync + 'static,
+    ) -> Self {
+        self.honours = Arc::new(honours);
+        self
+    }
+
     /// Returns whether the gate admits no credential at all.
     #[must_use]
     pub const fn is_open(&self) -> bool {
@@ -280,6 +337,14 @@ impl Gate {
     #[must_use]
     pub fn realm(&self) -> Option<&str> {
         self.realm.as_deref()
+    }
+
+    /// Returns what the product honours for `access`.
+    #[must_use]
+    pub fn honoured(&self, access: &Access) -> Honoured {
+        access
+            .caller()
+            .map_or_else(Honoured::default, |caller| (self.honours)(caller))
     }
 
     /// Returns who calls with `headers`, or the refusal.
@@ -551,7 +616,8 @@ async fn admit(
         .authenticate(headers)
         .await
         .map_err(|refusal| (None, refusal))?;
-    if gate.is_open() || target.requirement().met_by(&access, target.resource_type()) {
+    let honoured = gate.honoured(&access);
+    if gate.is_open() || target.requirement().met_by(&access, honoured) {
         Ok(access)
     } else {
         Err((Some(access), Refusal::Forbidden))
@@ -561,48 +627,57 @@ async fn admit(
 #[cfg(test)]
 mod tests {
     use super::{Requirement, Target};
-    use crate::resource::{Access, Caller};
+    use crate::resource::{Access, Caller, Honoured};
     use crate::scope::Permission;
     use std::sync::Arc;
 
     fn access(scope: &str) -> Access {
         Access::Caller(Arc::new(Caller::new(
             String::from("sub"),
-            None,
+            Some(String::from("client-1")),
             scope,
             None,
             false,
         )))
     }
 
+    fn fhir(permission: Permission) -> Requirement {
+        Requirement::Fhir {
+            permission,
+            resource_type: String::from("Condition"),
+        }
+    }
+
     #[test]
-    fn a_requirement_reads_the_permission_the_scope_or_either() {
-        let read = Requirement::Permissions(vec![Permission::Read]);
-        assert!(read.met_by(&access("system/Condition.r"), Some("Condition")));
-        assert!(!read.met_by(&access("system/Condition.c"), Some("Condition")));
-        assert!(
-            !read.met_by(&access("system/*.cruds"), None),
-            "no type, no permission"
-        );
+    fn a_requirement_reads_the_permission_the_scope_the_client_or_either() {
+        let none = Honoured::default();
+        let read = fhir(Permission::Read);
+        assert!(read.met_by(&access("system/Condition.r"), none));
+        assert!(!read.met_by(&access("system/Condition.c"), none));
         let operator = Requirement::Scope(String::from("__operator"));
-        assert!(operator.met_by(&access("__operator"), Some("Condition")));
-        assert!(!operator.met_by(&access("system/*.cruds"), Some("Condition")));
+        assert!(operator.met_by(&access("__operator"), none));
+        assert!(!operator.met_by(&access("system/*.cruds"), none));
         let either = Requirement::Either(Box::new(read), Box::new(operator));
-        assert!(either.met_by(&access("__operator"), Some("Condition")));
-        assert!(either.met_by(&access("system/Condition.r"), Some("Condition")));
-        assert!(!either.met_by(&access("system/Condition.c"), Some("Condition")));
-        assert!(!Requirement::Refused.met_by(&Access::Open, None));
-        assert!(Requirement::Caller.met_by(&access(""), Some("Condition")));
+        assert!(either.met_by(&access("__operator"), none));
+        assert!(either.met_by(&access("system/Condition.r"), none));
+        assert!(!either.met_by(&access("system/Condition.c"), none));
+        let client = Requirement::Client(vec![String::from("client-1")]);
+        assert!(client.met_by(&access(""), none));
+        assert!(!Requirement::Client(vec![String::from("other")]).met_by(&access(""), none));
+        assert!(
+            !client.met_by(&Access::Open, none),
+            "an open surface names no client"
+        );
+        assert!(!Requirement::Refused.met_by(&Access::Open, none));
+        assert!(Requirement::Caller.met_by(&access(""), none));
     }
 
     #[test]
     fn a_target_carries_what_the_path_names() {
         let target = Target::new("read", Requirement::Caller)
-            .on(Some(String::from("Condition")))
             .route("/fhir/{type}/{id}")
             .target("Condition/c-1");
         assert_eq!("read", target.interaction());
-        assert_eq!(Some("Condition"), target.resource_type());
         assert_eq!(Some("/fhir/{type}/{id}"), target.route_template());
         assert_eq!(Some("Condition/c-1"), target.target_name());
         assert_eq!(&Requirement::Caller, target.requirement());

@@ -48,6 +48,16 @@ it issues no token and holds no key that signs one.
   type held to the product's table, and the granular `?param=value`
   constraint carried on the grant and admitted only through a product
   evaluator.
+- `openehr`, behind the `openehr` feature: the SMART on openEHR grammar
+  beside the FHIR one, parsed by `openehr-sdt` and enforced here with the
+  rules the draft leaves to the resource server: the permission letters in
+  any order, `*` within a `::` segment and `**` across them, an operation
+  naming no resource covered only by a bare wildcard, `system/aql-*` only
+  for a listed backend client, a `patient/` grant only for a bound issuer
+  and only on EHR data, no FHIR v1 suffixes, and both grammars in one
+  `scope` claim; `Caller::ehr_id` and `Access::ehr_id` read the launch
+  context's `ehrId`; the discovery document takes a platform's `services`
+  map and the openEHR capabilities through `SmartOptions::with_openehr`.
 - `basic`: HTTP Basic (RFC 7617) verified against a store of Argon2id PHC
   hashes with the enumeration decoy, each user carrying the scopes its
   configuration grants, and the outgoing credential that redacts itself.
@@ -76,9 +86,10 @@ it issues no token and holds no key that signs one.
   `assertion_alg`), every secret with its `_file` sibling of which exactly
   one is set, resolved at load.
 - The `axum` feature: `guard`, the tower layer with the product's
-  classifier (`Requirement::Public`, `Caller`, `Permissions`, `Scope`,
-  `Either` or `Refused` on a `Target`), the credential check, the
-  type-level permission check and the audit line, with the body of a
+  classifier (`Requirement::Public`, `Caller`, `Fhir`, `OpenEhr`, `Scope`,
+  `Client`, `Either` or `Refused` on a `Target`), the credential check, the
+  per-route permission check under the grammar the route declares with the
+  product's `Honoured` flags, and the audit line, with the body of a
   refusal the product's; `extract`, the `Access` extractor and the
   header-only renderer.
 - The repository setup as FerroUI's: the lint set, CI with the single

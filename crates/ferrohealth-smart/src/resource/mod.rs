@@ -501,6 +501,23 @@ pub enum Rejection {
     },
 }
 
+/// What a product honours for a caller beyond a `user/` grant under the
+/// SMART on openEHR grammar, read from its issuer or client lists.
+///
+/// No specification governs these: our own design, FerroFED's, over the
+/// draft's own notes (`master08 §Resource Scopes` on `system/aql-*`,
+/// `master07 §Context Selection` on the `ehrId`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Honoured {
+    /// The caller is a backend client the product lists, so a
+    /// `system/aql-*` grant counts.
+    pub backend: bool,
+    /// The caller's issuer is bound to the product's own EHR space, so a
+    /// `patient/` grant counts on an EHR's data, confined to the `ehrId` of
+    /// the launch context.
+    pub patient: bool,
+}
+
 /// The scheme a credential arrived with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Via {
@@ -625,6 +642,30 @@ impl Caller {
     #[must_use]
     pub fn patient(&self) -> Option<&str> {
         self.patient.as_deref()
+    }
+
+    /// Returns the `ehrId` of the SMART on openEHR launch context, when the
+    /// token carries it as a claim.
+    ///
+    /// The draft places it in the token response (`master07 §Context
+    /// Selection`); reading it from an `ehrId` claim is the same convention
+    /// as `patient` (no specification governs it: our own design).
+    #[must_use]
+    pub fn ehr_id(&self) -> Option<&str> {
+        self.claims.get("ehrId").and_then(serde_json::Value::as_str)
+    }
+
+    /// Returns every token of the `scope` claim read under the SMART on
+    /// openEHR grammar, a token outside it as [`SmartScope::Other`].
+    ///
+    /// [`SmartScope::Other`]: openehr_sdt::smart_scopes::SmartScope::Other
+    #[cfg(feature = "openehr")]
+    #[must_use]
+    pub fn openehr_scopes(&self) -> Vec<openehr_sdt::smart_scopes::SmartScope> {
+        self.scope
+            .iter()
+            .map(|token| openehr_sdt::smart_scopes::SmartScope::parse(token))
+            .collect()
     }
 
     /// Returns the scheme the credential arrived with.
@@ -770,6 +811,13 @@ impl Access {
     #[must_use]
     pub fn claims(&self) -> Option<&serde_json::Map<String, serde_json::Value>> {
         self.caller().map(Caller::claims)
+    }
+
+    /// Returns the `ehrId` of the caller's launch context, when the token
+    /// carries one.
+    #[must_use]
+    pub fn ehr_id(&self) -> Option<&str> {
+        self.caller().and_then(Caller::ehr_id)
     }
 
     /// Returns which data `permission` on `resource_type` reaches.

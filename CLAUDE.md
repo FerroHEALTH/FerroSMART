@@ -3,11 +3,12 @@
 
 # CLAUDE.md
 
-**FerroSMART** is the shared SMART App Launch 2.x and OAuth 2.0
-resource-server crate of the FerroHEALTH products: FerroBRIDGE, FerroFED,
-FerroEHR and FerroTERM. It is one Cargo workspace with the library crate
-`ferrohealth-smart` (Rust path `ferrohealth_smart`, published to crates.io),
-the way FerroUI is the family's shared UI crate.
+**FerroSMART** is SMART for the openEHR ecosystem, FHIR included: the
+shared SMART App Launch 2.x and OAuth 2.0 resource-server crate of the
+FerroHEALTH products, FerroBRIDGE, FerroFED, FerroEHR and FerroTERM. It is
+one Cargo workspace with the library crate `ferrohealth-smart` (Rust path
+`ferrohealth_smart`, published to crates.io), the way FerroUI is the
+family's shared UI crate.
 
 FerroSMART in prose, `ferrohealth-smart` in identifiers. The crate name and
 its licence are the owner's decision of 2026-10-19: `ferrohealth-smart`,
@@ -32,10 +33,16 @@ assertion to the token endpoint (RFC 7523 §2.2), never an access token.
   rotation, and validate JWT access tokens under RFC 9068 (the signature with
   an asymmetric algorithm only, `iss`, `aud`, `exp` and `nbf` with a clock
   skew), answering one generic `401` that names no claim;
-- parse and enforce SMART v2 scopes (`scope`): `patient/`, `user/` and
-  `system/` with `cruds`, the patient compartment from the token's launch
-  context, granular constraints through a product evaluator, with a `403`
-  that names no scope;
+- parse and enforce the SMART on openEHR scopes (`openehr`, behind the
+  `openehr` feature, parsed by `openehr-sdt` and never by a second parser):
+  the `template-`, `composition-` and `aql-` families with their patterns,
+  the rules `docs/architecture.md` §3.9 fixes where the draft is silent,
+  and the `ehrId` of the launch context; and the SMART on FHIR scopes
+  (`scope`) beside them: `patient/`, `user/` and `system/` with `cruds`, the
+  patient compartment from the token's launch context, granular constraints
+  through a product evaluator. A product's route table declares which
+  grammar each route is checked against (`Requirement::OpenEhr` or
+  `Requirement::Fhir`), with a `403` that names no scope;
 - authenticate machine-to-machine callers and calls in exactly two modes
   (`basic`, `client`): HTTP Basic (verified against Argon2id hashes, sent
   outgoing) and the OAuth 2.0 client credentials grant (a token client with
@@ -81,10 +88,11 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
 
 ## IMPORTANT hard rules
 
-- **The specifications are the authority**: SMART App Launch 2.2.0, RFC
-  6749, 6750, 7515, 7517, 7519, 7523, 7617, 7662, 8414, 8725, 9068, 9700,
-  8707 and 7638, and OpenID Connect Discovery 1.0, as vendored under
-  `docs/specs/`. Cite the section in every `// NOTE:`; never resolve a
+- **The specifications are the authority**: SMART App Launch 2.2.0, the
+  SMART on openEHR draft (DEVELOPMENT, pinned by commit and read weekly
+  upstream), RFC 6749, 6750, 7515, 7517, 7519, 7523, 7617, 7662, 8414, 8725,
+  9068, 9700, 8707 and 7638, and OpenID Connect Discovery 1.0, as vendored
+  under `docs/specs/`. Cite the section in every `// NOTE:`; never resolve a
   question from memory or from another implementation's behaviour. Where
   none governs a decision, say so: "no specification governs this: our own
   design" (`.claude/rules/spec-adherence.md`).

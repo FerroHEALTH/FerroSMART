@@ -13,6 +13,8 @@
 //! does not define for a member is dropped rather than copied from the
 //! issuer.
 
+use std::collections::BTreeMap;
+
 use serde_json::Map;
 use serde_json::Value;
 
@@ -37,6 +39,24 @@ const AUTH_METHODS: [&str; 3] = [
     "private_key_jwt",
 ];
 
+/// The capabilities a SMART on openEHR platform advertises.
+///
+/// `master04 §Capabilities`: the EHR launch context conveyed by the `ehrId`
+/// claim, the openEHR resource scopes, and the base64 JSON launch parameter.
+pub const OPENEHR_CAPABILITIES: [&str; 3] = [
+    "context-openehr-ehr",
+    "openehr-permission-v1",
+    "launch-base64-json",
+];
+
+/// The key of the openEHR REST API in the `services` map, required of a
+/// SMART on openEHR platform (`master04 §Services`).
+pub const OPENEHR_REST_SERVICE: &str = "org.openehr.rest";
+
+/// The key of the FHIR API in the `services` map, recommended
+/// (`master04 §Services`).
+pub const FHIR_REST_SERVICE: &str = "org.fhir.rest";
+
 /// What the product adds to the discovery document.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SmartOptions {
@@ -49,6 +69,36 @@ pub struct SmartOptions {
     /// Whether the product supplies an evaluator for granular scopes, which
     /// is what `permission-v2` promises.
     pub granular: bool,
+    /// The `services` map of a SMART on openEHR platform, each key a
+    /// reverse domain name and each value the service's metadata with its
+    /// `baseUrl` (`master04 §Services`); omitted when empty.
+    pub services: BTreeMap<String, Value>,
+}
+
+impl SmartOptions {
+    /// Returns these options as a SMART on openEHR platform's, with the
+    /// openEHR REST API at `openehr_base_url`, the FHIR API at
+    /// `fhir_base_url` when the product serves one, and the openEHR
+    /// capabilities added.
+    #[must_use]
+    pub fn with_openehr(mut self, openehr_base_url: &str, fhir_base_url: Option<&str>) -> Self {
+        self.services.insert(
+            String::from(OPENEHR_REST_SERVICE),
+            serde_json::json!({ "baseUrl": openehr_base_url }),
+        );
+        if let Some(fhir) = fhir_base_url {
+            self.services.insert(
+                String::from(FHIR_REST_SERVICE),
+                serde_json::json!({ "baseUrl": fhir }),
+            );
+        }
+        for capability in OPENEHR_CAPABILITIES {
+            if !self.capabilities.iter().any(|added| added == capability) {
+                self.capabilities.push(String::from(capability));
+            }
+        }
+        self
+    }
 }
 
 /// Returns the discovery document of `metadata` under `options`.
@@ -97,6 +147,18 @@ pub(super) fn document(metadata: &ServerMetadata, options: &SmartOptions) -> Val
     if !options.scopes_supported.is_empty() {
         put("scopes_supported", Some(list(&options.scopes_supported)));
     }
+    if !options.services.is_empty() {
+        put(
+            "services",
+            Some(Value::Object(
+                options
+                    .services
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            )),
+        );
+    }
     put(
         "response_types_supported",
         metadata.response_types_supported.as_deref().map(list),
@@ -116,6 +178,26 @@ pub(super) fn document(metadata: &ServerMetadata, options: &SmartOptions) -> Val
         "code_challenge_methods_supported",
         Some(Value::from(challenge)),
     );
+    put(
+        "capabilities",
+        Some(Value::from(capabilities(
+            metadata,
+            options,
+            &grant_types,
+            &auth_methods,
+        ))),
+    );
+    Value::Object(document)
+}
+
+/// Returns the capabilities of the document: the enforced ones, the client
+/// types and the standalone launch the issuer supports, and the product's.
+fn capabilities<'a>(
+    metadata: &'a ServerMetadata,
+    options: &'a SmartOptions,
+    grant_types: &[String],
+    auth_methods: &[String],
+) -> Vec<&'a str> {
     let mut capabilities: Vec<&str> = ENFORCED.to_vec();
     if options.granular {
         capabilities.push("permission-v2");
@@ -150,8 +232,7 @@ pub(super) fn document(metadata: &ServerMetadata, options: &SmartOptions) -> Val
             capabilities.push(added);
         }
     }
-    put("capabilities", Some(Value::from(capabilities)));
-    Value::Object(document)
+    capabilities
 }
 
 #[cfg(test)]
@@ -181,6 +262,7 @@ mod tests {
             scopes_supported: vec![String::from("system/Condition.rs")],
             capabilities: vec![String::from("launch-ehr"), String::from("permission-v1")],
             granular: true,
+            ..SmartOptions::default()
         };
         let document = document(&metadata, &options);
         assert_eq!(

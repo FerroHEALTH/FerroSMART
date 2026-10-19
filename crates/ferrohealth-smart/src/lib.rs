@@ -19,7 +19,11 @@
 //! - [`scope`]: the SMART App Launch 2.x scopes, `patient/`, `user/` and
 //!   `system/` with the `cruds` permissions, and the patient compartment the
 //!   token's launch context names; a missing permission is a `403` that names
-//!   no scope.
+//!   no scope. Behind the `openehr` feature, [`openehr`] enforces the SMART
+//!   on openEHR grammar beside it, parsed by `openehr-sdt`: the
+//!   `template-`, `composition-` and `aql-` families with their patterns,
+//!   and the `ehrId` of the launch context. The product's route table
+//!   declares which grammar each route is checked against.
 //! - [`basic`] and [`client`]: machine-to-machine authentication in exactly
 //!   two modes, HTTP Basic (RFC 7617, verified against Argon2id hashes and
 //!   sent outgoing) and the OAuth 2.0 client credentials grant (RFC 6749 §4.4,
@@ -48,6 +52,8 @@ pub mod extract;
 #[cfg(feature = "axum")]
 pub mod guard;
 pub mod metadata;
+#[cfg(feature = "openehr")]
+pub mod openehr;
 pub mod refusal;
 pub mod resource;
 pub mod scope;

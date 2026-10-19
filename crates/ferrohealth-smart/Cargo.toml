@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 [package]
 name = "ferrohealth-smart"
-description = "The shared SMART App Launch and OAuth 2.0 resource-server crate of the FerroHEALTH products: token validation against the authorization server's keys, SMART v2 scopes and the patient compartment, Basic and client-credentials machine authentication, and the audit line"
+description = "SMART for the openEHR ecosystem, FHIR included: the shared SMART App Launch and OAuth 2.0 resource-server crate of the FerroHEALTH products, with token validation against the authorization server's keys, the SMART on openEHR and SMART on FHIR scopes with the patient compartment, Basic and client-credentials machine authentication, and the audit line"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,7 +12,7 @@ homepage.workspace = true
 authors.workspace = true
 publish = true
 readme = "README.md"
-keywords = ["smart-on-fhir", "oauth2", "jwt", "resource-server", "fhir"]
+keywords = ["smart-on-fhir", "openehr", "oauth2", "jwt", "resource-server"]
 categories = ["authentication", "web-programming"]
 include = ["src/**", "tests/**", "README.md"]
 
@@ -22,6 +22,10 @@ default = []
 # scope check and the audit line in front of every route), the extractor of
 # the caller it admitted, and the default renderer of a refusal.
 axum = ["dep:axum", "dep:tower"]
+# The SMART on openEHR scope grammar beside the FHIR one, parsed by
+# openehr-sdt and enforced here: the `Requirement::OpenEhr` of a product
+# route, the grant rules of the draft, and the launch context `ehrId`.
+openehr = ["dep:openehr-sdt"]
 
 [dependencies]
 argon2.workspace = true
@@ -40,6 +44,7 @@ tracing.workspace = true
 url.workspace = true
 tower = { workspace = true, optional = true }
 axum = { workspace = true, optional = true }
+openehr-sdt = { workspace = true, optional = true }
 
 [dev-dependencies]
 http-body-util.workspace = true

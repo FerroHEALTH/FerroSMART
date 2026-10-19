@@ -18,5 +18,7 @@ mod basic;
 mod client;
 #[cfg(feature = "axum")]
 mod guard;
+#[cfg(feature = "openehr")]
+mod openehr;
 mod support;
 mod token;
