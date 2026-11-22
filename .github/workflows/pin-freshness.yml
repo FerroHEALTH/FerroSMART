@@ -1,0 +1,113 @@
+# SPDX-FileCopyrightText: Cadasto B.V.
+# SPDX-License-Identifier: BUSL-1.1
+
+# The freshness of the pins of the other FerroHEALTH products (no
+# specification governs this: our own design, after FerroBRIDGE's lane of the
+# same name).
+#
+# Every image another product publishes, pinned by tag and digest in
+# docs/VERSIONS.md, is read against that product's latest stable release and
+# the digest of the image index GHCR serves for it by
+# scripts/checks/pin-freshness.sh, and each image behind gets one issue,
+# kept open and rewritten while the pin stays behind, so a product release
+# reaches the tracker under its own title. A pull request that changes the
+# lane or a pinned file runs it as a dry run that files nothing.
+#
+# It opens an issue rather than failing: a newer product release is not a
+# broken build. It fails only when a release or a digest could not be read.
+name: Pin freshness
+
+on:
+  schedule:
+    # Monday morning, off the hour.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/pin-freshness.yml
+      - scripts/checks/pin-freshness.sh
+      - docs/VERSIONS.md
+
+concurrency:
+  group: pin-freshness-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  family:
+    name: product image pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare every product image pin with the product's latest release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          status=0
+          bash scripts/checks/pin-freshness.sh > family.txt || status=$?
+          cat family.txt
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update one issue per image behind its latest release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          awk '$1 == "STALE" { image = $2; sub(/:$/, "", image); print image }' family.txt | sort -u > behind.txt
+          while read -r image; do
+            if ! [[ "$image" =~ ^ghcr\.io/ferrohealth/[a-z0-9-]+$ ]]; then
+              echo "not a product image: $image" >&2
+              exit 1
+            fi
+            title="Pin behind the product's latest release: $image"
+            {
+              echo "\`scripts/checks/pin-freshness.sh\` found \`$image\` pinned behind the latest release of the product that publishes it."
+              echo
+              echo '```text'
+              grep -F "STALE      $image: " family.txt
+              echo '```'
+              echo
+              echo "Read the release notes the line names, then move the pin in every file it names"
+              echo "to the release's tag and index digest, with the configuration that release reads,"
+              echo "and re-run the gates."
+              echo
+              echo "Reported by [this run]($RUN_URL)."
+            } > body.md
+            number="$(gh issue list --state open --limit 500 --json number,title \
+              --jq "[.[] | select(.title == \"$title\")][0].number // empty")"
+            if [ -n "$number" ]; then
+              gh issue edit "$number" --body-file body.md
+              echo "updated #$number for $image"
+            else
+              # fields.sh files the issue as a Task at Medium priority and Low
+              # effort; this job's default token may not read the
+              # organisation's issue types, and then the issue lands with its
+              # label alone.
+              bash scripts/gh/fields.sh new task medium low \
+                --title "$title" --body-file body.md --label chore
+            fi
+          done < behind.txt
+
+      # 2 means an image or a release could not be read: the comparison is
+      # incomplete, so the job fails after filing what it could compare.
+      - name: Every product image pin was compared
+        env:
+          STATUS: ${{ steps.check.outputs.status }}
+        run: |
+          if [ "$STATUS" -eq 2 ]; then
+            echo "an image or a release could not be read; the comparison is incomplete" >&2
+            exit 1
+          fi

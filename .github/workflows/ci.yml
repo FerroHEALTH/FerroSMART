@@ -97,6 +97,9 @@ jobs:
       - name: The VEX coverage check of the FerroSMART release refuses what it claims to
         if: ${{ !cancelled() }}
         run: bash scripts/checks/vex-coverage.sh --self-test
+      - name: The product image freshness readers hold over fixtures
+        if: ${{ !cancelled() }}
+        run: bash scripts/checks/pin-freshness.sh --self-test
       - name: The FerroSMART Dockerfile is clean at hadolint
         if: ${{ !cancelled() }}
         # The official image, digest-pinned like actionlint's: hadolint has no

@@ -241,6 +241,10 @@ the two macOS ones were checked again here on 2026-11-19.
 
 ## The CI tools
 
+The FerroEHR and FerroBRIDGE image rows are read each Monday against each
+product's latest release and the digest of its image index by
+`scripts/checks/pin-freshness.sh`, which opens one issue per image behind.
+
 | Item | Pin | Repeated in |
 |---|---|---|
 | zizmor | 1.31.1 | `.github/workflows/ci.yml` |
