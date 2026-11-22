@@ -85,6 +85,14 @@ Actions Security Cheat Sheet, SLSA v1.0, OpenSSF Scorecard, and Sigstore.
   FerroSMART image at `latest`, with every OpenVEX document under
   `security/vex/` applied. A finding files or comments on one tracking
   issue; the run is red only when the scan itself fails.
+- `.github/workflows/pin-freshness.yml`: each Monday and on dispatch,
+  `scripts/checks/pin-freshness.sh` reads every `ghcr.io/ferrohealth/*`
+  image of another product pinned in `docs/VERSIONS.md` against that
+  product's latest stable release and image index digest, and opens or
+  rewrites one issue per image behind through `scripts/gh/fields.sh new`.
+  A pull request that changes the lane or the pin table runs it as a dry
+  run that files nothing; it fails only when a release or a digest could not
+  be read. The `guards` job runs its `--self-test`.
 - `.github/workflows/publish-crates.yml`: the manual crates.io lane, a dry
   run unless `publish` is set, sharing `scripts/release/publish-crates.sh`
   with the release lane. A real publish runs only at the tag of the
