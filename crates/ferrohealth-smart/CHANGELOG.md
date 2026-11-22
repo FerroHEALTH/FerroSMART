@@ -11,6 +11,16 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-11-22
+
+### Changed
+
+- The guard checks a Basic credential the verified-credential cache holds
+  before its refresh point on the request's own task, with no hand-off to
+  Tokio's blocking pool, which only a miss, a refresh or a wrong password
+  still takes for the key derivation. A wrong password is refused as
+  before, after the same derivation (#756).
+
 ## [0.33.0] - 2026-11-21
 
 ### Changed
@@ -2564,7 +2574,8 @@ it issues no token and holds no key that signs one.
   `TODO(#N)` guards, the issue and pull request templates, the labels, the
   rulesets and the `crates-io` environment.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.1...HEAD
+[0.33.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.0...ferrohealth-smart-v0.33.1
 [0.33.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.32.0...ferrohealth-smart-v0.33.0
 [0.32.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.31.0...ferrohealth-smart-v0.32.0
 [0.31.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.30.2...ferrohealth-smart-v0.31.0
