@@ -371,6 +371,13 @@ mod tests {
     use crate::basic::PasswordStore;
     use crate::refusal::Reason;
 
+    /// A password drawn when the test runs.
+    fn drawn() -> String {
+        let mut bytes = [0_u8; 16];
+        aws_lc_rs::rand::fill(&mut bytes).unwrap();
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    }
+
     /// The `Basic` header value of `user` and `password`.
     fn header(user: &str, password: &str) -> HeaderValue {
         let token = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}"));
@@ -379,8 +386,11 @@ mod tests {
 
     #[test]
     fn a_cached_credential_needs_no_blocking_thread_and_a_wrong_one_still_derives() {
+        let (password, changed) = (drawn(), drawn());
+        let mut salt = [0_u8; 16];
+        aws_lc_rs::rand::fill(&mut salt).unwrap();
         let hash = Argon2::default()
-            .hash_password_with_salt(b"s3cret", b"synthetic-salt-16")
+            .hash_password_with_salt(password.as_bytes(), &salt)
             .unwrap()
             .to_string();
         let store = Arc::new(
@@ -390,7 +400,7 @@ mod tests {
                 .and_then(|store| store.with_cache(Duration::from_secs(60)))
                 .unwrap(),
         );
-        assert!(!store.check(&header("alice", "s3cret")).unwrap().cached);
+        assert!(!store.check(&header("alice", &password)).unwrap().cached);
         let runtime = tokio::runtime::Builder::new_current_thread()
             .max_blocking_threads(1)
             .enable_time()
@@ -402,13 +412,13 @@ mod tests {
             let blocker = tokio::task::spawn_blocking(move || held.recv());
             let hit = tokio::time::timeout(
                 Duration::from_secs(5),
-                basic(Arc::clone(&store), header("alice", "s3cret")),
+                basic(Arc::clone(&store), header("alice", &password)),
             )
             .await
             .expect("a cache hit never waits for the blocking pool")
             .expect("the cached credential is admitted");
             assert!(hit.cached(), "admitted from the cache");
-            let wrong = tokio::spawn(basic(Arc::clone(&store), header("alice", "changed")));
+            let wrong = tokio::spawn(basic(Arc::clone(&store), header("alice", &changed)));
             tokio::time::sleep(Duration::from_millis(200)).await;
             assert!(!wrong.is_finished(), "a miss waits for the blocking thread");
             release.send(()).unwrap();
