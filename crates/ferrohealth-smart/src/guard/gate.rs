@@ -310,11 +310,17 @@ fn held(outcome: Result<Caller, Rejection>) -> Result<Caller, Denied> {
 }
 
 /// Returns the caller the Basic credential `value` authenticates in
-/// `store`, the key derivation on a blocking thread.
+/// `store`: from the verified-credential cache on this task, else with the
+/// key derivation on a blocking thread.
 async fn basic(store: Arc<PasswordStore>, value: HeaderValue) -> Result<Caller, Denied> {
-    let checked = tokio::task::spawn_blocking(move || store.check(&value))
-        .await
-        .map_err(|_cancelled| Denied::new(Refusal::InvalidBasic, Some(Reason::BasicIncomplete)))?;
+    let checked = match store.cached(&value) {
+        Some(verified) => Ok(verified),
+        None => tokio::task::spawn_blocking(move || store.check(&value))
+            .await
+            .map_err(|_cancelled| {
+                Denied::new(Refusal::InvalidBasic, Some(Reason::BasicIncomplete))
+            })?,
+    };
     match checked {
         Ok(verified) => Ok(Caller::basic(verified.username, &verified.scope)
             .with_roles(verified.roles)
@@ -353,7 +359,67 @@ fn is_b64token(token: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_b64token;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use argon2::{Argon2, PasswordHasher};
+    use base64::Engine as _;
+    use http::HeaderValue;
+    use secrecy::SecretString;
+
+    use super::{basic, is_b64token};
+    use crate::basic::PasswordStore;
+    use crate::refusal::Reason;
+
+    /// The `Basic` header value of `user` and `password`.
+    fn header(user: &str, password: &str) -> HeaderValue {
+        let token = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}"));
+        HeaderValue::from_str(&format!("Basic {token}")).unwrap()
+    }
+
+    #[test]
+    fn a_cached_credential_needs_no_blocking_thread_and_a_wrong_one_still_derives() {
+        let hash = Argon2::default()
+            .hash_password_with_salt(b"s3cret", b"synthetic-salt-16")
+            .unwrap()
+            .to_string();
+        let store = Arc::new(
+            PasswordStore::new()
+                .with_user("alice", SecretString::from(hash))
+                .and_then(|store| store.with_scope("alice", "user/*.rs"))
+                .and_then(|store| store.with_cache(Duration::from_secs(60)))
+                .unwrap(),
+        );
+        assert!(!store.check(&header("alice", "s3cret")).unwrap().cached);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            // The one blocking thread is held, so a check that needs it waits.
+            let (release, held) = std::sync::mpsc::channel::<()>();
+            let blocker = tokio::task::spawn_blocking(move || held.recv());
+            let hit = tokio::time::timeout(
+                Duration::from_secs(5),
+                basic(Arc::clone(&store), header("alice", "s3cret")),
+            )
+            .await
+            .expect("a cache hit never waits for the blocking pool")
+            .expect("the cached credential is admitted");
+            assert!(hit.cached(), "admitted from the cache");
+            let wrong = tokio::spawn(basic(Arc::clone(&store), header("alice", "changed")));
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            assert!(!wrong.is_finished(), "a miss waits for the blocking thread");
+            release.send(()).unwrap();
+            blocker.await.unwrap().unwrap();
+            let refused = wrong
+                .await
+                .unwrap()
+                .expect_err("a wrong password is refused");
+            assert_eq!(Some(Reason::BasicRejected), refused.reason());
+        });
+    }
 
     #[test]
     fn a_b64token_is_the_rfc_6750_alphabet_with_trailing_padding() {

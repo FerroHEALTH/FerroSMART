@@ -424,15 +424,7 @@ impl PasswordStore {
     /// the key derivation; one that verifies is added to it, and concurrent
     /// misses with one credential run one derivation between them.
     pub(crate) fn check(&self, header: &HeaderValue) -> Result<Verified, Reason> {
-        let raw = header.to_str().map_err(|_opaque| Reason::BasicMalformed)?;
-        let (scheme, encoded) = raw.split_once(' ').ok_or(Reason::BasicMalformed)?;
-        if !scheme.eq_ignore_ascii_case("Basic") {
-            return Err(Reason::BasicMalformed);
-        }
-        let decoded = BASIC_B64
-            .decode(encoded.trim())
-            .map_err(|_malformed| Reason::BasicMalformed)?;
-        let decoded = String::from_utf8(decoded).map_err(|_opaque| Reason::BasicMalformed)?;
+        let decoded = decode(header)?;
         let (username, password) = decoded.split_once(':').ok_or(Reason::BasicMalformed)?;
         let derive = || self.verify_password(username, password);
         match &self.cache {
@@ -440,6 +432,18 @@ impl PasswordStore {
             None => derive(),
         }
         .map_err(|_invalid| Reason::BasicRejected)
+    }
+
+    /// Returns the user a `Basic <credentials>` header value authenticates
+    /// when the verified-credential cache holds it before its refresh point,
+    /// with no key derivation, so an async caller needs no blocking thread.
+    /// `None` for anything else: [`check`](Self::check) then decides.
+    #[cfg(feature = "axum")]
+    pub(crate) fn cached(&self, header: &HeaderValue) -> Option<Verified> {
+        let cache = self.cache.as_ref()?;
+        // NOTE: a header that does not decode is no cache hit; `check` names its refusal.
+        let decoded = decode(header).ok()?;
+        cache.fresh(&decoded)
     }
 
     /// Returns `username` when `password` is the one its hash names.
@@ -474,6 +478,21 @@ impl PasswordStore {
             cached: false,
         })
     }
+}
+
+/// Returns the `user-id:password` a `Basic <credentials>` header value
+/// carries: the scheme compared case-insensitively (RFC 9110 §11.1), the
+/// token base64 (RFC 7617 §2) and its octets UTF-8 (RFC 7617 §2.1).
+fn decode(header: &HeaderValue) -> Result<String, Reason> {
+    let raw = header.to_str().map_err(|_opaque| Reason::BasicMalformed)?;
+    let (scheme, encoded) = raw.split_once(' ').ok_or(Reason::BasicMalformed)?;
+    if !scheme.eq_ignore_ascii_case("Basic") {
+        return Err(Reason::BasicMalformed);
+    }
+    let decoded = BASIC_B64
+        .decode(encoded.trim())
+        .map_err(|_malformed| Reason::BasicMalformed)?;
+    String::from_utf8(decoded).map_err(|_opaque| Reason::BasicMalformed)
 }
 
 /// Returns whether `username` is a user-id RFC 7617 §2 admits: not empty,

@@ -169,6 +169,17 @@ impl VerifiedCache {
         }
     }
 
+    /// Returns the user of `user_pass` when the cache holds it before its
+    /// refresh point, which needs no key derivation; `None` when a request
+    /// must go through [`admit`](Self::admit).
+    #[cfg(feature = "axum")]
+    pub(super) fn fresh(&self, user_pass: &str) -> Option<Verified> {
+        match self.lookup(&self.name(user_pass)) {
+            Lookup::Fresh(verified) => Some(cached(verified)),
+            Lookup::Stale(_) | Lookup::Missing => None,
+        }
+    }
+
     /// Returns the cap, the entries and the estimated bytes of the cache:
     /// per entry its 32-byte name and its record with the text it owns.
     pub(super) fn usage(&self) -> CacheUsage {
