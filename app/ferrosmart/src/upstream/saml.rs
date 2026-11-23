@@ -686,6 +686,8 @@ pub struct SamlLogin {
     sp: Arc<ServiceProviderSettings>,
     /// The metadata last read.
     current: Arc<RwLock<Arc<IdentityProvider>>>,
+    /// The outcome of the last read.
+    last_read: Arc<RwLock<MetadataRead>>,
     /// The task that reads the metadata again.
     refresher: tokio::task::JoinHandle<()>,
 }
@@ -710,15 +712,23 @@ impl SamlLogin {
         let first = load(upstream, &sp.http, Timestamp::now()).await?;
         endpoints(upstream, &first)?;
         let current = Arc::new(RwLock::new(Arc::new(first)));
+        let now = Timestamp::now();
+        let last_read = Arc::new(RwLock::new(MetadataRead {
+            at: now,
+            failure: None,
+            good_at: now,
+        }));
         let refresher = tokio::spawn(refresh(
             upstream.clone(),
             Arc::clone(&sp),
             Arc::clone(&current),
+            Arc::clone(&last_read),
         ));
         Ok(Self {
             upstream: upstream.clone(),
             sp,
             current,
+            last_read,
             refresher,
         })
     }
@@ -733,6 +743,21 @@ impl SamlLogin {
     #[must_use]
     pub fn service_provider(&self) -> &ServiceProviderSettings {
         &self.sp
+    }
+
+    /// Returns the outcome of the last read of the metadata, and the copy
+    /// held, expired or not.
+    #[must_use]
+    pub fn last_read(&self) -> (MetadataRead, Arc<IdentityProvider>) {
+        let read = match self.last_read.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
+        let held = match self.current.read() {
+            Ok(guard) => Arc::clone(&guard),
+            Err(poisoned) => Arc::clone(&poisoned.into_inner()),
+        };
+        (read, held)
     }
 
     /// Returns the provider's metadata last read, refusing it once its
@@ -926,12 +951,25 @@ fn endpoints(upstream: &SamlUpstream, idp: &IdentityProvider) -> Result<(), Saml
     Ok(())
 }
 
+/// The outcome of a replica's last read of a provider's metadata.
+#[derive(Debug, Clone)]
+pub struct MetadataRead {
+    /// When it was read.
+    pub at: Timestamp,
+    /// Why the read failed, when it did; the last good copy stays in use.
+    pub failure: Option<String>,
+    /// When the copy in use was read.
+    pub good_at: Timestamp,
+}
+
 /// Reads the metadata of `upstream` again every `metadata_refresh` into
-/// `current`, keeping the last good document when a read fails.
+/// `current`, keeping the last good document when a read fails, and records
+/// each outcome in `last_read`.
 async fn refresh(
     upstream: SamlUpstream,
     sp: Arc<ServiceProviderSettings>,
     current: Arc<RwLock<Arc<IdentityProvider>>>,
+    last_read: Arc<RwLock<MetadataRead>>,
 ) {
     let mut interval = tokio::time::interval(upstream.metadata_refresh);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -939,19 +977,33 @@ async fn refresh(
     interval.tick().await;
     loop {
         interval.tick().await;
-        let read = load(&upstream, &sp.http, Timestamp::now())
+        let now = Timestamp::now();
+        let read = load(&upstream, &sp.http, now)
             .await
             .and_then(|idp| endpoints(&upstream, &idp).map(|()| idp));
+        let mut log = match last_read.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        log.at = now;
         match read {
-            Ok(idp) => match current.write() {
-                Ok(mut guard) => *guard = Arc::new(idp),
-                Err(poisoned) => *poisoned.into_inner() = Arc::new(idp),
-            },
-            Err(error) => tracing::warn!(
-                error = %ferrohealth_server::run::chain(&error),
-                provider = %upstream.entity_id,
-                "the identity provider's metadata was not read again; the last good copy stays"
-            ),
+            Ok(idp) => {
+                match current.write() {
+                    Ok(mut guard) => *guard = Arc::new(idp),
+                    Err(poisoned) => *poisoned.into_inner() = Arc::new(idp),
+                }
+                log.failure = None;
+                log.good_at = now;
+            }
+            Err(error) => {
+                let failure = ferrohealth_server::run::chain(&error);
+                tracing::warn!(
+                    error = %failure,
+                    provider = %upstream.entity_id,
+                    "the identity provider's metadata was not read again; the last good copy stays"
+                );
+                log.failure = Some(failure);
+            }
         }
     }
 }

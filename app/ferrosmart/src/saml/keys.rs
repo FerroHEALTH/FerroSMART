@@ -80,6 +80,8 @@ pub struct TrustedKey {
     /// The bytes `aws-lc-rs` verifies with: the `SubjectPublicKeyInfo` of
     /// an RSA key, the uncompressed point of an ECDSA key.
     public: Vec<u8>,
+    /// The end of the certificate's validity (RFC 5280 §4.1.2.5).
+    not_after: Option<jiff::Timestamp>,
 }
 
 impl fmt::Debug for TrustedKey {
@@ -110,7 +112,15 @@ impl TrustedKey {
             KeyKind::Rsa => spki.raw.to_vec(),
             KeyKind::P256 | KeyKind::P384 | KeyKind::P521 => spki.subject_public_key.data.to_vec(),
         };
-        Ok(Self { kind, public })
+        // NOTE: RFC 5280 §4.1.2.5, a notAfter past jiff's range is reported as none;
+        // the key verifies all the same.
+        let not_after =
+            jiff::Timestamp::from_second(certificate.validity().not_after.timestamp()).ok();
+        Ok(Self {
+            kind,
+            public,
+            not_after,
+        })
     }
 
     /// Returns the key the one PEM certificate `pem` carries, as a
@@ -122,6 +132,13 @@ impl TrustedKey {
     /// errors of [`TrustedKey::from_certificate_der`].
     pub fn from_certificate_pem(pem: &[u8]) -> Result<Self, KeyError> {
         Self::from_certificate_der(&pem_block(pem, "CERTIFICATE")?)
+    }
+
+    /// Returns the end of the certificate's validity, when it lies in the
+    /// range of an instant.
+    #[must_use]
+    pub const fn not_after(&self) -> Option<jiff::Timestamp> {
+        self.not_after
     }
 
     /// The kind of the key.
