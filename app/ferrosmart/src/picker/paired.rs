@@ -96,6 +96,37 @@ pub(super) async fn context_of(
     }
 }
 
+/// Returns the id of the EHR of the patient `id` at the openEHR `base`
+/// paired by `pairing`, read as `person`: the patient read at the FHIR
+/// server, their subject id, and their EHR looked up by it; none when the
+/// patient has no EHR the person may see.
+///
+/// # Errors
+/// Returns the [`PickerError`] of a read or lookup that failed.
+pub(super) async fn ehr_of(
+    state: &AppState,
+    person: &super::Person<'_>,
+    from: IpAddr,
+    (base, pairing): (&str, &Pairing),
+    id: &str,
+) -> Result<Option<String>, PickerError> {
+    let Some(namespace) = state.settings().subject_namespaces.get(base) else {
+        return Ok(None);
+    };
+    let url = super::patient_url(&pairing.fhir_base, Some(id)).map_err(PickerError::Url)?;
+    let ask = super::fhir_ask(&url, &pairing.fhir_base, super::Action::Read);
+    let patient = super::as_the(state, person, from, &ask).await?;
+    if patient.get("id").and_then(Value::as_str) != Some(id) {
+        return Err(PickerError::Unreadable);
+    }
+    let Some(subject_id) = subject_id(&patient, &pairing.subject_system)? else {
+        return Ok(None);
+    };
+    let found =
+        openehr::by_subject_as(state, person, from, (base, namespace), (subject_id, None)).await?;
+    Ok(found.map(|found| found.ehr_id))
+}
+
 /// Returns the subject id of the EHR of `patient`: the value of its one
 /// current identifier in `system`, or `None` when it has none.
 ///

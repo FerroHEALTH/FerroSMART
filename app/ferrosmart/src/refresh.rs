@@ -84,10 +84,7 @@ pub(crate) async fn refresh(
             under: Some(&grant.id),
             context: &context,
             roles: &grant.roles,
-            login: Some(Authentication {
-                auth_time: grant.auth_time,
-                acr: grant.acr,
-            }),
+            login: Some(Authentication::of(&grant)),
         },
     )?;
     // NOTE: SMART App Launch 2.2.0, Refresh access token, Response: the launch

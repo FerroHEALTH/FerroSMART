@@ -43,7 +43,7 @@ changed is no longer written from its table.
 | `policy_uri` | Optional: the app's privacy policy, absolute `https`, linked from the consent page |
 | `tos_uri` | Optional: the app's terms of service, absolute `https`, linked from the consent page |
 | `scopes` | The ceiling: every scope the client may ever be granted |
-| `grant_types` | Any of `authorization_code`, `client_credentials` and `refresh_token` |
+| `grant_types` | Any of `authorization_code`, `client_credentials`, `refresh_token` and `token_exchange`. `token_exchange` lets a confidential client that serves a FHIR base exchange a patient's own token there for a token at the paired openEHR base (RFC 8693), and needs both bases in `resources` |
 
 FerroSMART refuses at start a client that breaks one of these rules:
 
