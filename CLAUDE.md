@@ -164,7 +164,11 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
   FerroSMART's ZITADEL example and the role claim reader cite, the eHDSI
   specifications the owner supplied with SOG-IS ACM 1.3 recorded by sha256
   and never copied, Implementing Regulation (EU)
-  2026/2099 and 2015/1502, the GDPR and Commission Decision 2011/833/EU, and the
+  2026/2099 and 2015/1502, the GDPR and Commission Decision 2011/833/EU,
+  Regulation (EU) 2024/1183 with the wallet implementing acts and their 2026
+  amendments, OpenID4VC HAIP 1.0 and OpenID4VP 1.0 with the SD-JWT VC and
+  Token Status List drafts, the ETSI wallet profiles recorded by sha256 and
+  never copied, and the
   Federation Tier Annex B, and the openEHR RM Common chapter the party
   states cite, each with a `PROVENANCE.md`; `okta/` and `microsoft-graph/`
   hold only the provenance of cache-only pages, fetched into the ignored
