@@ -20,6 +20,7 @@ mod ehr_launch;
 mod ig_examples;
 mod introspection;
 mod launch;
+mod openapi;
 mod refresh;
 mod registration;
 mod replicas;

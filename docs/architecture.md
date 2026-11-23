@@ -3283,6 +3283,7 @@ differently.
 | `GET`, `PUT`, `DELETE /register/{client_id}` | the client's configuration endpoint, with its registration access token or an administrator's token (13.27) | `rfc7592 §2` |
 | `GET /admin/clients`; `POST /admin/clients/{client_id}/disable`, `.../enable` | the registry over the store, behind a `ferrohealth-smart` guard with the `system/admin` scope, every change audited (13.27) | our own design |
 | `GET /admin/keys` | the signing key ring's public keys with their states, behind the same guard | our own design |
+| `GET /admin/openapi.json` | the OpenAPI 3.1 document of the registration, admin and audit operations, answered without a token for the deployment's issuer; each admin router is built from the operation table the document is tested against, and each answer is tested against its schema | the OpenAPI Specification 3.1.0; our own design (#824) |
 | `/healthz`, `/readyz` | `ferrohealth-health` | the family |
 
 Each FHIR or openEHR server keeps serving its own
