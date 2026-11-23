@@ -186,6 +186,7 @@ async fn a_key_binding_that_does_not_hold_is_refused() {
     let wallet = Wallet::start().await;
     let begun = wallet.begin().await;
     let (client_id, nonce) = (begun.text("client_id"), begun.text("nonce"));
+    let another_nonce = format!("{nonce}-of-another-request");
     let credential = Credential::pid();
     let issuer = &wallet.pki.issuer;
     let holder = &wallet.holder;
@@ -205,7 +206,7 @@ async fn a_key_binding_that_does_not_hold_is_refused() {
                 &credential,
                 issuer,
                 holder,
-                (&client_id, "another-nonce", now()),
+                (&client_id, &another_nonce, now()),
             ),
         ),
         (
