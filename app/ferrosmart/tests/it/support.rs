@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 //! What the cases share: generated keys written to PEM files, a
-//! configuration over them, the audit lane and the records it stored.
+//! configuration over them, the client documents a case applies, the audit
+//! lane and the records it stored.
+//!
+//! A case writes its clients as `[[client]]` tables beside its
+//! configuration, each one client document in TOML: [`config`] leaves them
+//! out and [`clients`] reads them, which [`apply`] then writes as
+//! `ferrosmart client apply` does.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -109,10 +115,63 @@ pub(crate) const CLIENT_ADDRESS: &str = "192.0.2.10";
 /// The database URL a case that never reaches the database configures.
 pub(crate) const UNREACHED_DATABASE: &str = "postgres://ferrosmart@127.0.0.1:1/unreached";
 
-/// Returns the configuration `text` holds, with `[ferrosmart.keys]` naming
-/// `keys`' current key unless `text` names one, and
-/// [`UNREACHED_DATABASE`] as the database unless `text` names one.
+/// Returns `text` split into the configuration and the `[[client]]`
+/// tables with their subtables.
+fn split(text: &str) -> (String, String) {
+    let (mut config, mut clients) = (String::new(), String::new());
+    let mut in_client = false;
+    for line in text.lines() {
+        let header = line.trim();
+        if header.starts_with('[') {
+            in_client = header == "[[client]]" || header.starts_with("[client.");
+        }
+        let out = if in_client { &mut clients } else { &mut config };
+        out.push_str(line);
+        out.push('\n');
+    }
+    (config, clients)
+}
+
+/// Returns the client documents the `[[client]]` tables of `text` hold.
+pub(crate) fn clients(text: &str) -> Vec<Value> {
+    let (_, tables) = split(text);
+    let table: toml::Table = toml::from_str(&tables).expect("the client tables read");
+    match table.get("client") {
+        Some(clients) => serde_json::to_value(clients)
+            .expect("the client tables convert")
+            .as_array()
+            .cloned()
+            .expect("an array of tables"),
+        None => Vec::new(),
+    }
+}
+
+/// Writes each of `documents` to the registry as `ferrosmart client apply`
+/// does.
+pub(crate) async fn apply(state: &ferrosmart::server::AppState, documents: &[Value]) {
+    for document in documents {
+        let document = serde_json::from_value(document.clone()).expect("a client document");
+        ferrosmart::admin::apply(state, document)
+            .await
+            .expect("the client applies");
+    }
+}
+
+/// Returns `value` as a TOML inline value, for a JWK Set a `[[client]]`
+/// table holds by value.
+pub(crate) fn inline(value: &Value) -> String {
+    toml::Value::try_from(value)
+        .expect("a TOML value")
+        .to_string()
+}
+
+/// Returns the configuration `text` holds, its `[[client]]` tables left
+/// out, with `[ferrosmart.keys]` naming `keys`' current key unless `text`
+/// names one, and [`UNREACHED_DATABASE`] as the database unless `text`
+/// names one.
 pub(crate) fn config(text: &str, keys: &Keys) -> Config {
+    let (text, _) = split(text);
+    let text = text.as_str();
     let mut environment = BTreeMap::new();
     if !text.contains("[ferrosmart.database]") {
         environment.insert(
@@ -155,7 +214,7 @@ pub(crate) fn resources_of(text: &str) -> String {
     format!("resources = {bases:?}\n")
 }
 
-/// Returns `text` with every `[[ferrosmart.client]]` table that sets no
+/// Returns `text` with every `[[client]]` table that sets no
 /// `resources` given [`resources_of`] `text`: a case's clients reach every
 /// base it configures unless a table says otherwise.
 pub(crate) fn reach_every_base(text: &str) -> String {
@@ -165,7 +224,7 @@ pub(crate) fn reach_every_base(text: &str) -> String {
     for (index, line) in lines.iter().enumerate() {
         out.push_str(line);
         out.push('\n');
-        if line.trim() == "[[ferrosmart.client]]" {
+        if line.trim() == "[[client]]" {
             let listed = lines
                 .iter()
                 .skip(index + 1)
@@ -184,8 +243,24 @@ pub(crate) fn audit(settings: &Settings) -> Audit {
     Audit::new(settings.audit.observer.clone())
 }
 
-/// Returns every `AuditEvent` `store` keeps, oldest first.
+/// Returns whether `record` is one [`apply`] wrote when the case started.
+pub(crate) fn applied(record: &Value) -> bool {
+    record
+        .pointer("/agent/0/who/display")
+        .and_then(Value::as_str)
+        == Some(ferrosmart::admin::APPLY_REQUESTER)
+}
+
+/// Returns every `AuditEvent` `store` keeps after the case's clients were
+/// applied, oldest first.
 pub(crate) async fn records(store: &Store) -> Vec<Value> {
+    let mut records = all_records(store).await;
+    records.retain(|record| !applied(record));
+    records
+}
+
+/// Returns every `AuditEvent` `store` keeps, oldest first.
+pub(crate) async fn all_records(store: &Store) -> Vec<Value> {
     let mut records = store
         .audit_records(&AuditQuery {
             limit: 1000,

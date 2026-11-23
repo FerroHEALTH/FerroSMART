@@ -33,9 +33,10 @@ pub const TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchang
 /// type taken and the one token type issued.
 pub const ACCESS_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:access_token";
 
-/// The widest scope an exchanged token carries: the person's compositions,
-/// read (SMART on openEHR, the `patient` context).
-pub const EXCHANGE_CEILING: &str = "patient/composition-*.r";
+/// The widest scopes an exchanged token carries: reading the person's
+/// compositions and running a query on their EHR (SMART on openEHR,
+/// master08 §Resource Scopes, the `patient` compartment).
+pub const EXCHANGE_CEILING: [&str; 2] = ["patient/composition-*.r", "patient/aql-*.s"];
 
 /// The longest an exchanged token lives.
 ///
@@ -219,8 +220,9 @@ fn own_patient(base: &str, grant: &GrantRecord) -> Option<OwnPatient> {
 }
 
 /// Returns the scope the exchanged token carries: the `requested` scopes,
-/// or [`EXCHANGE_CEILING`] when none is named, each within that ceiling and
-/// the client's, and only while the subject token's `held` scope reads.
+/// or those of [`EXCHANGE_CEILING`] the client's ceiling admits when none is
+/// named, each within both ceilings, and only while the subject token's
+/// `held` scope reads.
 fn exchanged_scope(
     client: &Client,
     held: &str,
@@ -241,13 +243,20 @@ fn exchanged_scope(
     if !reads {
         return Err(invalid("the subject token reads nothing of the patient"));
     }
-    let ceiling = [String::from(EXCHANGE_CEILING)];
+    let ceiling = EXCHANGE_CEILING.map(String::from);
+    let defaults: Vec<&str> = EXCHANGE_CEILING
+        .into_iter()
+        .filter(|scope| crate::scopes::admits(&client.scopes, scope))
+        .collect();
+    let asked: Vec<&str> = match requested {
+        Some(requested) => requested
+            .split(' ')
+            .filter(|scope| !scope.is_empty())
+            .collect(),
+        None => defaults,
+    };
     let mut granted: Vec<&str> = Vec::new();
-    for scope in requested
-        .unwrap_or(EXCHANGE_CEILING)
-        .split(' ')
-        .filter(|scope| !scope.is_empty())
-    {
+    for scope in asked {
         let admitted =
             crate::scopes::admits(&ceiling, scope) && crate::scopes::admits(&client.scopes, scope);
         if !admitted {

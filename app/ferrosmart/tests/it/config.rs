@@ -260,6 +260,19 @@ fn an_unknown_key_is_refused_when_the_file_loads() {
     assert!(matches!(refused, Err(Error::Load(_))));
 }
 
+// NOTE: RFC 6749 §2, registration is the server's: a client lives in the store alone.
+#[test]
+fn a_client_table_is_refused_as_an_unknown_key() {
+    let refused = ferrosmart::config::Config::from_sources(
+        Some(
+            "[ferrosmart]\nissuer = \"https://smart.example.org\"\n\
+             [[ferrosmart.client]]\nclient_id = \"app\"\nkind = \"public\"",
+        ),
+        &std::collections::BTreeMap::new(),
+    );
+    assert!(matches!(refused, Err(Error::Load(_))));
+}
+
 #[test]
 fn a_missing_database_url_is_refused() {
     let keys = Keys::new();

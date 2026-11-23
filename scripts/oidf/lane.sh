@@ -237,16 +237,19 @@ start_provider() {
     -e "FERROSMART_KEYCLOAK_FHIR_USER=$issuer/fhir/Practitioner/example" \
     "$(pinned_image 'Keycloak test image')" start-dev --import-realm > /dev/null
   wait_for Keycloak http://localhost:8180/realms/ferrosmart/.well-known/openid-configuration
-  SSL_CERT_FILE="$LANE_DIR/trust.pem" \
-    "$root/target/debug/ferrosmart" --config "$lane/ferrosmart-op.toml" \
-    --set "server.tls.certificate_file=$LANE_DIR/host.crt" \
-    --set "server.tls.key_file=$LANE_DIR/host.key" \
-    --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem" \
-    --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem" \
-    --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_op" \
-    --set "ferrosmart.client[0].secret_hash_file=$LANE_DIR/client.phc" \
-    --set "ferrosmart.client[1].secret_hash_file=$LANE_DIR/client2.phc" \
-    serve > "$LANE_DIR/ferrosmart-op.log" 2>&1 &
+  local op=("$root/target/debug/ferrosmart" --config "$lane/ferrosmart-op.toml"
+    --set "server.tls.certificate_file=$LANE_DIR/host.crt"
+    --set "server.tls.key_file=$LANE_DIR/host.key"
+    --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+    --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem"
+    --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_op")
+  mkdir -p "$LANE_DIR/op-clients"
+  jq --rawfile hash "$LANE_DIR/client.phc" '.secret_hash = ($hash | rtrimstr("\n"))' \
+    "$lane/op-clients/oidf-suite.json" > "$LANE_DIR/op-clients/oidf-suite.json"
+  jq --rawfile hash "$LANE_DIR/client2.phc" '.secret_hash = ($hash | rtrimstr("\n"))' \
+    "$lane/op-clients/oidf-suite-2.json" > "$LANE_DIR/op-clients/oidf-suite-2.json"
+  "${op[@]}" client apply "$LANE_DIR"/op-clients/*.json
+  SSL_CERT_FILE="$LANE_DIR/trust.pem" "${op[@]}" serve > "$LANE_DIR/ferrosmart-op.log" 2>&1 &
   smart=$!
   wait_for FerroSMART "$issuer/.well-known/openid-configuration"
 }

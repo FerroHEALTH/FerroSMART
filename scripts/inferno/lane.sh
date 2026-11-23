@@ -232,19 +232,25 @@ run() {
   wait_for Keycloak http://localhost:8180/realms/ferrosmart/.well-known/openid-configuration
 
   # 3. FerroSMART, trusting the lane's CA beside the system roots for the
-  #    picker's search at FerroBRIDGE.
+  #    picker's search at FerroBRIDGE, with the kit's clients applied first,
+  #    each given its keys or secret hash for the run.
   cat /etc/ssl/certs/ca-certificates.crt "$LANE_DIR/ca.crt" > "$LANE_DIR/trust.pem"
-  SSL_CERT_FILE="$LANE_DIR/trust.pem" \
-  "$root/target/debug/ferrosmart" --config "$lane/ferrosmart.toml" \
-    --set "server.tls.certificate_file=$LANE_DIR/smart.crt" \
-    --set "server.tls.key_file=$LANE_DIR/smart.key" \
-    --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem" \
-    --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem" \
-    --set "ferrosmart.database.url=$LANE_PG/ferrosmart" \
-    --set "ferrosmart.client[0].jwks_file=$LANE_DIR/inferno-client.jwks.json" \
-    --set "ferrosmart.client[2].secret_hash_file=$LANE_DIR/inferno-ehr.phc" \
-    --set "ferrosmart.client[3].jwks_file=$LANE_DIR/lane-client.jwks.json" \
-    serve > "$LANE_DIR/ferrosmart.log" 2>&1 &
+  local smart=("$root/target/debug/ferrosmart" --config "$lane/ferrosmart.toml"
+    --set "server.tls.certificate_file=$LANE_DIR/smart.crt"
+    --set "server.tls.key_file=$LANE_DIR/smart.key"
+    --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+    --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem"
+    --set "ferrosmart.database.url=$LANE_PG/ferrosmart")
+  mkdir -p "$LANE_DIR/clients"
+  jq --slurpfile set "$LANE_DIR/inferno-client.jwks.json" '.jwks = $set[0]' \
+    "$lane/clients/inferno-backend-services.json" > "$LANE_DIR/clients/inferno-backend-services.json"
+  cp "$lane/clients/inferno-standalone.json" "$LANE_DIR/clients/"
+  jq --rawfile hash "$LANE_DIR/inferno-ehr.phc" '.secret_hash = ($hash | rtrimstr("\n"))' \
+    "$lane/clients/inferno-ehr.json" > "$LANE_DIR/clients/inferno-ehr.json"
+  jq --slurpfile set "$LANE_DIR/lane-client.jwks.json" '.jwks = $set[0]' \
+    "$lane/clients/inferno-lane.json" > "$LANE_DIR/clients/inferno-lane.json"
+  "${smart[@]}" client apply "$LANE_DIR"/clients/*.json
+  SSL_CERT_FILE="$LANE_DIR/trust.pem" "${smart[@]}" serve > "$LANE_DIR/ferrosmart.log" 2>&1 &
   wait_for FerroSMART https://smart.localhost:8443/.well-known/smart-configuration
 
   # 4. FerroBRIDGE, the FHIR server the kit is pointed at. Its REST routes

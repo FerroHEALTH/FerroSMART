@@ -141,8 +141,6 @@ pub struct FerroSmartSection {
     pub keys: SigningKeysSection,
     /// `[ferrosmart.database]`: the PostgreSQL database of the state.
     pub database: DatabaseSection,
-    /// `[[ferrosmart.client]]`: the registered clients.
-    pub client: Vec<crate::clients::ClientSection>,
     /// `[[ferrosmart.resource]]`: the FHIR and openEHR servers a token may
     /// be for, each its own audience.
     pub resource: Vec<ResourceSection>,
@@ -351,7 +349,6 @@ impl Default for FerroSmartSection {
             assurance_minimum: crate::assurance::Floor::Substantial,
             keys: SigningKeysSection::default(),
             database: DatabaseSection::default(),
-            client: Vec::new(),
             resource: Vec::new(),
             upstream: Vec::new(),
             saml: None,

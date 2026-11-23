@@ -1,0 +1,12 @@
+{
+  "client_id": "inferno-lane",
+  "name": "The Inferno lane",
+  "kind": "confidential_asymmetric",
+  "scopes": [
+    "system/introspect",
+    "system/launch.c"
+  ],
+  "grant_types": [
+    "client_credentials"
+  ]
+}

@@ -152,7 +152,7 @@ impl Saml {
              [ferrosmart.upstream.assurance]\nlevels = {{ {strong:?} = {level:?} }}\n\
              {beside}\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = [\"user/Observation.rs\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
              scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n{client}",
             database = secrecy::ExposeSecret::expose_secret(&database.url),
@@ -172,10 +172,11 @@ impl Saml {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let providers = crate::support::providers(&settings).await;
         let audit = audit(&settings);
         let state = AppState::new(settings.clone(), store.clone(), audit).with_login(providers);
+        let clients = crate::support::clients(&crate::support::reach_every_base(&text));
+        crate::support::apply(&state, &clients).await;
         Self {
             smart: Smart {
                 app: router(Arc::new(state)),
@@ -184,6 +185,7 @@ impl Saml {
                 database,
                 _keys: keys,
                 settings,
+                clients,
             },
             idp: signing_key(&idp),
             ars,

@@ -2,9 +2,8 @@
 -- SPDX-License-Identifier: BUSL-1.1
 --
 -- The client registry (docs/architecture.md section 13.9): each client as
--- the configuration, the admin API (13.27) or its own registration
--- (RFC 7591, 13.6 item 14) wrote it. A secret is kept only as its Argon2id
--- hash.
+-- an administrator (13.27) or its own registration (RFC 7591, 13.6 item 14)
+-- wrote it. A secret is kept only as its Argon2id hash.
 
 CREATE TABLE client (
     client_id text PRIMARY KEY,
@@ -16,8 +15,8 @@ CREATE TABLE client (
     redirect_uris text[] NOT NULL DEFAULT '{}',
     scopes text[] NOT NULL DEFAULT '{}',
     grant_types text[] NOT NULL DEFAULT '{}',
-    source text NOT NULL CONSTRAINT client_source_check
-        CHECK (source IN ('config', 'admin', 'dynamic')),
+    registered_by text NOT NULL CONSTRAINT client_registered_by_check
+        CHECK (registered_by IN ('admin', 'self')),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     secret_hash text,
@@ -51,6 +50,6 @@ CREATE TABLE client (
             AND (approved_by IS NULL) = (approved_at IS NULL)),
     CONSTRAINT client_first_party_check CHECK (NOT first_party OR approved_at IS NOT NULL),
     -- RFC 7591 section 5: an app's own registration is self-asserted.
-    CONSTRAINT client_dynamic_unapproved
-        CHECK (source <> 'dynamic' OR (approved_scope IS NULL AND NOT first_party))
+    CONSTRAINT client_self_unapproved
+        CHECK (registered_by <> 'self' OR (approved_scope IS NULL AND NOT first_party))
 );

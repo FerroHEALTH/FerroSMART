@@ -3,14 +3,12 @@
 
 //! The client registry: who may ask FerroSMART for a token, and how.
 //!
-//! SMART specifies no registration protocol ("SMART does not specify a
-//! standards-based registration process", SMART App Launch 2.2.0, Register
-//! App with EHR), so the registry is content: each `[[ferrosmart.client]]`
-//! table names one client, checked here against what SMART requires of a
-//! registration, and the store keeps them (`docs/architecture.md` §13.9).
+//! The store is the one place a client lives. RFC 6749 §2 leaves the means
+//! of registration to the server, and SMART App Launch 2.2.0 (Register App
+//! with EHR) asks only for what a registration holds, which this module
+//! checks (`docs/architecture.md` §13.9).
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -73,10 +71,9 @@ impl GrantType {
     }
 }
 
-/// One `[[ferrosmart.client]]` table.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ClientSection {
+/// What a registration of one client states, before it is checked.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClientMetadata {
     /// The `client_id` the client is assigned ("Upon registration, the
     /// client SHALL be assigned a `client_id`", SMART App Launch 2.2.0,
     /// Client Authentication: Asymmetric).
@@ -85,13 +82,8 @@ pub struct ClientSection {
     pub name: String,
     /// How the client authenticates.
     pub kind: ClientKind,
-    /// The URL of the client's JWK Set; exclusive with `jwks_file`.
+    /// The URL of the client's JWK Set; exclusive with a JWK Set by value.
     pub jwks_uri: String,
-    /// A file holding the client's JWK Set; exclusive with `jwks_uri`.
-    pub jwks_file: Option<PathBuf>,
-    /// A file holding the Argon2id PHC hash of a confidential symmetric
-    /// client's secret; FerroSMART never holds the secret itself.
-    pub secret_hash_file: Option<PathBuf>,
     /// The client's complete redirect URIs.
     pub redirect_uris: Vec<String>,
     /// The URIs the browser may be sent back to after a logout at the
@@ -104,7 +96,6 @@ pub struct ClientSection {
     pub upstreams: Vec<String>,
     /// The eIDAS level a person's login for the client reaches, above the
     /// deployment's floor and the provider's minimum; none leaves those.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub assurance_minimum: Option<ferrohealth_smart::assurance::AssuranceLevel>,
     /// The `[[ferrosmart.resource]]` bases the client's tokens may name in
     /// `aud`; none when empty, which leaves the client FerroSMART's own
@@ -131,15 +122,13 @@ pub struct ClientSection {
     /// The administrator's approval of the client for the whole
     /// organisation, under which a professional sees no consent page
     /// (`docs/architecture.md` §13.6 item 6).
-    pub organisation_approval: Option<ApprovalSection>,
+    pub organisation_approval: Option<ApprovalMetadata>,
 }
 
-/// One `[ferrosmart.client.organisation_approval]` table: what an
-/// administrator of the controller approved for every professional, who
-/// and when.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ApprovalSection {
+/// The organisation approval a registration states: what an administrator
+/// of the controller approved for every professional, who and when.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalMetadata {
     /// The approved scopes: `user/` and `patient/` scopes with the launch,
     /// OpenID, refresh and extension scopes that go with them, each within
     /// the client's ceiling. A `patient/` scope answers a professional's
@@ -153,7 +142,6 @@ pub struct ApprovalSection {
     /// approval may then cover `patient/` scopes for and a patient's own
     /// login too; the mark is set and cleared with the approval, by its
     /// approver at its time.
-    #[serde(default)]
     pub first_party: bool,
 }
 
@@ -248,8 +236,8 @@ pub struct Client {
 /// Who registered a client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Registration {
-    /// An administrator, in the configuration or through the admin API,
-    /// with the approval for the whole organisation they gave, if any.
+    /// An administrator, through the admin API or `ferrosmart client
+    /// apply`, with the approval for the whole organisation they gave, if any.
     Administered(Option<Approval>),
     /// The app itself (RFC 7591). RFC 7591 §5 has its metadata treated as
     /// self-asserted, so it carries no approval and is never first party.
@@ -339,27 +327,24 @@ pub fn claimed_https(uri: &str) -> bool {
     })
 }
 
-/// Returns a warning for each first-party public client with no claimed
-/// `https` redirect URI.
+/// Returns a warning when `client` is a first-party public app with no
+/// claimed `https` redirect URI.
 ///
 /// No sign-in of such an app can assure its identity, so every one shows
 /// the consent page (RFC 8252 §8.6).
 #[must_use]
-pub fn unassured_first_party(clients: &[Client]) -> Vec<String> {
-    clients
-        .iter()
-        .filter(|client| {
-            client.kind == ClientKind::Public
-                && client.approval().is_some_and(|approval| approval.first_party)
-                && !client.redirect_uris.iter().any(|uri| claimed_https(uri))
-        })
-        .map(|client| {
-            format!(
-                "client {:?} is a first-party public app with no claimed https redirect URI, so every sign-in shows the consent page (RFC 8252 §8.6): register an https redirect the app claims, such as a Universal Link or an App Link",
-                client.client_id
-            )
-        })
-        .collect()
+pub fn unassured_first_party(client: &Client) -> Option<String> {
+    let unassured = client.kind == ClientKind::Public
+        && client
+            .approval()
+            .is_some_and(|approval| approval.first_party)
+        && !client.redirect_uris.iter().any(|uri| claimed_https(uri));
+    unassured.then(|| {
+        format!(
+            "client {:?} is a first-party public app with no claimed https redirect URI, so every sign-in shows the consent page (RFC 8252 §8.6): register an https redirect the app claims, such as a Universal Link or an App Link",
+            client.client_id
+        )
+    })
 }
 
 /// What a client registers about its app for the person who approves it
@@ -412,18 +397,12 @@ pub enum ClientKeys {
     Set(Value),
 }
 
-/// Why a client table was refused, naming the client and the key.
+/// Why a registration was refused, naming the client and the member.
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    /// A client has no `client_id`.
-    #[error("a `[[ferrosmart.client]]` table has no `client_id`")]
+    /// The registration has no `client_id`.
+    #[error("the client document has no `client_id`")]
     NoClientId,
-    /// Two tables name one `client_id`.
-    #[error("the client `{client_id}` is registered twice")]
-    Repeated {
-        /// The client.
-        client_id: String,
-    },
     /// A key the client's kind or grants need is missing, or one they
     /// forbid is set.
     #[error("the client `{client_id}`: {rule}")]
@@ -438,15 +417,6 @@ pub enum ClientError {
     JwksUri {
         /// The client.
         client_id: String,
-    },
-    /// The JWK Set file cannot be read or is no JSON.
-    #[error("the client `{client_id}`: `jwks_file` cannot be read as JSON")]
-    JwksFile {
-        /// The client.
-        client_id: String,
-        /// Why.
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
     },
     /// A JWK of the set breaks SMART's rule for a registered key.
     #[error("the client `{client_id}`: key {index} of its JWK Set {rule}")]
@@ -473,9 +443,8 @@ pub enum ClientError {
         /// The client.
         client_id: String,
     },
-    /// The secret hash file cannot be read, or holds no Argon2id PHC string
-    /// at the OWASP floor.
-    #[error("the client `{client_id}`: `secret_hash_file` holds no usable Argon2id hash")]
+    /// The secret hash is no Argon2id PHC string at the OWASP floor.
+    #[error("the client `{client_id}`: `secret_hash` is no usable Argon2id hash")]
     SecretHash {
         /// The client.
         client_id: String,
@@ -500,49 +469,12 @@ pub enum ClientError {
         /// The key.
         key: &'static str,
     },
-    /// Two clients register one launch URL, which a launch registration
-    /// could then not tell apart.
-    #[error("the clients `{first}` and `{second}` register the same `launch_uri`")]
-    RepeatedLaunchUri {
-        /// The client that registered it first.
-        first: String,
-        /// The client that registered it again.
-        second: String,
-    },
     /// A scope is outside the RFC 6749 §3.3 character set.
     #[error("the client `{client_id}`: a scope is outside the RFC 6749 §3.3 character set")]
     Scope {
         /// The client.
         client_id: String,
     },
-}
-
-/// Returns the clients `sections` register, each checked.
-///
-/// # Errors
-/// Returns [`ClientError`] for the first table that breaks a rule.
-pub fn resolve(sections: &[ClientSection]) -> Result<Vec<Client>, ClientError> {
-    let mut seen = BTreeSet::new();
-    let mut launch_uris: BTreeMap<String, String> = BTreeMap::new();
-    let mut clients = Vec::with_capacity(sections.len());
-    for section in sections {
-        let client = resolve_one(section)?;
-        if !seen.insert(client.client_id.clone()) {
-            return Err(ClientError::Repeated {
-                client_id: client.client_id,
-            });
-        }
-        if let Some(uri) = &client.launch_uri
-            && let Some(first) = launch_uris.insert(uri.clone(), client.client_id.clone())
-        {
-            return Err(ClientError::RepeatedLaunchUri {
-                first,
-                second: client.client_id,
-            });
-        }
-        clients.push(client);
-    }
-    Ok(clients)
 }
 
 /// Returns the launch URL `uri` normalized for comparison.
@@ -571,47 +503,8 @@ pub fn normalized_launch_uri(uri: &str) -> Option<String> {
     })
 }
 
-/// Returns the client `section` registers, checked, its JWK Set and secret
-/// hash read from the files it names.
-fn resolve_one(section: &ClientSection) -> Result<Client, ClientError> {
-    if section.client_id.is_empty() {
-        return Err(ClientError::NoClientId);
-    }
-    let rule = |rule| ClientError::Rule {
-        client_id: section.client_id.clone(),
-        rule,
-    };
-    if section.kind != ClientKind::ConfidentialSymmetric && section.secret_hash_file.is_some() {
-        return Err(rule(
-            "only a confidential symmetric client registers a `secret_hash_file`",
-        ));
-    }
-    if section.kind != ClientKind::ConfidentialAsymmetric && section.jwks_file.is_some() {
-        return Err(rule(
-            "only a confidential asymmetric client registers a `jwks_file`",
-        ));
-    }
-    let jwks = section
-        .jwks_file
-        .as_ref()
-        .map(|path| read_jwks(&section.client_id, path))
-        .transpose()?;
-    let secret_hash = match (section.kind, &section.secret_hash_file) {
-        (ClientKind::ConfidentialSymmetric, Some(path)) => {
-            let phc = std::fs::read_to_string(path).map_err(|source| ClientError::SecretHash {
-                client_id: section.client_id.clone(),
-                source: Box::new(source),
-            })?;
-            Some(SecretHash(phc.trim().to_owned()))
-        }
-        _ => None,
-    };
-    resolve_with(section, Material { jwks, secret_hash })
-}
-
 /// What a client registers by value: its JWK Set and the Argon2id hash of
-/// its secret, read from the files of its table or carried by the admin
-/// API's document.
+/// its secret.
 #[derive(Debug, Clone, Default)]
 pub struct Material {
     /// Its JWK Set by value.
@@ -620,12 +513,11 @@ pub struct Material {
     pub secret_hash: Option<SecretHash>,
 }
 
-/// Returns the client `section` and `material` register, checked as a
-/// configured client is; the file keys of `section` are not read.
+/// Returns the client `section` and `material` register, checked.
 ///
 /// # Errors
 /// Returns [`ClientError`] for the first rule the registration breaks.
-pub fn resolve_with(section: &ClientSection, material: Material) -> Result<Client, ClientError> {
+pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, ClientError> {
     if section.client_id.is_empty() {
         return Err(ClientError::NoClientId);
     }
@@ -743,7 +635,7 @@ pub fn resolve_with(section: &ClientSection, material: Material) -> Result<Clien
 /// The consent page links and draws these, so each is an absolute `https`
 /// URL without a fragment; RFC 7591 §2 asks only for a URL, and the scheme
 /// rule is our own design.
-fn resolve_about(section: &ClientSection) -> Result<About, ClientError> {
+fn resolve_about(section: &ClientMetadata) -> Result<About, ClientError> {
     let url = |key: &'static str, value: &str| {
         if value.is_empty() {
             return Ok(None);
@@ -765,11 +657,10 @@ fn resolve_about(section: &ClientSection) -> Result<About, ClientError> {
     })
 }
 
-/// Returns the launch URL the client `section` registers, normalized; it
 /// Checks the client's `post_logout_redirect_uris`: absolute, with no
 /// fragment, and only beside the authorization code grant.
 fn check_post_logout(
-    section: &ClientSection,
+    section: &ClientMetadata,
     grant_types: &[GrantType],
 ) -> Result<(), ClientError> {
     // NOTE: RP-Initiated Logout 1.0 §3.1, a post-logout redirect follows a login of an
@@ -792,9 +683,10 @@ fn check_post_logout(
     Ok(())
 }
 
+/// Returns the launch URL the client `section` registers, normalized; it
 /// needs the authorization code grant an EHR launch continues in.
 fn resolve_launch_uri(
-    section: &ClientSection,
+    section: &ClientMetadata,
     grant_types: &[GrantType],
 ) -> Result<Option<String>, ClientError> {
     if section.launch_uri.is_empty() {
@@ -817,9 +709,9 @@ fn resolve_launch_uri(
 /// checked: a person's grant to approve, an approver and an instant, and
 /// scopes an organisation may approve within the client's ceiling.
 fn resolve_approval(
-    section: &ClientSection,
+    section: &ClientMetadata,
     grant_types: &[GrantType],
-    approval: &ApprovalSection,
+    approval: &ApprovalMetadata,
 ) -> Result<Approval, ClientError> {
     let rule = |rule| ClientError::Rule {
         client_id: section.client_id.clone(),
@@ -870,7 +762,7 @@ fn resolve_approval(
 /// registration of client JWKs using both of the following techniques",
 /// SMART App Launch 2.2.0, Client Authentication: Asymmetric, Registering a
 /// client).
-fn keys(section: &ClientSection, set: Option<Value>) -> Result<ClientKeys, ClientError> {
+fn keys(section: &ClientMetadata, set: Option<Value>) -> Result<ClientKeys, ClientError> {
     let id = || section.client_id.clone();
     match (section.jwks_uri.is_empty(), set) {
         (false, None) => {
@@ -893,22 +785,12 @@ fn keys(section: &ClientSection, set: Option<Value>) -> Result<ClientKeys, Clien
     }
 }
 
-/// Returns the JWK Set the file `path` holds for `client_id`.
-fn read_jwks(client_id: &str, path: &std::path::Path) -> Result<Value, ClientError> {
-    let failed = |source: Box<dyn std::error::Error + Send + Sync>| ClientError::JwksFile {
-        client_id: client_id.to_owned(),
-        source,
-    };
-    let bytes = std::fs::read(path).map_err(|source| failed(Box::new(source)))?;
-    serde_json::from_slice::<Value>(&bytes).map_err(|source| failed(Box::new(source)))
-}
-
 /// Returns the secret hash a confidential symmetric client registers,
 /// checked as `ferrohealth-smart` checks a Basic user's hash: an Argon2id
 /// PHC string at the OWASP Password Storage Cheat Sheet floor
 /// (`docs/architecture.md` §13.9).
 fn secret_hash(
-    section: &ClientSection,
+    section: &ClientMetadata,
     hash: Option<SecretHash>,
 ) -> Result<SecretHash, ClientError> {
     let hash = hash.ok_or(ClientError::Rule {
@@ -933,7 +815,7 @@ pub const HASH_PASSES: u32 = 2;
 
 /// Returns the Argon2id PHC hash of `secret` at [`HASH_MEMORY_KIB`] and
 /// [`HASH_PASSES`], one lane, under a fresh 16-byte salt: the string a
-/// confidential symmetric client's `secret_hash_file` holds.
+/// confidential symmetric client's `secret_hash` holds.
 ///
 /// # Errors
 /// Returns [`HashError`] when no salt can be drawn or the hash fails.

@@ -6,13 +6,13 @@
 //! request naming another base is refused `invalid_target` (RFC 8707 §2),
 //! read again on every request.
 
-use ferrosmart::config::error::Error;
+use ferrosmart::admin::AdminError;
 use ferrosmart::store::grant::Access;
 use http::{Method, StatusCode, header};
 use serde_json::{Value, json};
 
 use crate::introspection::{Answer, ISSUER, Server};
-use crate::support::{Keys, RESOURCE, config};
+use crate::support::RESOURCE;
 
 /// A second FHIR server the cases configure.
 const OTHER: &str = "https://other.example.org/fhir";
@@ -39,7 +39,7 @@ async fn narrow(server: &Server, client_id: &str, resources: &[&str]) {
         )
         .await;
     if let Some(members) = client.as_object_mut() {
-        for computed in ["source", "disabled_at"] {
+        for computed in ["registered_by", "disabled_at"] {
             members.remove(computed);
         }
         members.insert(String::from("resources"), json!(resources));
@@ -163,18 +163,39 @@ async fn a_refresh_names_only_a_base_the_client_still_lists() {
 }
 
 #[tokio::test]
-async fn a_client_naming_a_base_no_resource_table_configures_is_refused_at_load() {
-    let keys = Keys::new();
-    let text = "[ferrosmart]\nissuer = \"https://smart.example.org\"\n\
-                [[ferrosmart.client]]\nclient_id = \"app\"\nkind = \"public\"\n\
-                redirect_uris = [\"https://app.example.org/callback\"]\n\
-                grant_types = [\"authorization_code\"]\n\
-                resources = [\"https://elsewhere.example.org/fhir\"]";
+async fn client_apply_refuses_a_base_or_a_provider_the_configuration_lacks() {
+    let server = Server::start().await;
+    let settings = server.settings();
+    let state = ferrosmart::server::AppState::new(
+        settings.clone(),
+        server.store.clone(),
+        crate::support::audit(settings),
+    );
+    let document = json!({
+        "client_id": "app",
+        "kind": "public",
+        "redirect_uris": ["https://app.example.org/callback"],
+        "grant_types": ["authorization_code"],
+        "resources": ["https://elsewhere.example.org/fhir"],
+    });
+    let apply = |document: Value| {
+        let document = serde_json::from_value(document).expect("a client document");
+        ferrosmart::admin::apply(&state, document)
+    };
     assert!(matches!(
-        config(text, &keys).resolve(),
-        Err(Error::UnknownResource { client_id, base })
+        apply(document.clone()).await,
+        Err(AdminError::UnknownResource { client_id, base })
             if client_id == "app" && base == "https://elsewhere.example.org/fhir"
     ));
+    let mut elsewhere = document;
+    elsewhere["resources"] = json!([RESOURCE]);
+    elsewhere["upstreams"] = json!(["elsewhere"]);
+    assert!(matches!(
+        apply(elsewhere).await,
+        Err(AdminError::UnknownUpstream { client_id, name })
+            if client_id == "app" && name == "elsewhere"
+    ));
+    server.stop().await;
 }
 
 #[tokio::test]

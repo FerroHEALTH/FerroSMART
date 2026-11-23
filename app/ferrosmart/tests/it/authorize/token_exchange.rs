@@ -28,8 +28,6 @@ struct Platform {
     _fhir: MockServer,
     /// The openEHR server, kept for the case's length.
     _openehr: MockServer,
-    /// The directory of the client's secret hash.
-    _dir: tempfile::TempDir,
 }
 
 /// Starts the platform.
@@ -52,20 +50,17 @@ async fn platform() -> Platform {
         .await;
     let fhir_base = format!("{}/fhir", fhir.uri());
     let openehr_base = format!("{}/openehr/v1", openehr.uri());
-    let dir = tempfile::tempdir().expect("a directory");
-    let hash = dir.path().join("bridge.phc");
-    std::fs::write(&hash, crate::introspection::phc(SECRET)).expect("written");
+    let hash = crate::introspection::phc(SECRET);
     let grants = format!(
         "[\"authorization_code\"]\n\
          scopes = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\", \"user/Observation.rs\"]\n\
-         [[ferrosmart.client]]\nclient_id = \"bridge\"\nkind = \"confidential_symmetric\"\n\
-         secret_hash_file = {:?}\nresources = [{fhir_base:?}, {openehr_base:?}]\n\
-         grant_types = [\"token_exchange\"]",
-        hash.display().to_string()
+         [[client]]\nclient_id = \"bridge\"\nkind = \"confidential_symmetric\"\n\
+         secret_hash = {hash:?}\nresources = [{fhir_base:?}, {openehr_base:?}]\n\
+         grant_types = [\"token_exchange\"]"
     );
     let smart = Smart::start_over(
         &grants,
-        "[\"patient/composition-*.r\"]",
+        "[\"patient/composition-*.r\", \"patient/aql-*.s\"]",
         "[\"user/Observation.rs\"]",
         &format!(
             "[[ferrosmart.resource]]\nbase = {fhir_base:?}\n\
@@ -81,7 +76,6 @@ async fn platform() -> Platform {
         openehr_base,
         _fhir: fhir,
         _openehr: openehr,
-        _dir: dir,
     }
 }
 
@@ -161,7 +155,10 @@ async fn a_patient_s_own_token_is_exchanged_for_their_ehr_at_the_paired_base() {
     // NOTE: RFC 8693 §2.2.1, issued_token_type names the token issued.
     assert_eq!(json!(ACCESS_TOKEN), body["issued_token_type"]);
     assert_eq!(json!("Bearer"), body["token_type"]);
-    assert_eq!(json!("patient/composition-*.r"), body["scope"]);
+    assert_eq!(
+        json!("patient/composition-*.r patient/aql-*.s"),
+        body["scope"]
+    );
     let issued = jwt_claims(&body, "access_token");
     let original = jwt_claims(&subject, "access_token");
     assert_eq!(original["sub"], issued["sub"]);
@@ -326,6 +323,7 @@ async fn a_wider_scope_another_target_an_actor_or_a_public_client_is_refused() {
             "invalid_scope",
         ),
         (vec![("scope", "user/composition-*.r")], "invalid_scope"),
+        (vec![("scope", "patient/aql-*.rs")], "invalid_scope"),
         (
             vec![("resource", platform.fhir_base.as_str())],
             "invalid_target",

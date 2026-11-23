@@ -266,10 +266,11 @@ FerroSMART as one SAML 2.0 service provider, which every `protocol =
 | `[[ferrosmart.saml.decryption]]` | `key_file` and `certificate_file` of an RSA key a provider encrypts assertions, identifiers and attributes for |
 | `[ferrosmart.saml.tls]` | `client_identity_file`, the certificate and key artifact resolution presents, and `trust_roots_file`, roots beside the platform's for every call to a provider |
 
-## `[[ferrosmart.role]]` and `[[ferrosmart.client]]`
+## `[[ferrosmart.role]]`
 
-The policy: what each role may be granted and which clients exist.
-[Clients, roles and consent](clients.md) describes both tables.
+The policy: what each role may be granted. The clients live in the
+database, never in the configuration. [Clients, roles and consent](clients.md)
+describes both.
 
 ## `[ferrosmart.branding]`
 
@@ -375,15 +376,6 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 [[ferrosmart.role]]
 name = "clinician"
 scopes = ["user/Patient.rs", "user/Observation.rs"]
-
-[[ferrosmart.client]]
-client_id = "growth-chart"
-name = "Growth chart"
-kind = "public"
-resources = ["https://ehr.example.org/fhir"]
-redirect_uris = ["https://growth-chart.example.org/callback"]
-scopes = ["openid", "fhirUser", "launch", "launch/patient", "patient/Observation.rs"]
-grant_types = ["authorization_code"]
 
 [ferrosmart.branding]
 name = "Example Hospital"
