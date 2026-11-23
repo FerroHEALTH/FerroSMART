@@ -59,8 +59,8 @@ pub fn certificates(pem: &[u8]) -> Result<Vec<Vec<u8>>, AnchorError> {
         if block.label != "CERTIFICATE" {
             continue;
         }
-        let (rest, _certificate) =
-            X509Certificate::from_der(&block.contents).map_err(|_malformed| AnchorError::Unreadable)?;
+        let (rest, _certificate) = X509Certificate::from_der(&block.contents)
+            .map_err(|_malformed| AnchorError::Unreadable)?;
         if !rest.is_empty() {
             return Err(AnchorError::Unreadable);
         }
@@ -99,15 +99,14 @@ impl Anchors {
             .iter()
             .filter_map(|anchor| {
                 let (_, certificate) = X509Certificate::from_der(&anchor.der).ok()?;
-                certificate
-                    .extensions()
-                    .iter()
-                    .find_map(|extension| match extension.parsed_extension() {
+                certificate.extensions().iter().find_map(|extension| {
+                    match extension.parsed_extension() {
                         ParsedExtension::SubjectKeyIdentifier(identifier) => {
                             Some(super::encode(identifier.0))
                         }
                         _ => None,
-                    })
+                    }
+                })
             })
             .collect()
     }
@@ -156,7 +155,10 @@ impl Anchors {
 
 /// Checks that `signer` is a certificate authority that names and signs
 /// `certificate` (RFC 5280 §6.1.3).
-fn signed_by(certificate: &X509Certificate<'_>, signer: &X509Certificate<'_>) -> Result<(), PathError> {
+fn signed_by(
+    certificate: &X509Certificate<'_>,
+    signer: &X509Certificate<'_>,
+) -> Result<(), PathError> {
     if certificate.issuer().as_raw() != signer.subject().as_raw() {
         return Err(PathError::Issuer);
     }
@@ -244,7 +246,9 @@ mod tests {
 
     fn signed(params: CertificateParams, key: KeyPair, signer: Option<&Authority>) -> Authority {
         let certificate = match signer {
-            Some(signer) => params.signed_by(&key, &Issuer::from_params(&signer.params, &signer.key)),
+            Some(signer) => {
+                params.signed_by(&key, &Issuer::from_params(&signer.params, &signer.key))
+            }
             None => params.self_signed(&key),
         }
         .expect("the certificate should sign");
@@ -277,7 +281,9 @@ mod tests {
         let root = authority("root", None);
         let middle = authority("middle", Some(&root));
         let chain = vec![leaf("issuer", &middle), middle.der.clone()];
-        let point = anchors(&root).verify(&chain, now()).expect("the path should verify");
+        let point = anchors(&root)
+            .verify(&chain, now())
+            .expect("the path should verify");
         assert_eq!(point.len(), 65);
     }
 
@@ -286,14 +292,20 @@ mod tests {
         let root = authority("root", None);
         let other = authority("other", None);
         let chain = vec![leaf("issuer", &other)];
-        assert_eq!(anchors(&root).verify(&chain, now()), Err(PathError::Unanchored));
+        assert_eq!(
+            anchors(&root).verify(&chain, now()),
+            Err(PathError::Unanchored)
+        );
     }
 
     #[test]
     fn a_self_signed_leaf_is_refused() {
         let root = authority("root", None);
         let chain = vec![root.der.clone()];
-        assert_eq!(anchors(&root).verify(&chain, now()), Err(PathError::SelfSigned));
+        assert_eq!(
+            anchors(&root).verify(&chain, now()),
+            Err(PathError::SelfSigned)
+        );
     }
 
     #[test]
@@ -301,7 +313,10 @@ mod tests {
         let root = authority("root", None);
         let not_ca = signed(params("not-ca", false), key(), Some(&root));
         let chain = vec![leaf("issuer", &not_ca), not_ca.der.clone()];
-        assert_eq!(anchors(&root).verify(&chain, now()), Err(PathError::NotAuthority));
+        assert_eq!(
+            anchors(&root).verify(&chain, now()),
+            Err(PathError::NotAuthority)
+        );
     }
 
     #[test]
@@ -309,7 +324,10 @@ mod tests {
         let root = authority("root", None);
         let chain = vec![leaf("issuer", &root)];
         let past_2100 = 4_102_444_800 + 1;
-        assert_eq!(anchors(&root).verify(&chain, past_2100), Err(PathError::Expired));
+        assert_eq!(
+            anchors(&root).verify(&chain, past_2100),
+            Err(PathError::Expired)
+        );
     }
 
     #[test]

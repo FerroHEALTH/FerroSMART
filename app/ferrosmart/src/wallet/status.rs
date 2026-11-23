@@ -76,7 +76,12 @@ impl<'a> StatusToken<'a> {
     /// Returns [`Refusal::StatusUnavailable`] when the token does not verify,
     /// names another list, is expired, or does not hold the index, and
     /// [`Refusal::Revoked`] for a status other than valid.
-    pub fn check(&self, signer: &[u8], reference: &StatusReference, now: i64) -> Result<(), Refusal> {
+    pub fn check(
+        &self,
+        signer: &[u8],
+        reference: &StatusReference,
+        now: i64,
+    ) -> Result<(), Refusal> {
         let jws = &self.jws;
         if !jws.verifies_with(signer) || jws.seconds("iat").is_none() {
             return Err(Refusal::StatusUnavailable);
@@ -142,7 +147,10 @@ mod tests {
         let bytes = [0xB9, 0xA3];
         let expected = [1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1];
         for (index, status) in expected.iter().enumerate() {
-            assert_eq!(status_at(&bytes, 1, u64::try_from(index).expect("a small index")), Some(*status));
+            assert_eq!(
+                status_at(&bytes, 1, u64::try_from(index).expect("a small index")),
+                Some(*status)
+            );
         }
         assert_eq!(status_at(&bytes, 1, 16), None);
     }
@@ -153,7 +161,10 @@ mod tests {
         let bytes = [0xC9, 0x44, 0xF9];
         let expected = [1, 2, 0, 3, 0, 1, 0, 1, 1, 2, 3, 3];
         for (index, status) in expected.iter().enumerate() {
-            assert_eq!(status_at(&bytes, 2, u64::try_from(index).expect("a small index")), Some(*status));
+            assert_eq!(
+                status_at(&bytes, 2, u64::try_from(index).expect("a small index")),
+                Some(*status)
+            );
         }
     }
 

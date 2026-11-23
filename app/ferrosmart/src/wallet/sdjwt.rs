@@ -118,7 +118,10 @@ impl<'a> Presentation<'a> {
         let disclosures: Vec<&str> = parts.filter(|part| !part.is_empty()).collect();
         // NOTE: draft-ietf-oauth-sd-jwt-vc-13 §3.2.1, vc+sd-jwt is accepted beside
         // dc+sd-jwt for the transitional period the draft recommends.
-        if !matches!(issuer_jwt.header_text("typ"), Some("dc+sd-jwt" | "vc+sd-jwt")) {
+        if !matches!(
+            issuer_jwt.header_text("typ"),
+            Some("dc+sd-jwt" | "vc+sd-jwt")
+        ) {
             return Err(Refusal::InvalidCredential);
         }
         Ok(Self {
@@ -164,7 +167,10 @@ impl<'a> Presentation<'a> {
         if !self.issuer_jwt.verifies_with(issuer) {
             return Err(Refusal::InvalidCredential);
         }
-        let vct = self.issuer_jwt.text("vct").ok_or(Refusal::InvalidCredential)?;
+        let vct = self
+            .issuer_jwt
+            .text("vct")
+            .ok_or(Refusal::InvalidCredential)?;
         if !expected.vct_values.iter().any(|wanted| wanted == vct) {
             return Err(Refusal::UnrequestedCredential);
         }
@@ -269,7 +275,10 @@ struct Disclosure {
 /// applied, refusing a digest met twice, a Disclosure of a reserved or
 /// repeated name, and a Disclosure no digest references (RFC 9901 §7.1
 /// steps 3 to 5).
-fn disclose(payload: &Map<String, Value>, disclosures: &[&str]) -> Result<Map<String, Value>, Refusal> {
+fn disclose(
+    payload: &Map<String, Value>,
+    disclosures: &[&str],
+) -> Result<Map<String, Value>, Refusal> {
     match payload.get("_sd_alg") {
         None => {}
         Some(Value::String(alg)) if alg == SHA_256 => {}

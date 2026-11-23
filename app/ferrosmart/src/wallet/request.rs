@@ -215,7 +215,11 @@ pub struct Request<'a> {
 /// from an issuer under the trusted anchors, with the claims asked for
 /// (OpenID4VP 1.0 §6, Appendix B.3.5; HAIP 1.0 §5).
 fn dcql(asks: &Asks<'_>) -> Value {
-    let claims: Vec<Value> = asks.claims.iter().map(|path| json!({"path": path})).collect();
+    let claims: Vec<Value> = asks
+        .claims
+        .iter()
+        .map(|path| json!({"path": path}))
+        .collect();
     let mut credential = json!({
         "id": CREDENTIAL_ID,
         "format": SD_JWT_VC,
@@ -236,7 +240,8 @@ fn dcql(asks: &Asks<'_>) -> Value {
 /// Returns the DER contents of the one `PRIVATE KEY` block of `pem`.
 fn pem_contents(pem: &[u8]) -> Option<Vec<u8>> {
     let (rest, block) = x509_parser::pem::parse_x509_pem(pem).ok()?;
-    (block.label == "PRIVATE KEY" && rest.iter().all(u8::is_ascii_whitespace)).then_some(block.contents)
+    (block.label == "PRIVATE KEY" && rest.iter().all(u8::is_ascii_whitespace))
+        .then_some(block.contents)
 }
 
 #[cfg(test)]
@@ -259,7 +264,10 @@ mod tests {
         let credential = &query["credentials"][0];
         assert_eq!(credential["format"], "dc+sd-jwt");
         assert_eq!(credential["meta"]["vct_values"][0], "urn:eudi:pid:1");
-        assert_eq!(credential["claims"][1]["path"], json!(["address", "country"]));
+        assert_eq!(
+            credential["claims"][1]["path"],
+            json!(["address", "country"])
+        );
         assert_eq!(credential["trusted_authorities"][0]["type"], "aki");
     }
 }

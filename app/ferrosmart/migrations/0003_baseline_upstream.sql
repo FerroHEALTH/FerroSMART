@@ -2,7 +2,7 @@
 -- SPDX-License-Identifier: BUSL-1.1
 --
 -- The logins at the upstream providers (docs/architecture.md sections 13.9,
--- 13.25, 13.26 and 13.30): each upstream session a grant may live in, a logout
+-- 13.25, 13.26 and 13.32): each upstream session a grant may live in, a logout
 -- waiting for the person's answer, the SAML assertions already admitted,
 -- and the EUDI Wallet's answers.
 
@@ -40,7 +40,7 @@ CREATE TABLE seen_saml_assertion (
 );
 CREATE INDEX seen_saml_assertion_expires_at ON seen_saml_assertion (expires_at);
 
--- An EUDI Wallet's answer (section 13.30), kept under its request's nonce so
+-- An EUDI Wallet's answer (section 13.32), kept under its request's nonce so
 -- the nonce is answered once (OpenID4VP 1.0 section 14.1.2), and taken once
 -- by the browser that brings the response code back (section 14.2).
 CREATE TABLE wallet_answer (

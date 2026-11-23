@@ -3,7 +3,7 @@
 
 //! The EUDI Wallet verifier: the OpenID4VP 1.0 machinery of the HAIP 1.0
 //! profile for a PID presented as an SD-JWT VC (`docs/architecture.md`
-//! §13.30).
+//! §13.32).
 //!
 //! It holds no configuration and does no I/O: [`request`] builds the signed
 //! request object, [`jwe`] opens the encrypted response, [`sdjwt`] checks the
@@ -225,11 +225,13 @@ mod tests {
     #[test]
     fn only_a_public_p256_jwk_gives_a_point() {
         let coordinate = encode(&[7; 32]);
-        let public = serde_json::json!({"kty": "EC", "crv": "P-256", "x": coordinate, "y": coordinate});
+        let public =
+            serde_json::json!({"kty": "EC", "crv": "P-256", "x": coordinate, "y": coordinate});
         assert_eq!(p256_point(&public).map(|point| point.len()), Some(65));
         let private = serde_json::json!({"kty": "EC", "crv": "P-256", "x": coordinate, "y": coordinate, "d": coordinate});
         assert!(p256_point(&private).is_none());
-        let other = serde_json::json!({"kty": "EC", "crv": "P-384", "x": coordinate, "y": coordinate});
+        let other =
+            serde_json::json!({"kty": "EC", "crv": "P-384", "x": coordinate, "y": coordinate});
         assert!(p256_point(&other).is_none());
     }
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 //! The EUDI Wallet as an upstream provider: a person logs in by presenting
-//! their PID (`docs/architecture.md` §13.30).
+//! their PID (`docs/architecture.md` §13.32).
 //!
 //! `[ferrosmart.upstream.openid4vp]` names the verifier's access key and
 //! certificate, its registration certificate, the anchors of the PID
@@ -174,7 +174,10 @@ impl WalletUpstream {
 /// # Errors
 /// Returns [`WalletConfigError`] for a broken rule, a file that cannot be
 /// read, or a key, certificate or anchor that cannot be used.
-pub fn upstream(section: &WalletSection, issuer: &Url) -> Result<WalletUpstream, WalletConfigError> {
+pub fn upstream(
+    section: &WalletSection,
+    issuer: &Url,
+) -> Result<WalletUpstream, WalletConfigError> {
     let endpoint = Url::parse(&section.wallet_endpoint)
         .map_err(|_unparsed| WalletConfigError::Rule("`wallet_endpoint` is an absolute URL"))?;
     let vct_issuer = section
@@ -209,7 +212,10 @@ pub fn upstream(section: &WalletSection, issuer: &Url) -> Result<WalletUpstream,
         key_identifiers: &key_identifiers,
     };
     let verifier = Verifier::new(
-        &read("ferrosmart.upstream.openid4vp.access_key_file", &section.access_key_file)?,
+        &read(
+            "ferrosmart.upstream.openid4vp.access_key_file",
+            &section.access_key_file,
+        )?,
         &read(
             "ferrosmart.upstream.openid4vp.access_certificate_file",
             &section.access_certificate_file,
@@ -336,7 +342,10 @@ impl WalletLogin {
             .map_err(|()| WalletError::Random)?
             .push(&state);
         Ok(Begun {
-            invocation: self.upstream.verifier.invocation(&self.upstream.endpoint, &request_uri),
+            invocation: self
+                .upstream
+                .verifier
+                .invocation(&self.upstream.endpoint, &request_uri),
             state,
             nonce,
             key,
@@ -376,11 +385,18 @@ impl WalletLogin {
     ///
     /// # Errors
     /// Returns the [`Refusal`] of the first check that fails.
-    pub async fn verify(&self, presentation: &str, nonce: &str, now: i64) -> Result<Identity, Refusal> {
+    pub async fn verify(
+        &self,
+        presentation: &str,
+        nonce: &str,
+        now: i64,
+    ) -> Result<Identity, Refusal> {
         let read = Presentation::parse(presentation)?;
         let chain = match read.issuer_key()? {
             IssuerKey::Chain(chain) => chain,
-            IssuerKey::Url { url, thumbprint } => self.chain_at(&url, thumbprint.as_deref()).await?,
+            IssuerKey::Url { url, thumbprint } => {
+                self.chain_at(&url, thumbprint.as_deref()).await?
+            }
         };
         let issuer = self
             .upstream
@@ -423,7 +439,8 @@ impl WalletLogin {
                 .filter(|value| !value.trim().is_empty())
                 .map(str::to_owned)
         };
-        let identifier = text(&self.upstream.identifier_claim).ok_or(Refusal::NoAdministrativeNumber)?;
+        let identifier =
+            text(&self.upstream.identifier_claim).ok_or(Refusal::NoAdministrativeNumber)?;
         let present = |name: &String| claim_at(&claims, name).is_some_and(|value| !value.is_null());
         if !self.upstream.claims.iter().all(present) {
             return Err(Refusal::MissingClaim);
@@ -450,7 +467,11 @@ impl WalletLogin {
 
     /// Returns the certificate chain at the `x5u` URL `url`, whose leaf
     /// matches `thumbprint` when one is named (RFC 7515 §4.1.5, §4.1.8).
-    async fn chain_at(&self, url: &str, thumbprint: Option<&[u8]>) -> Result<Vec<Vec<u8>>, Refusal> {
+    async fn chain_at(
+        &self,
+        url: &str,
+        thumbprint: Option<&[u8]>,
+    ) -> Result<Vec<Vec<u8>>, Refusal> {
         // NOTE: RFC 7515 §4.1.5, the x5u resource is fetched over TLS.
         if !Url::parse(url).is_ok_and(|url| url.scheme() == "https") {
             return Err(Refusal::UntrustedIssuer);
@@ -510,7 +531,10 @@ fn unreached(error: &FetchError, refusal: Refusal) -> Refusal {
 }
 
 /// Returns the claim the dotted `name` reaches in `claims`.
-fn claim_at<'a>(claims: &'a serde_json::Map<String, serde_json::Value>, name: &str) -> Option<&'a serde_json::Value> {
+fn claim_at<'a>(
+    claims: &'a serde_json::Map<String, serde_json::Value>,
+    name: &str,
+) -> Option<&'a serde_json::Value> {
     let mut steps = name.split('.');
     let first = claims.get(steps.next()?)?;
     steps.try_fold(first, |value, step| value.get(step))

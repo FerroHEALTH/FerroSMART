@@ -146,7 +146,9 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
   0.1.0 (#512 carried the steps); `docs/architecture.md` §13 fixes its
   requirements, crate layout, storage, endpoints, configuration, keys and
   threat model; `src/saml/` is the SAML 2.0 service provider an upstream
-  provider can log a person in through (13.26).
+  provider can log a person in through (13.26), and `src/wallet/` the
+  OpenID4VP verifier a person logs in at with the PID in their EUDI Wallet
+  (13.32).
 - `tools/zitadel-fhir-user`: the Actions v2 target of FerroSMART's ZITADEL
   example (`compose.zitadel.yaml`, #523), which writes a user's `fhirUser`
   claim from its metadata; deployment content of the example, never

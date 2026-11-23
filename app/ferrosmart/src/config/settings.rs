@@ -728,9 +728,14 @@ fn upstream(
             rule: "`name` is set, of letters, digits and `-`",
         });
     }
+    let levels = wallet_assurance(section)?;
     // NOTE: no specification governs the entry: our own design, the table present
     // names the protocol and a preset fills only an OpenID Connect table (#733).
-    let (protocol, fhir_user_claim, role_claims) = match (&section.oidc, &section.saml, &section.openid4vp) {
+    let (protocol, fhir_user_claim, role_claims) = match (
+        &section.oidc,
+        &section.saml,
+        &section.openid4vp,
+    ) {
         (Some(oidc), None, None) => {
             let effective = oidc.effective(&section.defaults()?);
             let resolved = oidc_upstream(oidc, &effective, keys)?;
@@ -759,14 +764,12 @@ fn upstream(
             });
         }
     };
-    let assurance = wallet_assurance(section)?;
-    let assurance =
-        crate::assurance::Assurance::resolve(&assurance, floor).map_err(|source| {
-            Error::Assurance {
-                name: section.name.clone(),
-                source,
-            }
-        })?;
+    let assurance = crate::assurance::Assurance::resolve(&levels, floor).map_err(|source| {
+        Error::Assurance {
+            name: section.name.clone(),
+            source,
+        }
+    })?;
     let named = |claim: &String| !claim.is_empty();
     Ok(Upstream {
         name: section.name.clone(),
@@ -785,7 +788,9 @@ fn upstream(
 /// Returns the assurance of the entry `section`: its own table, or for a
 /// wallet the one level of a PID (Regulation (EU) 2024/1183 Art 5a(11)),
 /// whose table may set only a minimum.
-fn wallet_assurance(section: &UpstreamSection) -> Result<crate::assurance::AssuranceSection, Error> {
+fn wallet_assurance(
+    section: &UpstreamSection,
+) -> Result<crate::assurance::AssuranceSection, Error> {
     if section.openid4vp.is_none() {
         return Ok(section.assurance.clone());
     }

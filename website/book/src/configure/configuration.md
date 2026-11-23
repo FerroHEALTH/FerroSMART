@@ -169,8 +169,9 @@ entry, nobody logs in and FerroSMART answers Backend Services alone.
 | `preset` | `keycloak`, `entra`, `okta` or `zitadel`: the defaults of FerroSMART's tested setup with that provider, for an OpenID Connect entry; none by default |
 
 The table present names the protocol: `[ferrosmart.upstream.oidc]` for
-OpenID Connect or `[ferrosmart.upstream.saml]` for SAML 2.0, exactly one
-per entry.
+OpenID Connect, `[ferrosmart.upstream.saml]` for SAML 2.0 or
+`[ferrosmart.upstream.openid4vp]` for the EUDI Wallet, exactly one per
+entry.
 
 `[ferrosmart.upstream.assurance]` says what the provider's logins are
 worth. A login below the minimum is refused with `access_denied`, and every
@@ -253,6 +254,22 @@ The `private_key_jwt` table:
 | `claims` | A table of claim name to attribute `Name`: the claims the login yields, a string for one value and an array for more. `name`, `preferred_username` and `email` are read as the ID Token claims of those names are |
 | `fhir_user_claim` | The claim of `claims` holding the person's `fhirUser`; empty for none |
 | `role_claims` | The claims of `claims` holding the person's roles |
+
+`[ferrosmart.upstream.openid4vp]`, for the EUDI Wallet
+([the EUDI Wallet](../install/upstream.md#the-eudi-wallet)). A wallet login
+is at level `high`, so the entry's `[ferrosmart.upstream.assurance]` sets
+only a `minimum`.
+
+| Key | What it is |
+|---|---|
+| `access_certificate_file` | The PEM wallet-relying party access certificate first, then its path up to, but not including, the anchor. It must not be self-signed |
+| `access_key_file` | The access certificate's PKCS#8 PEM P-256 key, which signs every request object |
+| `registration_certificate_file` | The registration certificate as the registrar issued it; every request object carries it |
+| `issuer_anchor_files` | The PEM certificates of the PID providers' trust anchors. A PID's issuer and its status list must chain to one |
+| `wallet_endpoint` | Where the wallet is invoked; `eu-eaap://` by default |
+| `vct_values` | The credential types accepted; `["urn:eudi:pid:1"]` by default. The first names the person's pairwise `sub` |
+| `claims` | The PID claims asked for, dotted for a nested claim, with `identifier_claim` and `issuing_country` among them; the PID's names and the administrative number by default |
+| `identifier_claim` | The claim whose value names the person and that a [`fhirUser` lookup](#ferrosmartresource) reads; `personal_administrative_number` by default |
 
 ## `[ferrosmart.saml]`
 

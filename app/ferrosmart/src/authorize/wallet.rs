@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! The EUDI Wallet routes (`docs/architecture.md` §13.30): the request
+//! The EUDI Wallet routes (`docs/architecture.md` §13.32): the request
 //! object, the response URI and the browser's way back.
 //!
 //! The wallet fetches the request object by its `state` as often as it
@@ -15,11 +15,11 @@
 
 use std::sync::Arc;
 
-use axum::routing::{get, post};
-use axum::{Json, Router};
 use axum::body::Bytes;
 use axum::extract::{Path, RawQuery, State};
 use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use serde_json::{Value, json};
 
@@ -191,7 +191,11 @@ async fn answered(
 
 /// Checks the one presentation of the VP Token in `payload` for `pending`
 /// and returns the person it names (OpenID4VP 1.0 §8.1, §8.6).
-async fn presented(login: &WalletLogin, pending: &Pending, payload: &Value) -> Result<Identity, Refusal> {
+async fn presented(
+    login: &WalletLogin,
+    pending: &Pending,
+    payload: &Value,
+) -> Result<Identity, Refusal> {
     let Some([Value::String(presentation)]) = payload
         .get("vp_token")
         .and_then(|token| token.get(CREDENTIAL_ID))
@@ -227,7 +231,12 @@ async fn accept(
     };
     match state
         .store()
-        .first_answer(&pending.upstream_nonce, &sha256(&code), &answer, pending.expires_at)
+        .first_answer(
+            &pending.upstream_nonce,
+            &sha256(&code),
+            &answer,
+            pending.expires_at,
+        )
         .await
     {
         Ok(true) => {}
@@ -243,14 +252,21 @@ async fn accept(
         declined = answer.identity.is_none(),
         "a wallet answer was admitted"
     );
-    no_store(Json(json!({"redirect_uri": back.as_str()})), "application/json")
+    no_store(
+        Json(json!({"redirect_uri": back.as_str()})),
+        "application/json",
+    )
 }
 
 /// Records that the wallet declined `pending` and keeps the refusal for
 /// the browser, which sends it back to the app (OpenID4VP 1.0 §8.5).
 async fn declined(state: &AppState, pending: &Pending, provider: &LoginProvider) -> Response {
-    if let Err(response) =
-        super::callback::record_login(state, provider.upstream(), Err("the person declined at the wallet")).await
+    if let Err(response) = super::callback::record_login(
+        state,
+        provider.upstream(),
+        Err("the person declined at the wallet"),
+    )
+    .await
     {
         return *response;
     }
@@ -262,7 +278,9 @@ async fn declined(state: &AppState, pending: &Pending, provider: &LoginProvider)
 async fn refused(state: &AppState, provider: &LoginProvider, refusal: Refusal) -> Response {
     tracing::warn!(reason = %refusal, "a wallet presentation was refused");
     let reason = format!("the wallet presentation is refused: {refusal}");
-    if let Err(response) = super::callback::record_login(state, provider.upstream(), Err(&reason)).await {
+    if let Err(response) =
+        super::callback::record_login(state, provider.upstream(), Err(&reason)).await
+    {
         return *response;
     }
     refusal_body(refusal)
@@ -322,7 +340,9 @@ pub async fn complete(
         return pages::fault(&state, Fault::Lapsed);
     };
     match answer.identity.map(serde_json::from_value::<Identity>) {
-        Some(Ok(identity)) => super::callback::complete(&state, &pending, provider, &identity, from).await,
+        Some(Ok(identity)) => {
+            super::callback::complete(&state, &pending, provider, &identity, from).await
+        }
         Some(Err(error)) => pages::server_error(&state, &error),
         None => back_declined(&state, &pending).await,
     }

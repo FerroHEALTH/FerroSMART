@@ -3268,6 +3268,9 @@ differently.
 | `GET /callback` | the upstream provider's redirect back, completed with the settings of the provider the request went to | `oidc core §3.1.2.5` |
 | `GET /saml/metadata` | FerroSMART's SAML 2.0 service provider metadata (`application/samlmetadata+xml`), when `[ferrosmart.saml]` is set | `saml-metadata §2.4.4`, `§4.1.1` |
 | `GET`, `POST /saml/acs` | the assertion consumer service: a `SAMLResponse` posted, or a `SAMLart` posted or redirected and resolved over mutual TLS, with the `RelayState` that names the pending request (13.26) | `saml-bindings §3.5`, `§3.6`; `saml-profiles §4.1.4` |
+| `GET`, `POST /wallet/request/{state}` | the signed request object of an EUDI Wallet login, served as often as the wallet asks, echoing a posted `wallet_nonce` (13.32) | `openid4vp §5.10`; `rfc9101 §5.2` |
+| `POST /wallet/response` | the wallet's encrypted answer: a refusal is a `400` naming its reason, an accepted answer a `redirect_uri` with a fresh response code (13.32) | `openid4vp §8.2`, `§8.3.1` |
+| `GET /wallet/complete` | the response code brought back by the browser that began the request, where the login completes (13.32) | `openid4vp §14.2`; `haip §5.1` |
 | `GET`, `POST /login` | the chooser of a request whose client may use more than one `[[ferrosmart.upstream]]` provider: one button per provider, whose post sends the browser to that provider's login | our own design (#678) |
 | `POST /backchannel-logout` | the back-channel logout URI registered at the upstream provider, which ends the `online_access` grants of a login | `backchannel §2.5` to `§2.8` |
 | `GET /frontchannel-logout` | the front-channel logout URI registered at the upstream provider: with its `iss` and `sid`, it ends the sessions of that `sid` and their `online_access` grants; never cached, framed only by the provider's origins | `frontchannel §2` |
@@ -3311,6 +3314,7 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 | `upstream_session` | id | upstream issuer, upstream `sid` and `sub`, last seen, end |
 | `seen_jti` | issuer, `jti` | client assertions and launch JWTs, until their `exp` |
 | `seen_saml_assertion` | identity provider, assertion `ID` | the SAML assertions a login was admitted with, until the bearer confirmation's `NotOnOrAfter` (`saml-profiles §4.1.4.5`) |
+| `wallet_answer` | the request's nonce | an EUDI Wallet's answer: the pending request, the SHA-256 of the response code, the person the PID names (none when the wallet declined), when the browser took it, expiry; kept until expiry, so a nonce is answered once (13.32) |
 | `pending_logout` | random id (the logout cookie) | a logout waiting for the person's answer: the client, the hint's `sub`, the registered post-logout redirect and its `state`, the form token, the `state` sent upstream, expiry |
 | `brand_bundle` | one row for the contents and one per resource, by `Type/id` | the digest a replica last started with, and when it became so: the Bundle's `timestamp` and each resource's `meta.lastUpdated` |
 
@@ -3363,7 +3367,7 @@ kind = "fhir"                                 # or "openehr"
 name = "idp"                                   # the provider's name, which a client's `upstreams` names
 preset = "keycloak"                           # optional: "keycloak", "entra", "okta" or "zitadel", the defaults below
 
-[ferrosmart.upstream.oidc]                    # OpenID Connect; [ferrosmart.upstream.saml] instead for SAML 2.0 (13.26)
+[ferrosmart.upstream.oidc]                    # OpenID Connect; [ferrosmart.upstream.saml] instead for SAML 2.0 (13.26), [ferrosmart.upstream.openid4vp] for the EUDI Wallet (13.32)
 issuer = "https://idp.example.org/realms/hospital"
 client_id = "ferrosmart"
 # scopes = ["openid"]                         # the preset's, else ["openid"]
@@ -3417,6 +3421,19 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 # roles = "<attribute of the roles>"
 # fhir_user = "<attribute of the fhirUser>"
 
+# [[ferrosmart.upstream]]
+# name = "wallet"
+# label = "EUDI Wallet"
+# [ferrosmart.upstream.openid4vp]             # the PID from an EUDI Wallet, by OpenID4VP under HAIP (13.32)
+# access_certificate_file = "/run/secrets/wrp-access.pem"   # the access certificate and its path, the anchor left out
+# access_key_file = "/run/secrets/wrp-access-key.pem"       # its PKCS#8 P-256 key, which signs every request object
+# registration_certificate_file = "/run/secrets/wrp-registration.jwt"   # as the registrar issued it
+# issuer_anchor_files = ["/run/secrets/pid-providers.pem"]  # the PID providers' trust anchors
+# wallet_endpoint = "eu-eaap://"
+# vct_values = ["urn:eudi:pid:1"]
+# claims = ["family_name", "given_name", "birthdate", "personal_administrative_number", "issuing_country"]
+# identifier_claim = "personal_administrative_number"       # the claim the fhirUser lookup reads
+
 [[ferrosmart.role]]                           # policy as content: what a role may be granted
 name = "clinician"
 scopes = ["user/Observation.rs", "user/Patient.rs"]    # user/ and patient/ scopes only
@@ -3459,9 +3476,8 @@ Every secret is a `_file` key read through `ferrohealth-secret`; the
 
 **Several upstream providers** (owner, 2026-11-19, #678). Each
 `[[ferrosmart.upstream]]` entry is a provider by `name`, with one
-protocol's table, `oidc` or `saml` (13.26), whose presence names the
-protocol (#733: a separate `protocol` key restated the table and is
-removed); the claim names
+protocol's table, `oidc`, `saml` (13.26) or `openid4vp` (13.32), whose
+presence names the protocol (#733); the claim names
 (`fhir_user_claim`, `role_claims`) sit in that table, since each protocol
 names what its login carries in its own terms. Nothing in
 SMART App Launch 2.2.0 limits a server to one provider. Each entry has an
@@ -4988,3 +5004,129 @@ answers the token's `cnf` (`rfc9449 §6.2`, `rfc8705 §3.2`). The metadata
 names `dpop_signing_alg_values_supported`, the proof algorithms the check
 admits (`rfc9449 §5.1`), and `tls_client_certificate_bound_access_tokens`,
 `true` when the listener asks for a certificate (`rfc8705 §3.3`).
+
+### 13.32 Upstream providers: the EUDI Wallet
+
+A person can log in by presenting their person identification data (PID)
+from a European Digital Identity Wallet. A relying party in the health
+sector that requires strong user authentication accepts the wallet at the
+person's request (Regulation (EU) 2024/1183, new Art 5f(2)), and FerroSMART
+is where a care provider puts that acceptance. The wallet is an
+`[[ferrosmart.upstream]]` entry with an `[ferrosmart.upstream.openid4vp]`
+table, beside OpenID Connect and SAML 2.0 (13.26). The protocol machinery
+is `app/ferrosmart/src/wallet/`, which holds no configuration and does no
+I/O; `app/ferrosmart/src/upstream/wallet.rs` reads the files and fetches
+what a presentation points at, and `app/ferrosmart/src/authorize/wallet.rs`
+holds the routes. Citation keys: `openid4vp` is OpenID for Verifiable
+Presentations 1.0 (Final), `haip` the OpenID4VC High Assurance
+Interoperability Profile 1.0 (Final), `sd-jwt-vc` draft-ietf-oauth-sd-jwt-vc-13,
+`tsl` draft-ietf-oauth-status-list-20 (the revision Implementing Regulation
+(EU) 2026/1731 names; `haip` pins -14, which agrees on every rule read
+here), all under `docs/specs/openid4vc/`; `rfc9901` is SD-JWT; `etsi 472-2`
+is ETSI TS 119 472-2 V1.2.1, recorded by sha256 under
+`docs/specs/etsi-eudi/`; the EU acts are under `docs/specs/eu-law/`.
+
+**The protocol.** Implementing Regulation (EU) 2024/2979 Annex II, as
+amended by 2026/1731 (Annex XII), applies `etsi 472-2` clauses 4.1, 4.2, 5
+and 6: an ISO/IEC mdoc profile and the OpenID4VP profile under `haip`. A
+relying party "shall" meet clause 6.5, the Digital Credentials API
+(OIDFVP-HAIP-SUPPORT-05), which FerroHEALTH/FerroSMART#840 builds. The
+redirect mechanism of clause 6.4 is built here and is what the OpenID
+Foundation's verifier plan tests. The ISO/IEC 18013-7 Annex C mdoc API is
+an RP "should" (ISO/IEC 18013-SUPPORT-04) and is not built. The PID is
+accepted as an SD-JWT VC (`dc+sd-jwt`, `haip §5.3.2`) of type
+`urn:eudi:pid:1` (Implementing Regulation (EU) 2024/2977 Annex as amended,
+§4.2); the mdoc PID is FerroHEALTH/FerroSMART#793.
+
+**The request.** The browser is sent to the wallet endpoint, `eu-eaap://`
+by default (`etsi 472-2` OIDFVP-HAIP-REDIRECTS-03), with the `client_id`,
+the `request_uri` and `request_uri_method=post`. The `client_id` is
+`x509_hash:` and the base64url SHA-256 of the wallet-relying party access
+certificate (`openid4vp §5.9.3`; `haip §5`; OIDFVP-HAIP-COMMON-REQ-RO-23).
+`GET` or `POST {issuer}/wallet/request/{state}` answers the request object
+as often as a wallet asks, since only the nonce is single-use
+(`openid4vp §5.10`), and a posted `wallet_nonce` is echoed in it. The object
+is a JWS of type `oauth-authz-req+jwt` (`openid4vp §5`), signed ES256 with
+the access key, whose protected header carries `x5c` (the access
+certificate and its path, the anchor left out) and `iat`
+(OIDFVP-HAIP-REDIRECTS_RO-01 to -03). Its claims are `aud`
+`https://self-issued.me/v2` (`openid4vp §5.8`), `response_type`
+`vp_token`, `response_mode` `direct_post.jwt` with the `response_uri`
+(`haip §5.1`), a fresh `nonce` and `state` (`openid4vp §5.2`), `iat` and
+`exp`, `client_metadata` with the request's own ECDH-ES P-256 key named by
+the `state`, `A128GCM` and `A256GCM`, and ES256 for the SD-JWT and the Key
+Binding JWT (`haip §5`, `§7`; `openid4vp §8.3`, Appendix B.3.4),
+`verifier_info` with the registration certificate as `registration_cert`
+(OIDFVP-HAIP-COMMON-REQ-RO-13 to -16), and one DCQL credential query `pid`
+naming the accepted types, the claims asked for and an `aki` trusted
+authorities query over the configured anchors (`openid4vp §6`, `§6.1.1.1`;
+`haip §5`). The `etsi_tl` query of RO-17 waits on the trusted lists of
+FerroHEALTH/FerroSMART#794.
+
+**The answer.** The wallet posts `response`, a JWE under ECDH-ES to the
+request's key (`openid4vp §8.3.1`), to `POST {issuer}/wallet/response`.
+FerroSMART finds the request by the JWE's `kid`, opens it, checks its
+`state`, and reads one presentation for `pid`. A wallet's error, sealed or
+in the clear, ends as `access_denied` for the app (`openid4vp §8.5`). A
+VP Token posted in the clear is refused (`haip §5.1`). The presentation is
+then checked in this order, and the first check that fails is the
+refusal:
+
+| Reason | The check |
+|---|---|
+| `malformed_response` | the JWE opens under the request's key, names its `state`, and carries one presentation for `pid` (`openid4vp §8.1`, `§8.6`) |
+| `unencrypted_response` | the VP Token comes inside an encrypted `response` (`haip §5.1`) |
+| `invalid_credential` | the SD-JWT reads, its `typ` is `dc+sd-jwt` (or `vc+sd-jwt`, `sd-jwt-vc §3.2.1`), its ES256 signature verifies, and its Disclosures apply (`rfc9901 §7.1`) |
+| `untrusted_issuer` | the issuer's chain, from `x5c` (`haip §6.1.1`) or from `x5u` over https matching `x5t#S256` (2977 Annex §4.2 as amended; `rfc7515 §4.1.5`), ends at a configured anchor, every certificate valid, every signer a certificate authority, the leaf not self-signed |
+| `unrequested_credential` | the `vct` is one the request asked for (`openid4vp §8.6`, Appendix B.3.5) |
+| `expired` | now is before `exp` and at or after `nbf` less 60 seconds |
+| `bad_holder_binding` | a Key Binding JWT of type `kb+jwt`, ES256 under `cnf.jwk`, with the request's `nonce`, the `client_id` as `aud`, the `sd_hash` of the presentation, and an `iat` at most 300 seconds old and 60 ahead (`rfc9901 §7.3`; `openid4vp` Appendix B.3.6; the window is our own design) |
+| `revoked` | the Token Status List gives the credential's index the value valid (`tsl §7.1`) |
+| `status_unavailable` | the Status List Token reads, is of type `statuslist+jwt`, is signed under a chain to the same anchors (`haip §6.1`), names the credential's `uri` as `sub`, is not expired, and holds the index (`tsl §8.3`) |
+| `replayed_nonce` | the request's nonce was not answered before (`openid4vp §14.1.2`) |
+| `no_administrative_number` | the identifier claim is disclosed |
+| `missing_claim` | every other claim asked for is disclosed (`openid4vp §8.6`) |
+
+The status list is read only when the credential carries `status`
+(`sd-jwt-vc §3.4`); a credential without one is accepted, as a credential
+valid for 24 hours or less needs no revocation (2979 EAA-4.2.13-03). A
+refusal is recorded as a failed `110122` Login naming the reason and
+answered with a `400` whose `error_description` is the reason, so the
+wallet sees it. The request stays open until it lapses or a valid answer
+completes it, so an answer forged against a public `state` cannot end a
+person's login (our own design).
+
+**The way back.** An accepted answer is kept in `wallet_answer` under the
+request's nonce, so a nonce is answered once, and under the SHA-256 of a
+fresh response code. The response URI answers `200` with a `redirect_uri`,
+`{issuer}/wallet/complete?response_code=…` (`openid4vp §8.2`). The browser
+that began the request brings it back, its cookie naming the request, and
+the login completes there; an answer brought back in another session is
+refused (`haip §5.1`; `openid4vp §14.2`). The answer is taken once and its
+row stays until the request lapses.
+
+**The person.** The PID's `issuing_country` and identifier claim name the
+person. The FerroSMART `sub` is pairwise (13.6 item 9) over the entry's
+first credential type and `{issuing_country}:{identifier}`, which
+`ferrosmart subject <entry> NL:999990019` prints. The identifier claim is
+`personal_administrative_number` by default (2977 Annex, Table 8), or a
+domestic claim a jurisdiction configures, and the `fhirUser` lookup reads
+it through `[[ferrosmart.resource.fhir_user_lookup]]` with the jurisdiction's
+identifier system (13.6 item 9). A PID without it is refused as
+`no_administrative_number`, and no demographic matching is attempted. The
+login's `acr` is `http://eidas.europa.eu/LoA/high`, the level the wallet is
+provided at (Regulation (EU) 2024/1183 Art 5a(11); 2977 Art 3(7)), so a
+wallet entry takes no `assurance.levels`, only a `minimum`. Its
+`auth_time` is the Key Binding JWT's `iat`.
+
+**The configuration.** `access_certificate_file` (the access certificate
+and its path), `access_key_file` (its PKCS#8 P-256 key), and
+`registration_certificate_file` are read at start, the key checked against
+the certificate and the certificate refused when self-signed.
+`issuer_anchor_files` hold the PID providers' anchors as PEM certificates.
+`wallet_endpoint`, `vct_values`, `claims` (dotted for a nested claim, the
+identifier claim and `issuing_country` among them) and `identifier_claim`
+have the defaults above. `ferrosmart upstream registration <entry>` prints
+the request URI, the response URI, the redirect URI, the types and the
+attributes the registrar records (Implementing Regulation (EU) 2025/848
+Art 5, Annex I).

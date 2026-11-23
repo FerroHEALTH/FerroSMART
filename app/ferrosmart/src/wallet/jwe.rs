@@ -68,8 +68,10 @@ impl EphemeralKey {
     /// # Errors
     /// Returns [`JweError::Key`] when the scalar cannot be read out.
     pub fn stored(&self) -> Result<String, JweError> {
-        let scalar: EcPrivateKeyBin<'static> =
-            self.private.as_be_bytes().map_err(|_failed| JweError::Key)?;
+        let scalar: EcPrivateKeyBin<'static> = self
+            .private
+            .as_be_bytes()
+            .map_err(|_failed| JweError::Key)?;
         Ok(encode(scalar.as_ref()))
     }
 
@@ -152,7 +154,12 @@ impl EphemeralKey {
             Some(value) => decode(value).map_err(|_unread| JweError::Malformed),
             None => Ok(Vec::new()),
         };
-        let other = other_info(text("enc").unwrap_or_default(), &party("apu")?, &party("apv")?, length);
+        let other = other_info(
+            text("enc").unwrap_or_default(),
+            &party("apu")?,
+            &party("apv")?,
+            length,
+        );
         let key = agreement::agree(
             &self.private,
             UnparsedPublicKey::new(&ECDH_P256, &peer),
@@ -163,7 +170,8 @@ impl EphemeralKey {
         let mut sealed = decode(ciphertext).map_err(|_unread| JweError::Malformed)?;
         sealed.extend(decode(tag).map_err(|_unread| JweError::Malformed)?);
         let nonce = Nonce::try_assume_unique_for_key(&iv).map_err(|_length| JweError::Malformed)?;
-        let key = LessSafeKey::new(UnboundKey::new(algorithm, &key).map_err(|_length| JweError::Key)?);
+        let key =
+            LessSafeKey::new(UnboundKey::new(algorithm, &key).map_err(|_length| JweError::Key)?);
         // NOTE: RFC 7516 §5.2 step 14, the additional data is the ASCII of the encoded header.
         let plain = key
             .open_in_place(nonce, Aad::from(protected.as_bytes()), &mut sealed)
@@ -272,7 +280,9 @@ mod tests {
         for enc in ENC_VALUES {
             let jwe = encrypt(b"{\"vp_token\":{}}", &jwk, enc).expect("the response should seal");
             assert_eq!(kid(&jwe).as_deref(), Some("state-1"));
-            let plain = key.decrypt(&jwe, "state-1").expect("the response should open");
+            let plain = key
+                .decrypt(&jwe, "state-1")
+                .expect("the response should open");
             assert_eq!(plain, b"{\"vp_token\":{}}");
         }
     }
@@ -284,7 +294,10 @@ mod tests {
         let again = EphemeralKey::from_stored(&key.stored().expect("the key should store"))
             .expect("the key should read back");
         let jwe = encrypt(b"x", &jwk, "A256GCM").expect("the response should seal");
-        assert_eq!(again.decrypt(&jwe, "k").expect("the response should open"), b"x");
+        assert_eq!(
+            again.decrypt(&jwe, "k").expect("the response should open"),
+            b"x"
+        );
     }
 
     #[test]
