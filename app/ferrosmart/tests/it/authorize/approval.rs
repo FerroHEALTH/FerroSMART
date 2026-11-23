@@ -142,7 +142,7 @@ async fn a_professional_s_launch_of_an_approved_app_skips_the_page_within_four_b
     let jti = claims["jti"].as_str().expect("a jti");
     let mut cleared = smart.settings.clients.clone();
     for client in &mut cleared {
-        client.approval = None;
+        client.registration = ferrosmart::clients::Registration::Administered(None);
     }
     let issuer = smart.settings.endpoint_url("");
     let origin = ferrosmart::approvals::Origin {
@@ -326,7 +326,9 @@ async fn a_patient_s_launch_of_a_first_party_app_skips_the_page_and_is_withdrawn
     let jti = claims["jti"].as_str().expect("a jti");
     let mut cleared = smart.settings.clients.clone();
     for client in &mut cleared {
-        if let Some(approval) = client.approval.as_mut() {
+        if let ferrosmart::clients::Registration::Administered(Some(approval)) =
+            &mut client.registration
+        {
             approval.first_party = false;
             approval.scopes = vec![String::from("openid"), String::from("fhirUser")];
         }

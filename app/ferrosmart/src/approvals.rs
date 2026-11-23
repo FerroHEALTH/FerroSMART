@@ -52,7 +52,7 @@ pub async fn withdraw_lapsed(
         let given = clients
             .iter()
             .find(|client| client.client_id == client_id)
-            .and_then(|client| client.approval.as_ref());
+            .and_then(Client::approval);
         if given == Some(&approval) {
             continue;
         }

@@ -28,7 +28,9 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Postgres, Row as _};
 use url::Url;
 
-use crate::clients::{About, Approval, Client, ClientKeys, ClientKind, GrantType, SecretHash};
+use crate::clients::{
+    About, Approval, Client, ClientKeys, ClientKind, GrantType, Registration, SecretHash,
+};
 use crate::launch::context::Context;
 
 /// How long a request waits for a connection before the store answers that
@@ -161,7 +163,7 @@ impl Store {
             .execute(&mut *tx)
             .await?;
         let managed: Vec<String> = sqlx::query_scalar(
-            "SELECT client_id FROM client WHERE source = 'admin' AND client_id = ANY($1) ORDER BY client_id",
+            "SELECT client_id FROM client WHERE source <> 'config' AND client_id = ANY($1) ORDER BY client_id",
         )
         .bind(&ids)
         .fetch_all(&mut *tx)
@@ -382,13 +384,16 @@ enum ClientKey {
 }
 
 /// Where a client's row came from: the configuration, which writes it at
-/// every start, or the admin API, which makes the store its source.
+/// every start, or the admin API or the app's own registration, which make
+/// the store its source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     /// A `[[ferrosmart.client]]` table.
     Config,
     /// The admin API.
     Admin,
+    /// The app's own registration (RFC 7591).
+    Dynamic,
 }
 
 impl Source {
@@ -398,6 +403,17 @@ impl Source {
         match self {
             Self::Config => "config",
             Self::Admin => "admin",
+            Self::Dynamic => "dynamic",
+        }
+    }
+
+    /// Returns the source the store wrote as `text`.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        match text {
+            "config" => Some(Self::Config),
+            "admin" => Some(Self::Admin),
+            "dynamic" => Some(Self::Dynamic),
+            _ => None,
         }
     }
 }
@@ -410,7 +426,8 @@ async fn upsert(
     write_client(tx, client, Source::Config).await
 }
 
-/// Writes `client`, from `source`, over any row of its id.
+/// Writes `client`, from `source`, over any row of its id; an app that
+/// registered itself is written as [`Source::Dynamic`] whatever `source` says.
 pub(crate) async fn write_client(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     client: &Client,
@@ -426,6 +443,12 @@ pub(crate) async fn write_client(
         .iter()
         .map(|grant| grant.as_str())
         .collect();
+    let source = if client.registered_itself() {
+        Source::Dynamic
+    } else {
+        source
+    };
+    let approval = client.approval();
     sqlx::query(
         "INSERT INTO client (client_id, name, kind, jwks_uri, jwks, redirect_uris, scopes, grant_types, secret_hash, \
          launch_uri, approved_scope, approved_by, approved_at, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
@@ -448,10 +471,10 @@ pub(crate) async fn write_client(
     .bind(&grants)
     .bind(client.secret_hash.as_ref().map(SecretHash::phc))
     .bind(&client.launch_uri)
-    .bind(client.approval.as_ref().map(|approval| &approval.scopes))
-    .bind(client.approval.as_ref().map(|approval| &approval.approved_by))
-    .bind(client.approval.as_ref().map(|approval| approval.approved_at))
-    .bind(client.approval.as_ref().is_some_and(|approval| approval.first_party))
+    .bind(approval.map(|approval| &approval.scopes))
+    .bind(approval.map(|approval| &approval.approved_by))
+    .bind(approval.map(|approval| approval.approved_at))
+    .bind(approval.is_some_and(|approval| approval.first_party))
     .bind(client.about.home.as_ref().map(Url::as_str))
     .bind(client.about.logo.as_ref().map(Url::as_str))
     .bind(client.about.policy.as_ref().map(Url::as_str))
@@ -470,7 +493,7 @@ pub(crate) async fn write_client(
 pub(crate) const CLIENT_COLUMNS: &str = "client_id, name, kind, jwks_uri, jwks, secret_hash, redirect_uris, \
      post_logout_redirect_uris, upstreams, resources, scopes, grant_types, launch_uri, approved_scope, approved_by, \
      extract(epoch FROM approved_at)::bigint AS approved_at, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
-     assurance_minimum";
+     assurance_minimum, source";
 
 /// Reads a `client` row.
 pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreError> {
@@ -521,6 +544,14 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
         (None, None, None) => None,
         _ => return Err(corrupt()),
     };
+    let source = Source::parse(&row.try_get::<String, _>("source")?).ok_or_else(corrupt)?;
+    // NOTE: RFC 7591 §5, an app's own registration is self-asserted, so a row of
+    // one that holds an approval or the first-party mark is refused.
+    let registration = match (source, approval) {
+        (Source::Dynamic, None) if !row.try_get::<bool, _>("first_party")? => Registration::Dynamic,
+        (Source::Dynamic, _) => return Err(corrupt()),
+        (Source::Config | Source::Admin, approval) => Registration::Administered(approval),
+    };
     Ok(Client {
         name: row.try_get("name")?,
         kind,
@@ -534,7 +565,7 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
         scopes: row.try_get("scopes")?,
         grant_types,
         launch_uri: row.try_get("launch_uri")?,
-        approval,
+        registration,
         about: About {
             home: read_url(row, "client_uri", &corrupt)?,
             logo: read_url(row, "logo_uri", &corrupt)?,

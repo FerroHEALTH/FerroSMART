@@ -707,7 +707,7 @@ async fn the_configuration_seeds_the_registry_and_leaves_a_client_the_api_change
         "Portal, changed", kept.name,
         "a restart leaves the API's change"
     );
-    assert!(kept.approval.is_some());
+    assert!(kept.approval().is_some());
     let (_, _, app) = server
         .call(Method::GET, "/admin/clients/app", None, Some(&token))
         .await;

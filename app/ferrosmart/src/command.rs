@@ -221,7 +221,7 @@ async fn listen_and_serve(settings: Settings) -> Result<ExitCode, Failure> {
     for client_id in managed {
         tracing::warn!(
             %client_id,
-            "the client's [[ferrosmart.client]] table is not written: the admin API changed the client, so the store is its source"
+            "the client's [[ferrosmart.client]] table is not written: the admin API changed the client or the app registered itself, so the store is its source"
         );
     }
     let forwarder = settings.audit.feed.clone().map(|feed| {

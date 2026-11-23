@@ -147,7 +147,7 @@ impl Fields {
             .and_then(|client| client.secret_hash.clone());
         let approval = self.organisation_approval.map(|approval| {
             let same = stored
-                .and_then(|client| client.approval.as_ref())
+                .and_then(Client::approval)
                 .filter(|kept| {
                     kept.scopes == approval.scopes
                         && kept.approved_by == approval.approved_by
@@ -299,7 +299,7 @@ impl<'a> From<&'a Registered> for ClientView<'a> {
             logo_uri: client.about.logo.as_ref().map(Url::as_str),
             policy_uri: client.about.policy.as_ref().map(Url::as_str),
             tos_uri: client.about.terms.as_ref().map(Url::as_str),
-            organisation_approval: client.approval.as_ref().map(|approval| ApprovalView {
+            organisation_approval: client.approval().map(|approval| ApprovalView {
                 scopes: &approval.scopes,
                 approved_by: &approval.approved_by,
                 approved_at: instant(approval.approved_at),
