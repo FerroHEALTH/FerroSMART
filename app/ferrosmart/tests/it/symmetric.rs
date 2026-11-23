@@ -7,7 +7,7 @@
 //! client secret sent by HTTP Basic or in the form (RFC 6749 §2.3.1).
 
 use base64::Engine as _;
-use ferrosmart::clients::{ClientKind, ClientSection, GrantType, resolve};
+use ferrosmart::clients::{ClientKind, ClientMetadata, GrantType, Material, SecretHash, resolve};
 use ferrosmart::store::grant::Access;
 use http::{StatusCode, header};
 use serde_json::{Value, json};
@@ -144,39 +144,47 @@ async fn a_symmetric_client_revokes_its_refresh_token() {
 // "SHALL NOT be used" for Backend Services.
 #[test]
 fn a_symmetric_client_is_refused_the_client_credentials_grant_and_a_jwk_set() {
-    let dir = tempfile::tempdir().expect("a directory");
-    let file = dir.path().join("secret.phc");
-    std::fs::write(&file, phc(VAULT_SECRET)).expect("written");
-    let section = |grants: Vec<GrantType>, jwks_uri: &str| ClientSection {
+    let hash = phc(VAULT_SECRET);
+    let admit = |section: &ClientMetadata, hash: &str| {
+        resolve(
+            section,
+            Material {
+                jwks: None,
+                secret_hash: Some(SecretHash::from(hash.to_owned())),
+            },
+        )
+    };
+    let section = |grants: Vec<GrantType>, jwks_uri: &str| ClientMetadata {
         client_id: String::from("vault"),
         kind: ClientKind::ConfidentialSymmetric,
-        secret_hash_file: Some(file.clone()),
         jwks_uri: jwks_uri.to_owned(),
         redirect_uris: vec![String::from("https://vault.example.org/callback")],
         grant_types: grants,
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     };
-    assert!(resolve(&[section(vec![GrantType::AuthorizationCode], "")]).is_ok());
-    assert!(resolve(&[section(vec![GrantType::ClientCredentials], "")]).is_err());
+    assert!(admit(&section(vec![GrantType::AuthorizationCode], ""), &hash).is_ok());
+    assert!(admit(&section(vec![GrantType::ClientCredentials], ""), &hash).is_err());
     assert!(
-        resolve(&[section(
-            vec![GrantType::AuthorizationCode],
-            "https://vault.example.org/jwks"
-        )])
+        admit(
+            &section(
+                vec![GrantType::AuthorizationCode],
+                "https://vault.example.org/jwks"
+            ),
+            &hash
+        )
         .is_err()
     );
-    let weak = dir.path().join("weak.phc");
-    std::fs::write(
-        &weak,
-        "$argon2id$v=19$m=1024,t=1,p=1$c3ludGhldGljLXNhbHQtMTY$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    )
-    .expect("written");
-    let mut below_floor = section(vec![GrantType::AuthorizationCode], "");
-    below_floor.secret_hash_file = Some(weak);
-    assert!(resolve(&[below_floor]).is_err(), "a hash below the floor");
+    let weak = "$argon2id$v=19$m=1024,t=1,p=1$c3ludGhldGljLXNhbHQtMTY$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    assert!(
+        admit(&section(vec![GrantType::AuthorizationCode], ""), weak).is_err(),
+        "a hash below the floor"
+    );
     let mut public = section(vec![GrantType::AuthorizationCode], "");
     public.kind = ClientKind::Public;
-    assert!(resolve(&[public]).is_err(), "a secret on a public client");
+    assert!(
+        admit(&public, &hash).is_err(),
+        "a secret on a public client"
+    );
 }
 
 // NOTE: OWASP Password Storage Cheat Sheet, Argon2id at m=19456, t=2, p=1.

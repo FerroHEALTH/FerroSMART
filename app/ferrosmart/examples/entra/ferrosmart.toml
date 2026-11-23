@@ -54,13 +54,5 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 name = "clinician"
 scopes = ["user/Patient.rs", "user/Observation.rs"]
 
-# The example's SMART app: a public client, PKCE alone (SMART App Launch
-# 2.2.0, Client Types, client-public).
-[[ferrosmart.client]]
-client_id = "example-app"
-name = "Example SMART app"
-kind = "public"
-redirect_uris = ["https://app.example.org/callback"]
-scopes = ["openid", "fhirUser", "user/Patient.rs", "user/Observation.rs"]
-resources = ["https://ehr.example.org/fhir"]
-grant_types = ["authorization_code"]
+# The example's SMART app is the client document example-app.json beside
+# this file, which `ferrosmart client apply example-app.json` registers.

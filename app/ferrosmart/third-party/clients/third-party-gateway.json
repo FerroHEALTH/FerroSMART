@@ -1,0 +1,19 @@
+{
+  "client_id": "third-party-gateway",
+  "name": "The third-party lane's gateway",
+  "kind": "confidential_symmetric",
+  "resources": [
+    "http://localhost:8090/fhir",
+    "http://localhost:8092/fhir",
+    "http://localhost:8099/fhir"
+  ],
+  "redirect_uris": [
+    "http://localhost:8092/callback"
+  ],
+  "scopes": [
+    "system/introspect"
+  ],
+  "grant_types": [
+    "authorization_code"
+  ]
+}

@@ -196,7 +196,7 @@ async fn prompt_consent_shows_the_page_an_approval_would_skip() {
     let smart = Smart::start_with(
         "[\"authorization_code\"]",
         "[\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n\
-         [ferrosmart.client.organisation_approval]\n\
+         [client.organisation_approval]\n\
          scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n\
          approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"",
         "[\"user/Observation.rs\"]",

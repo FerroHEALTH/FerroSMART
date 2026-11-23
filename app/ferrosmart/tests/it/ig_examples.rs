@@ -73,21 +73,16 @@ struct Server {
     store: Store,
     /// The database.
     database: Database,
-    /// The keys and the client files, kept for the case's length.
+    /// The keys, kept for the case's length.
     _keys: Keys,
     /// The path of the issuer, which every route is served under.
     base: String,
 }
 
 impl Server {
-    /// Starts FerroSMART at `issuer` with the `[[ferrosmart.client]]` table
-    /// `client`, whose `{dir}` names the case's directory.
-    async fn start(issuer: &str, client: &str, files: &[(&str, &str)]) -> Self {
+    /// Starts FerroSMART at `issuer` with the `[[client]]` table `client`.
+    async fn start(issuer: &str, client: &str) -> Self {
         let keys = Keys::new();
-        for (name, content) in files {
-            std::fs::write(keys.dir.path().join(name), content).expect("written");
-        }
-        let client = client.replace("{dir}", &keys.dir.path().display().to_string());
         let database = Database::create().await;
         // NOTE: RFC 8414 §3, the routes of an issuer with a path are served under it.
         let base = url::Url::parse(issuer)
@@ -107,9 +102,14 @@ impl Server {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let audit = audit(&settings);
-        let app = router(Arc::new(AppState::new(settings, store.clone(), audit)));
+        let state = Arc::new(AppState::new(settings, store.clone(), audit));
+        crate::support::apply(
+            &state,
+            &crate::support::clients(&crate::support::reach_every_base(&text)),
+        )
+        .await;
+        let app = router(state);
         Self {
             app,
             store,
@@ -251,13 +251,14 @@ async fn the_worked_example_s_rs384_and_es384_assertions_verify() {
     let es384: Value = serde_json::from_str(ES384_KEYS).expect("JSON");
     let mut keys = rs384["keys"].as_array().expect("keys").clone();
     keys.extend(es384["keys"].as_array().expect("keys").iter().cloned());
-    let set = json!({ "keys": keys }).to_string();
+    let set = crate::support::inline(&json!({ "keys": keys }));
     let server = Server::start(
         "https://authorize.smarthealthit.org",
-        "[[ferrosmart.client]]\nclient_id = \"https://bili-monitor.example.com\"\n\
-         kind = \"confidential_asymmetric\"\njwks_file = \"{dir}/bili.json\"\n\
-         scopes = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]",
-        &[("bili.json", &set)],
+        &format!(
+            "[[client]]\nclient_id = \"https://bili-monitor.example.com\"\n\
+             kind = \"confidential_asymmetric\"\njwks = {set}\n\
+             scopes = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]"
+        ),
     )
     .await;
     let worked = jws(ASYMMETRIC, "eyJhbGciOiJSUzM4NCIs");
@@ -287,12 +288,14 @@ async fn the_app_launch_and_backend_examples_assertions_verify() {
     let claims: Value = jsonwebtoken::dangerous::insecure_decode_claims(&launch).expect("claims");
     let audience = claims["aud"].as_str().expect("an aud");
     let issuer = audience.strip_suffix("/token").expect("the token URL");
+    let set = crate::support::inline(&json!({ "keys": [jwk] }));
     let server = Server::start(
         issuer,
-        "[[ferrosmart.client]]\nclient_id = \"demo_app_whatever\"\n\
-         kind = \"confidential_asymmetric\"\njwks_file = \"{dir}/demo.json\"\n\
-         scopes = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]",
-        &[("demo.json", &json!({ "keys": [jwk] }).to_string())],
+        &format!(
+            "[[client]]\nclient_id = \"demo_app_whatever\"\n\
+             kind = \"confidential_asymmetric\"\njwks = {set}\n\
+             scopes = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]"
+        ),
     )
     .await;
     holds_but_expired(&server, &launch, "the app launch").await;
@@ -336,13 +339,12 @@ async fn the_symmetric_example_s_basic_credentials_authenticate() {
     let server = Server::start(
         "https://smart.example.org",
         &format!(
-            "[[ferrosmart.client]]\nclient_id = {client_id:?}\nkind = \"confidential_symmetric\"\n\
-             secret_hash_file = \"{{dir}}/demo.phc\"\n\
+            "[[client]]\nclient_id = {client_id:?}\nkind = \"confidential_symmetric\"\n\
+             secret_hash = {hash:?}\n\
              redirect_uris = [\"https://sharp-lake-word.glitch.me/graph.html\"]\n\
              scopes = [\"launch/patient\", \"patient/Observation.rs\"]\n\
              grant_types = [\"authorization_code\"]"
         ),
-        &[("demo.phc", &hash)],
     )
     .await;
     // NOTE: RFC 7009 §2.2, an unknown token answers 200 to a client that authenticated.

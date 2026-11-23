@@ -3,38 +3,50 @@
 
 //! What the client registry admits and refuses, each rule its own case.
 
-use ferrosmart::clients::{ClientError, ClientKeys, ClientKind, ClientSection, GrantType, resolve};
-use serde_json::json;
+use ferrosmart::clients::{
+    Client, ClientError, ClientKeys, ClientKind, ClientMetadata, GrantType, Material, resolve,
+};
+use serde_json::{Value, json};
+
+/// Returns the client `section` registers.
+fn admit(section: &ClientMetadata) -> Result<Client, ClientError> {
+    resolve(section, Material::default())
+}
+
+/// Returns the client `section` registers with the JWK Set `set` by value.
+fn admit_with(section: &ClientMetadata, set: &Value) -> Result<Client, ClientError> {
+    resolve(
+        section,
+        Material {
+            jwks: Some(set.clone()),
+            secret_hash: None,
+        },
+    )
+}
 
 /// Returns a Backend Services client with its JWK Set at a URL.
-fn backend(client_id: &str) -> ClientSection {
-    ClientSection {
+fn backend(client_id: &str) -> ClientMetadata {
+    ClientMetadata {
         client_id: client_id.to_owned(),
         kind: ClientKind::ConfidentialAsymmetric,
         jwks_uri: String::from("https://export.example.org/jwks.json"),
         scopes: vec![String::from("system/Patient.rs")],
         grant_types: vec![GrantType::ClientCredentials],
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     }
 }
 
-/// Writes `set` to a file and returns a client registering it by value.
-fn by_value(set: &serde_json::Value) -> (tempfile::TempDir, ClientSection) {
-    let dir = tempfile::tempdir().expect("a directory");
-    let path = dir.path().join("jwks.json");
-    std::fs::write(&path, set.to_string()).expect("written");
-    let client = ClientSection {
+/// Returns a client that registers its JWK Set by value.
+fn by_value() -> ClientMetadata {
+    ClientMetadata {
         jwks_uri: String::new(),
-        jwks_file: Some(path),
         ..backend("by-value")
-    };
-    (dir, client)
+    }
 }
 
 #[test]
 fn a_backend_services_client_registers_its_jwk_set_by_url() {
-    let clients = resolve(&[backend("export")]).expect("admitted");
-    let client = &clients[0];
+    let client = admit(&backend("export")).expect("admitted");
     assert_eq!("export", client.name, "the name defaults to the client id");
     assert!(
         matches!(&client.keys, Some(ClientKeys::Uri(url)) if url.as_str() == "https://export.example.org/jwks.json")
@@ -48,9 +60,8 @@ fn a_jwk_set_by_value_holds_bare_public_keys_with_kty_and_kid() {
         {"kty": "RSA", "kid": "r1", "n": "AQAB", "e": "AQAB", "alg": "RS384"},
         {"kty": "EC", "kid": "e1", "crv": "P-384", "x": "AA", "y": "AA"}
     ]});
-    let (_dir, client) = by_value(&set);
-    let clients = resolve(&[client]).expect("admitted");
-    assert!(matches!(&clients[0].keys, Some(ClientKeys::Set(kept)) if *kept == set));
+    let client = admit_with(&by_value(), &set).expect("admitted");
+    assert!(matches!(&client.keys, Some(ClientKeys::Set(kept)) if *kept == set));
     // NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric,
     // Registering a client: `kty`, `kid` and the bare key members.
     for (key, rule) in [
@@ -71,130 +82,114 @@ fn a_jwk_set_by_value_holds_bare_public_keys_with_kty_and_kid() {
             "carries a private member",
         ),
     ] {
-        let (_dir, client) = by_value(&json!({"keys": [key]}));
         assert!(
-            matches!(resolve(&[client]), Err(ClientError::Jwk { rule: refused, .. }) if refused == rule),
+            matches!(admit_with(&by_value(), &json!({"keys": [key]})), Err(ClientError::Jwk { rule: refused, .. }) if refused == rule),
             "{rule}"
         );
     }
-    let (_dir, client) = by_value(&json!({"keys": []}));
-    assert!(matches!(resolve(&[client]), Err(ClientError::Rule { .. })));
+    assert!(matches!(
+        admit_with(&by_value(), &json!({"keys": []})),
+        Err(ClientError::Rule { .. })
+    ));
 }
 
 #[test]
 fn a_confidential_asymmetric_client_registers_exactly_one_jwk_set() {
-    let neither = ClientSection {
+    let neither = ClientMetadata {
         jwks_uri: String::new(),
         ..backend("neither")
     };
-    assert!(matches!(resolve(&[neither]), Err(ClientError::Rule { .. })));
-    let (_dir, by_value) =
-        by_value(&json!({"keys": [{"kty": "RSA", "kid": "r", "n": "AQAB", "e": "AQAB"}]}));
-    let both = ClientSection {
-        jwks_uri: String::from("https://export.example.org/jwks.json"),
-        ..by_value
-    };
-    assert!(matches!(resolve(&[both]), Err(ClientError::Rule { .. })));
-    let plain = ClientSection {
+    assert!(matches!(admit(&neither), Err(ClientError::Rule { .. })));
+    let set = json!({"keys": [{"kty": "RSA", "kid": "r", "n": "AQAB", "e": "AQAB"}]});
+    assert!(matches!(
+        admit_with(&backend("both"), &set),
+        Err(ClientError::Rule { .. })
+    ));
+    let plain = ClientMetadata {
         jwks_uri: String::from("http://export.example.org/jwks.json"),
         ..backend("plain")
     };
-    assert!(matches!(
-        resolve(&[plain]),
-        Err(ClientError::JwksUri { .. })
-    ));
+    assert!(matches!(admit(&plain), Err(ClientError::JwksUri { .. })));
 }
 
 #[test]
 fn a_public_client_neither_registers_keys_nor_uses_client_credentials() {
-    let keyed = ClientSection {
+    let keyed = ClientMetadata {
         kind: ClientKind::Public,
         ..backend("keyed")
     };
-    assert!(matches!(resolve(&[keyed]), Err(ClientError::Rule { .. })));
-    let public = ClientSection {
+    assert!(matches!(admit(&keyed), Err(ClientError::Rule { .. })));
+    let public = ClientMetadata {
         client_id: String::from("app"),
         kind: ClientKind::Public,
         grant_types: vec![GrantType::ClientCredentials],
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     };
-    assert!(matches!(resolve(&[public]), Err(ClientError::Rule { .. })));
+    assert!(matches!(admit(&public), Err(ClientError::Rule { .. })));
 }
 
 #[test]
 fn an_authorization_code_client_registers_absolute_redirect_uris() {
-    let app = |uris: Vec<&str>| ClientSection {
+    let app = |uris: Vec<&str>| ClientMetadata {
         client_id: String::from("app"),
         kind: ClientKind::Public,
         redirect_uris: uris.into_iter().map(String::from).collect(),
         grant_types: vec![GrantType::AuthorizationCode, GrantType::AuthorizationCode],
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     };
-    let admitted = resolve(&[app(vec!["https://app.example.org/callback"])]).expect("admitted");
+    let admitted = admit(&app(vec!["https://app.example.org/callback"])).expect("admitted");
     assert_eq!(
         vec![GrantType::AuthorizationCode],
-        admitted[0].grant_types,
+        admitted.grant_types,
         "once"
     );
-    assert!(matches!(
-        resolve(&[app(vec![])]),
-        Err(ClientError::Rule { .. })
-    ));
+    assert!(matches!(admit(&app(vec![])), Err(ClientError::Rule { .. })));
     // NOTE: RFC 6749 §3.1.2, absolute and without a fragment.
     for uri in ["/callback", "https://app.example.org/callback#done"] {
         assert!(
-            matches!(
-                resolve(&[app(vec![uri])]),
-                Err(ClientError::RedirectUri { .. })
-            ),
+            matches!(admit(&app(vec![uri])), Err(ClientError::RedirectUri { .. })),
             "{uri}"
         );
     }
 }
 
 #[test]
-fn the_registry_refuses_a_repeated_or_missing_id_a_bad_scope_and_no_grant() {
-    assert!(
-        matches!(resolve(&[backend("x"), backend("x")]), Err(ClientError::Repeated { client_id }) if client_id == "x")
-    );
-    assert!(matches!(
-        resolve(&[backend("")]),
-        Err(ClientError::NoClientId)
-    ));
-    let scoped = ClientSection {
+fn the_registry_refuses_a_missing_id_a_bad_scope_and_no_grant() {
+    assert!(matches!(admit(&backend("")), Err(ClientError::NoClientId)));
+    let scoped = ClientMetadata {
         scopes: vec![String::from("system/Patient.rs extra")],
         ..backend("scoped")
     };
-    assert!(matches!(resolve(&[scoped]), Err(ClientError::Scope { .. })));
-    let idle = ClientSection {
+    assert!(matches!(admit(&scoped), Err(ClientError::Scope { .. })));
+    let idle = ClientMetadata {
         grant_types: Vec::new(),
         ..backend("idle")
     };
-    assert!(matches!(resolve(&[idle]), Err(ClientError::Rule { .. })));
+    assert!(matches!(admit(&idle), Err(ClientError::Rule { .. })));
 }
 
 #[test]
 fn a_refresh_token_continues_an_authorization_code_grant_only() {
     // NOTE: SMART App Launch 2.2.0, Backend Services: refresh tokens SHOULD NOT be issued.
-    let backend_refresh = ClientSection {
+    let backend_refresh = ClientMetadata {
         grant_types: vec![GrantType::ClientCredentials, GrantType::RefreshToken],
         ..backend("export")
     };
     assert!(matches!(
-        resolve(&[backend_refresh]),
+        admit(&backend_refresh),
         Err(ClientError::Rule { .. })
     ));
-    let app = ClientSection {
+    let app = ClientMetadata {
         client_id: String::from("app"),
         kind: ClientKind::Public,
         redirect_uris: vec![String::from("https://app.example.org/callback")],
         grant_types: vec![GrantType::RefreshToken, GrantType::AuthorizationCode],
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     };
-    let admitted = resolve(&[app]).expect("admitted");
+    let admitted = admit(&app).expect("admitted");
     assert_eq!(
         vec![GrantType::AuthorizationCode, GrantType::RefreshToken],
-        admitted[0].grant_types
+        admitted.grant_types
     );
 }
 
@@ -202,35 +197,23 @@ fn a_refresh_token_continues_an_authorization_code_grant_only() {
 // launch URL, so two clients may not register one (#659).
 #[test]
 fn a_launch_url_is_normalized_and_registered_once() {
-    let app = |client_id: &str, launch_uri: &str| ClientSection {
+    let app = |client_id: &str, launch_uri: &str| ClientMetadata {
         client_id: client_id.to_owned(),
         kind: ClientKind::Public,
         redirect_uris: vec![String::from("https://app.example.org/callback")],
         grant_types: vec![GrantType::AuthorizationCode],
         launch_uri: launch_uri.to_owned(),
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     };
-    let clients = resolve(&[app(
+    let client = admit(&app(
         "one",
         "HTTPS://App.Example.ORG:443/a/../%6Caunch?x=%7e",
-    )])
+    ))
     .expect("admitted");
     assert_eq!(
         Some("https://app.example.org/launch?x=~"),
-        clients
-            .first()
-            .and_then(|client| client.launch_uri.as_deref()),
+        client.launch_uri.as_deref(),
         "RFC 3986 §6.2.2"
-    );
-    assert!(
-        matches!(
-            resolve(&[
-                app("one", "https://app.example.org/launch"),
-                app("two", "https://APP.example.org/launch"),
-            ]),
-            Err(ClientError::RepeatedLaunchUri { .. })
-        ),
-        "the same launch URL twice"
     );
     for refused in [
         "http://app.example.org/launch",
@@ -239,7 +222,7 @@ fn a_launch_url_is_normalized_and_registered_once() {
     ] {
         assert!(
             matches!(
-                resolve(&[app("one", refused)]),
+                admit(&app("one", refused)),
                 Err(ClientError::LaunchUri { .. })
             ),
             "{refused}"
@@ -251,12 +234,12 @@ fn a_launch_url_is_normalized_and_registered_once() {
 #[test]
 fn the_app_s_urls_are_absolute_https_urls() {
     let app = |key: &str, value: &str| {
-        let mut section = ClientSection {
+        let mut section = ClientMetadata {
             client_id: String::from("app"),
             kind: ClientKind::Public,
             redirect_uris: vec![String::from("https://app.example.org/callback")],
             grant_types: vec![GrantType::AuthorizationCode],
-            ..ClientSection::default()
+            ..ClientMetadata::default()
         };
         match key {
             "client_uri" => section.client_uri = value.to_owned(),
@@ -267,8 +250,10 @@ fn the_app_s_urls_are_absolute_https_urls() {
         section
     };
     for key in ["client_uri", "logo_uri", "policy_uri", "tos_uri"] {
-        let admitted = resolve(&[app(key, "https://app.example.org/x")]).expect("admitted");
-        assert!(!admitted.is_empty(), "{key}");
+        assert!(
+            admit(&app(key, "https://app.example.org/x")).is_ok(),
+            "{key}"
+        );
         for refused in [
             "http://app.example.org/x",
             "https://app.example.org/x#y",
@@ -276,16 +261,15 @@ fn the_app_s_urls_are_absolute_https_urls() {
         ] {
             assert!(
                 matches!(
-                    resolve(&[app(key, refused)]),
+                    admit(&app(key, refused)),
                     Err(ClientError::AboutUri { key: named, .. }) if named == key
                 ),
                 "{key} = {refused}"
             );
         }
     }
-    let admitted =
-        resolve(&[app("logo_uri", "https://cdn.example.org/logo.png")]).expect("admitted");
-    let about = &admitted.first().expect("one client").about;
+    let admitted = admit(&app("logo_uri", "https://cdn.example.org/logo.png")).expect("admitted");
+    let about = &admitted.about;
     assert_eq!(
         Some("https://cdn.example.org/logo.png"),
         about.logo.as_ref().map(url::Url::as_str)
@@ -295,8 +279,8 @@ fn the_app_s_urls_are_absolute_https_urls() {
 
 /// Returns a client of `kind` that registers `redirect`, first party when
 /// `first_party`, its JWK Set at a URL when it is confidential.
-fn redirecting(kind: ClientKind, redirect: &str, first_party: bool) -> ClientSection {
-    ClientSection {
+fn redirecting(kind: ClientKind, redirect: &str, first_party: bool) -> ClientMetadata {
+    ClientMetadata {
         client_id: String::from("app"),
         kind,
         jwks_uri: if kind == ClientKind::ConfidentialAsymmetric {
@@ -307,13 +291,13 @@ fn redirecting(kind: ClientKind, redirect: &str, first_party: bool) -> ClientSec
         redirect_uris: vec![redirect.to_owned()],
         grant_types: vec![GrantType::AuthorizationCode],
         scopes: vec![String::from("openid")],
-        organisation_approval: first_party.then(|| ferrosmart::clients::ApprovalSection {
+        organisation_approval: first_party.then(|| ferrosmart::clients::ApprovalMetadata {
             scopes: vec![String::from("openid")],
             approved_by: String::from("Synthetic Administrator"),
             approved_at: String::from("2026-11-19T09:00:00Z"),
             first_party: true,
         }),
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     }
 }
 
@@ -329,8 +313,7 @@ fn a_public_client_is_assured_only_by_a_claimed_https_redirect() {
         ("https://127.0.0.1/callback", false),
         ("https://localhost/callback", false),
     ] {
-        let client =
-            &resolve(&[redirecting(ClientKind::Public, redirect, false)]).expect("admitted")[0];
+        let client = admit(&redirecting(ClientKind::Public, redirect, false)).expect("admitted");
         assert_eq!(assured, client.assured_by(redirect), "{redirect}");
     }
 }
@@ -338,39 +321,43 @@ fn a_public_client_is_assured_only_by_a_claimed_https_redirect() {
 #[test]
 fn a_confidential_client_is_assured_whatever_its_redirect() {
     let redirect = "com.example.app:/callback";
-    let client = &resolve(&[redirecting(
+    let client = admit(&redirecting(
         ClientKind::ConfidentialAsymmetric,
         redirect,
         false,
-    )])
-    .expect("admitted")[0];
+    ))
+    .expect("admitted");
     assert!(
         client.assured_by(redirect),
         "it authenticates at the token endpoint"
     );
 }
 
-// NOTE: RFC 8252 §8.6, config check warns of a first-party public app no sign-in
+// NOTE: RFC 8252 §8.6, client apply warns of a first-party public app no sign-in
 // can assure, since every one would show the consent page.
 #[test]
 fn a_first_party_public_app_without_a_claimed_https_redirect_is_warned_of() {
     let warned = |kind, redirect, first_party| {
-        let clients = resolve(&[redirecting(kind, redirect, first_party)]).expect("admitted");
-        ferrosmart::clients::unassured_first_party(&clients)
+        let client = admit(&redirecting(kind, redirect, first_party)).expect("admitted");
+        ferrosmart::clients::unassured_first_party(&client)
     };
-    let warnings = warned(ClientKind::Public, "com.example.app:/callback", true);
-    assert_eq!(1, warnings.len(), "{warnings:?}");
-    assert!(warnings[0].contains("\"app\""), "{warnings:?}");
+    let warning = warned(ClientKind::Public, "com.example.app:/callback", true);
     assert!(
-        warned(ClientKind::Public, "http://127.0.0.1:8400/callback", true).len() == 1,
+        warning
+            .as_deref()
+            .is_some_and(|text| text.contains("\"app\"")),
+        "{warning:?}"
+    );
+    assert!(
+        warned(ClientKind::Public, "http://127.0.0.1:8400/callback", true).is_some(),
         "a loopback redirect"
     );
     assert!(
-        warned(ClientKind::Public, "https://app.example.org/callback", true).is_empty(),
+        warned(ClientKind::Public, "https://app.example.org/callback", true).is_none(),
         "a claimed https redirect"
     );
     assert!(
-        warned(ClientKind::Public, "com.example.app:/callback", false).is_empty(),
+        warned(ClientKind::Public, "com.example.app:/callback", false).is_none(),
         "no first-party approval"
     );
     assert!(
@@ -379,7 +366,7 @@ fn a_first_party_public_app_without_a_claimed_https_redirect_is_warned_of() {
             "com.example.app:/callback",
             true
         )
-        .is_empty(),
+        .is_none(),
         "a confidential client"
     );
 }

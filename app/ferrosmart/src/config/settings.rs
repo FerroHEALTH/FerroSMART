@@ -20,7 +20,6 @@ use jsonwebtoken::Algorithm;
 use secrecy::SecretString;
 use url::Url;
 
-use crate::clients::Client;
 use crate::upstream::{
     AssertionKeys, Authentication, Effective, OidcSection, OidcUpstream, PrivateKeyJwtSection,
     Protocol, Upstream, UpstreamSection,
@@ -54,8 +53,6 @@ pub struct Settings {
     pub database_url: SecretString,
     /// The most connections one replica holds.
     pub max_connections: u32,
-    /// The clients the configuration registers.
-    pub clients: Vec<Client>,
     /// The base URLs of the resource servers, each as configured.
     pub resources: Vec<String>,
     /// The base URLs among them that serve openEHR.
@@ -191,7 +188,6 @@ impl Config {
             keys: Arc::clone(&keys),
             database_url,
             max_connections: section.database.max_connections,
-            clients: clients_of(&section.client, &section.upstream, &section.resource)?,
             resources: resources(&section.resource)?,
             openehr_resources: section
                 .resource
@@ -595,39 +591,6 @@ fn purposes(
         purposes.insert(section.base.clone(), Purposes { header, codes });
     }
     Ok(purposes)
-}
-
-/// Returns the clients `sections` register, each naming only providers
-/// `upstreams` configures and bases `resources` configures.
-fn clients_of(
-    sections: &[crate::clients::ClientSection],
-    upstreams: &[UpstreamSection],
-    resources: &[crate::config::ResourceSection],
-) -> Result<Vec<Client>, Error> {
-    let clients = crate::clients::resolve(sections)?;
-    for client in &clients {
-        if let Some(unknown) = client
-            .resources
-            .iter()
-            .find(|base| !resources.iter().any(|resource| &resource.base == *base))
-        {
-            return Err(Error::UnknownResource {
-                client_id: client.client_id.clone(),
-                base: unknown.clone(),
-            });
-        }
-        if let Some(unknown) = client
-            .upstreams
-            .iter()
-            .find(|name| !upstreams.iter().any(|upstream| &upstream.name == *name))
-        {
-            return Err(Error::UnknownUpstream {
-                client_id: client.client_id.clone(),
-                name: unknown.clone(),
-            });
-        }
-    }
-    Ok(clients)
 }
 
 /// Returns the providers `sections` name, each by a name of its own and an

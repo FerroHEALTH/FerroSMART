@@ -3,9 +3,10 @@
 
 //! The JSON documents of `/admin/clients`.
 //!
-//! The client an administrator sends carries what a `[[ferrosmart.client]]`
-//! table does, with the JWK Set and the secret hash by value; the client
-//! the API answers with never carries the secret hash.
+//! The client an administrator sends to the API or applies with
+//! `ferrosmart client apply` is one document, with the JWK Set and the
+//! secret hash by value; the client the API answers with never carries the
+//! secret hash.
 //!
 //! No specification governs the documents: our own design, with the RFC
 //! 7591 §2 member names wherever the registry has one.
@@ -15,13 +16,16 @@ use serde_json::Value;
 use url::Url;
 
 use crate::clients::{
-    ApprovalSection, Client, ClientKeys, ClientKind, ClientSection, GrantType, Material, SecretHash,
+    ApprovalMetadata, Client, ClientKeys, ClientKind, ClientMetadata, GrantType, Material,
+    SecretHash,
 };
 use crate::store::admin::Registered;
 
-/// A client as an administrator sends it to `POST /admin/clients` or
-/// `PUT /admin/clients/{client_id}`: a JSON object alone, never the
+/// A client as an administrator sends it: a JSON object alone, never the
 /// positional array serde would also read a struct from.
+///
+/// `POST /admin/clients` and `PUT /admin/clients/{client_id}` take it, and
+/// `ferrosmart client apply` reads it from a file.
 #[derive(Debug, Clone, Default)]
 pub struct ClientDocument(Fields);
 
@@ -126,7 +130,7 @@ impl ClientDocument {
         client_id: &str,
         stored: Option<&Client>,
         now: i64,
-    ) -> (ClientSection, Material) {
+    ) -> (ClientMetadata, Material) {
         self.0.registration(client_id, stored, now)
     }
 }
@@ -138,7 +142,7 @@ impl Fields {
         client_id: &str,
         stored: Option<&Client>,
         now: i64,
-    ) -> (ClientSection, Material) {
+    ) -> (ClientMetadata, Material) {
         let kept_hash = stored
             .filter(|client| {
                 self.kind == ClientKind::ConfidentialSymmetric
@@ -157,20 +161,18 @@ impl Fields {
             let approved_at = approval
                 .approved_at
                 .unwrap_or_else(|| instant(same.unwrap_or(now)));
-            ApprovalSection {
+            ApprovalMetadata {
                 scopes: approval.scopes,
                 approved_by: approval.approved_by,
                 approved_at,
                 first_party: approval.first_party,
             }
         });
-        let section = ClientSection {
+        let section = ClientMetadata {
             client_id: client_id.to_owned(),
             name: self.name,
             kind: self.kind,
             jwks_uri: self.jwks_uri,
-            jwks_file: None,
-            secret_hash_file: None,
             redirect_uris: self.redirect_uris,
             post_logout_redirect_uris: self.post_logout_redirect_uris,
             upstreams: self.upstreams,
@@ -241,9 +243,8 @@ pub struct ClientView<'a> {
     /// Its organisation approval.
     #[serde(skip_serializing_if = "Option::is_none")]
     organisation_approval: Option<ApprovalView<'a>>,
-    /// `config` while its table writes it at start, `admin` once the API
-    /// created or changed it.
-    source: &'static str,
+    /// `admin`, or `self` for an app that registered itself (RFC 7591 §5).
+    registered_by: &'static str,
     /// When it was disabled, an RFC 3339 instant; absent while enabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     disabled_at: Option<String>,
@@ -305,7 +306,7 @@ impl<'a> From<&'a Registered> for ClientView<'a> {
                 approved_at: instant(approval.approved_at),
                 first_party: approval.first_party,
             }),
-            source: registered.source.as_str(),
+            registered_by: registered.by.as_str(),
             disabled_at: registered.disabled_at.map(instant),
         }
     }

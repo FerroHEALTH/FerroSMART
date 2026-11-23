@@ -1,0 +1,20 @@
+{
+  "client_id": "example-app",
+  "name": "Example SMART app",
+  "kind": "public",
+  "redirect_uris": [
+    "http://localhost:9000/callback"
+  ],
+  "scopes": [
+    "openid",
+    "fhirUser",
+    "user/Patient.rs",
+    "user/Observation.rs"
+  ],
+  "resources": [
+    "http://localhost:8090/fhir"
+  ],
+  "grant_types": [
+    "authorization_code"
+  ]
+}
