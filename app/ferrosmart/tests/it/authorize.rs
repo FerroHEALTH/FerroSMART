@@ -2528,6 +2528,7 @@ mod fhir_user_lookup;
 mod logout;
 mod paired_picker;
 mod picker_purpose;
+mod picker_shortcuts;
 mod preset;
 mod providers;
 mod public_redirect;

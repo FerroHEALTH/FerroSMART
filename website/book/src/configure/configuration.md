@@ -98,6 +98,7 @@ of the tokens issued for it. At least one is required, and no base twice.
 | `fhir_user_lookup` | FHIR only, a list of tables: how to find a person's `fhirUser` when the identity provider sends none (below) |
 | `purpose` | openEHR only, a list of tables: the purposes of use the server accepts, one of which a professional chooses on the patient picker (below). Empty, a lookup declares none |
 | `purpose_header` | openEHR only, with `purpose`: the header a picker lookup declares the purpose in. Default `x-purpose-of-use`, FerroEHR's default `[audit] purpose_header` |
+| `assigned` | FHIR only: the search the patient picker lists a professional's assigned patients by, `care_team` (their active care teams) or `encounter` (their encounters in progress), each by the FHIR R4 `participant` search parameter and the person's `fhirUser`. Unset, the picker lists none |
 
 When the identity provider sends no `fhirUser` claim, FerroSMART can find
 the person at a FHIR server by an identifier. Each
@@ -334,6 +335,12 @@ base = "https://ehr.example.org/fhir"
 fhir_version = ["4.0.1"]
 contact = ["https://developer.example.org"]
 ```
+
+## `[ferrosmart.picker]`
+
+| Key | Default | What it is |
+|---|---|---|
+| `recent_retention` | `30d` | How long a patient a person chose stays on their recent list, which the picker offers again; `0s` keeps no list. FerroSMART keeps a person's ten latest choices at each server, and the person forgets them on the management page |
 
 ## `[ferrosmart.audit]`
 

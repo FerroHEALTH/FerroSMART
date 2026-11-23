@@ -3168,6 +3168,32 @@ specification governs.
    before the person chose, and does not read the accepted purposes from
    the server, since no published standard names such a route. No
    specification governs a picker's purpose: our own design.
+
+   Before a search the picker offers two lists (#685), each read again as
+   the person before the page shows it. The recent list holds the patients
+   the person chose at the base asked: at a FHIR base (or the FHIR base
+   paired with an openEHR one) one search `GET [base]/Patient?_id=…` as
+   the person, the `_id` parameter with comma-separated values, which FHIR
+   R4 search reads as any of them, so a patient they may no longer see
+   is left out; at an unpaired openEHR base the EHR of each subject id is
+   looked up again, with the kept or the only listed purpose of use, and
+   not before one is chosen where several are listed. The `recent_patient`
+   table keeps a person's ten latest choices per base for
+   `[ferrosmart.picker] recent_retention` (30 days by default, `0s` keeps
+   none), the sweep deletes the older ones, and the person erases the list
+   on the management page beside their apps' access, with a
+   `recent-patients-forgotten` record. The assigned list, where a FHIR
+   base's table names `assigned`, is the professional's patients by the
+   FHIR R4 `participant` search parameter of `CareTeam`
+   (`CareTeam.participant.member`, with `status=active`) or `Encounter`
+   (`Encounter.participant.individual`, with `status=in-progress`), the
+   patients included by FHIR R4 search's `_include` of the `patient`
+   reference, for a `fhirUser` that names a `Practitioner`,
+   `PractitionerRole` or `RelatedPerson` at that base; its token carries
+   `user/CareTeam.rs user/Patient.rs` or `user/Encounter.rs
+   user/Patient.rs`. A choice from either list is read again as any
+   other. SMART App Launch 2.2 leaves the widget to the server, so both
+   lists are our own design.
 5. **Scope narrowing.** The granted scope is the intersection of the
    request, the client's registered ceiling, the user's roles mapped to
    scopes by configuration, and the consent the user gave; SMART allows the
