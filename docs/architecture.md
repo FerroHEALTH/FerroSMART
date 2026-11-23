@@ -2392,8 +2392,8 @@ discovery and token shapes for the two SaaS providers.
   password.
 - **Standards only on every interface.** SMART App Launch 2.2, OAuth 2.0
   (RFC 6749 with the OAuth 2.1 consolidation and RFC 9700), OpenID Connect
-  Core and Discovery, RFC 9068, 7662, 7009, 7523, 8414, 7591 and 7636; PAR
-  (RFC 9126), DPoP (RFC 9449), token exchange (RFC 8693) and FAPI 2.0 follow.
+  Core and Discovery, RFC 9068, 7662, 7009, 7523, 8414, 7591, 7636, 9126
+  (PAR) and 8693; DPoP (RFC 9449) and FAPI 2.0 follow.
   No interface requires a Ferro-specific claim or parameter.
 - **Vendor neutral on both sides.** Any OpenID Connect provider upstream;
   any FHIR or openEHR server downstream, which reads FerroSMART's tokens as
@@ -3263,7 +3263,8 @@ differently.
 | `GET /.well-known/openid-configuration` | OpenID Connect discovery | `discovery §4` |
 | `GET /.well-known/smart-configuration` | FerroSMART's SMART document, which each product's own document describes through the described-issuer rule (3.8) | `smart conformance` |
 | `GET /jwks` | the public signing keys, bare JWKs | `rfc7517 §5`; `smart scopes-and-launch-context` |
-| `GET`, `POST /authorize` | the authorization endpoint | `smart app-launch`; `rfc6749 §3.1` |
+| `GET`, `POST /authorize` | the authorization endpoint; a `request_uri` the PAR endpoint issued stands for the request, taken once | `smart app-launch`; `rfc6749 §3.1`; `rfc9126 §4` |
+| `POST /par` | the pushed authorization request endpoint (13.30) | `rfc9126 §2` |
 | `GET /callback` | the upstream provider's redirect back, completed with the settings of the provider the request went to | `oidc core §3.1.2.5` |
 | `GET /saml/metadata` | FerroSMART's SAML 2.0 service provider metadata (`application/samlmetadata+xml`), when `[ferrosmart.saml]` is set | `saml-metadata §2.4.4`, `§4.1.1` |
 | `GET`, `POST /saml/acs` | the assertion consumer service: a `SAMLResponse` posted, or a `SAMLart` posted or redirected and resolved over mutual TLS, with the `RelayState` that names the pending request (13.26) | `saml-bindings §3.5`, `§3.6`; `saml-profiles §4.1.4` |
@@ -3282,11 +3283,9 @@ differently.
 | `GET`, `PUT`, `DELETE /register/{client_id}` | the client's configuration endpoint, with its registration access token or an administrator's token (13.27) | `rfc7592 §2` |
 | `GET /admin/clients`; `POST /admin/clients/{client_id}/disable`, `.../enable` | the registry over the store, behind a `ferrohealth-smart` guard with the `system/admin` scope, every change audited (13.27) | our own design |
 | `GET /admin/keys` | the signing key ring's public keys with their states, behind the same guard | our own design |
+| `GET /admin/openapi.json` | the OpenAPI 3.1 document of the registration, admin and audit operations, answered without a token for the deployment's issuer; each admin router is built from the operation table the document is tested against, and each answer is tested against its schema | the OpenAPI Specification 3.1.0; our own design (#824) |
 | `GET /admin/upstreams` | each upstream provider with the clients that name it, its OpenID Connect discovery document and key set read when the request is answered, or its SAML metadata as the replica last read it, each with its outcome and its signing certificates' expiry, behind the same guard | our own design (#830) |
 | `/healthz`, `/readyz` | `ferrohealth-health` | the family |
-
-`POST /par` (RFC 9126) joins later; the metadata names it only once it
-exists.
 
 Each FHIR or openEHR server keeps serving its own
 `/.well-known/smart-configuration` at its base, as SMART requires of "FHIR
@@ -3300,14 +3299,15 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 
 | Table | Key | Holds |
 |---|---|---|
-| `client` | `client_id` | the RFC 7591 §2 metadata (`client_name`, `token_endpoint_auth_method`, `scope`, `grant_types`, `jwks` or `jwks_uri`, `redirect_uris`, `post_logout_redirect_uris`, `default_acr_values`, the app's URLs), the secret's Argon2id hash, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, `first_party`, `registered_by` (`admin` (13.27) or `self` (13.6 item 14)), disabled time |
+| `client` | `client_id` | the RFC 7591 §2 metadata (`client_name`, `token_endpoint_auth_method`, `scope`, `grant_types`, `jwks` or `jwks_uri`, `redirect_uris`, `post_logout_redirect_uris`, `default_acr_values`, `require_pushed_authorization_requests`, the app's URLs), the secret's Argon2id hash, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, `first_party`, `registered_by` (`admin` (13.27) or `self` (13.6 item 14)), disabled time |
 | `signing_key` | `kid` | state (`next`, `active`, `retiring`, `retired`) and the time it reached each one; the key itself stays in the files of `[ferrosmart.keys]` (13.11) |
 | `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
 | `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time, the basis of its consent (13.6 item 6) |
-| `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), the basis of its consent, creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
+| `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), the basis of its consent, the `DPoP` key a public client's refresh token is bound to (13.31), creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
 | `refresh_token` | token hash | grant, predecessor, idle expiry, use time (set when rotated, kept for reuse detection), revocation |
 | `access_token` | `jti` | grant or client, `aud`, scope, `exp`, revocation, so introspection and revocation answer for a JWT |
 | `launch` | launch hash | EHR client, the app's `client_id`, `aud`, context, expiry, use time |
+| `pushed_request` | `request_uri` hash | the pushed authorization request without its client authentication, the client that pushed it, expiry; deleted when taken (13.30) |
 | `consent` | subject, client | the scope set the user chose to remember, times, revocation |
 | `upstream_session` | id | upstream issuer, upstream `sid` and `sub`, last seen, end |
 | `seen_jti` | issuer, `jti` | client assertions and launch JWTs, until their `exp` |
@@ -4931,3 +4931,61 @@ choice to the server, the rules below are our own design.
   `CallerKind::Patient` and `is_the_person` (3.13, 3.14).
 
 The tests are `app/ferrosmart/tests/it/authorize/token_exchange.rs`.
+
+### 13.30 Pushed authorization requests
+
+FerroSMART accepts pushed authorization requests (RFC 9126), which FAPI
+2.0 Security Profile §5.3.2.2 requires of an authorization server.
+`POST {issuer}/par` authenticates the client as the token endpoint does
+(`rfc9126 §2.1`; a client assertion's `aud` may also be the PAR endpoint's
+URL, §2), refuses a `request_uri` parameter, and checks the request as the
+authorization endpoint would: the client's grant, its registered redirect
+URI, `response_type`, `state`, the S256 challenge, the `aud` and the
+client's reach (13.6 item 13), `scope` and the OpenID Connect parameters.
+A refusal is the token endpoint's error body (`rfc9126 §2.3`). An accepted
+request is kept without its client authentication under the SHA-256 of a
+`request_uri` of the form `urn:ietf:params:oauth:request_uri:<random>`,
+bound to the client, and answered `201` with `expires_in` of 60 seconds,
+never cached (`rfc9126 §2.2`).
+
+At the authorization endpoint a `request_uri` with its `client_id` stands
+for the request: it is taken in one statement, so it is used once and
+never by another client, and a taken, lapsed, unknown or another client's
+`request_uri` is the page that says the request lapsed (`rfc9126 §4`). The
+pushed request is then checked again in full. `[ferrosmart]
+require_pushed_authorization_requests = true` refuses every request that
+names no `request_uri`, and a client's own
+`require_pushed_authorization_requests` (`rfc9126 §6`) refuses its own, as
+`invalid_request` (`rfc9126 §4`). The RFC 8414 metadata and the OpenID
+Connect discovery document name `pushed_authorization_request_endpoint` and
+`require_pushed_authorization_requests` once people log in (`rfc9126 §5`).
+The lifetime is our own design within §2.2's range.
+
+### 13.31 Sender-constrained tokens
+
+FerroSMART binds a token to its sender when the token request proves a key
+or presents a certificate, as FAPI 2.0 Security Profile §5.3.2.1 requires
+of an authorization server. A `DPoP` header at `POST {issuer}/token` is
+checked as RFC 9449 §4.3 says, against `POST` and the token endpoint's URL
+and with no `ath`, since the request presents no access token (`rfc9449
+§5`); its `jti` is recorded once in `seen_jti` under its own issuer column,
+so every replica refuses a replay (`rfc9449 §11.1`). A proof that does not
+hold is `invalid_dpop_proof`. The token then carries `cnf.jkt`, the RFC
+7638 thumbprint of the proof's key (`rfc9449 §6.1`), and the response's
+`token_type` is `DPoP` (`rfc9449 §5`). A public client's refresh token is
+bound to that key in its grant, and a refresh without a proof of it is
+`invalid_grant`, checked before the token is used up; a confidential
+client's refresh token is bound to its authentication instead (`rfc9449
+§5`). A client registered with `dpop_bound_access_tokens` that sends no
+proof is `invalid_request` (`rfc9449 §5.2`).
+
+Under `[server.tls]` with a `client_auth` the listener reads the client's
+certificate. A client registered with
+`tls_client_certificate_bound_access_tokens` gets a token whose `cnf`
+carries `x5t#S256`, the SHA-256 of the leaf certificate's DER encoding
+(`rfc8705 §3.1`); its request over a connection that presented none is
+`invalid_request`, which RFC 8705 §3.4 leaves to the server. Introspection
+answers the token's `cnf` (`rfc9449 §6.2`, `rfc8705 §3.2`). The metadata
+names `dpop_signing_alg_values_supported`, the proof algorithms the check
+admits (`rfc9449 §5.1`), and `tls_client_certificate_bound_access_tokens`,
+`true` when the listener asks for a certificate (`rfc8705 §3.3`).

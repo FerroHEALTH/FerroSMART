@@ -30,8 +30,9 @@ use crate::server::AppState;
 use crate::store::Code;
 use crate::store::Transaction;
 use crate::store::grant::{Access, GrantRecord, IdleUntil, NewGrant, Rotation, Successor};
-use crate::token::grants::identify;
+use crate::token::grants::admitted;
 use crate::token::mint::{Authentication, Grant, mint};
+use crate::token::sender::Presented;
 use crate::token::{Issued, Refusal, server_error};
 
 /// The `invalid_grant` refusal: "The provided authorization grant ... or
@@ -50,20 +51,16 @@ pub(crate) async fn refresh(
     headers: &http::HeaderMap,
     form: &Params,
     from: std::net::IpAddr,
+    presented: &Presented,
 ) -> Result<Issued, Refusal> {
-    let client = identify(state, headers, form).await?;
-    if !client.grant_types.contains(&GrantType::RefreshToken) {
-        return Err(Refusal {
-            error: "unauthorized_client",
-            description: "the client may not use this grant",
-        });
-    }
-    let presented = form
+    let (client, confirmation) =
+        admitted(state, headers, form, presented, GrantType::RefreshToken).await?;
+    let token = form
         .get("refresh_token")
         .ok_or(Refusal::request("the request carries no refresh_token"))?;
-    let hash = sha256(presented);
-    let (scope, target) = requested(state, &client, form, &hash).await?;
-    let (grant, successor) = redeem(state, &client, presented, &hash, from).await?;
+    let hash = sha256(token);
+    let (scope, target) = requested(state, &client, form, &hash, presented).await?;
+    let (grant, successor) = redeem(state, &client, token, &hash, from).await?;
     let context = grant.context.as_object().cloned().unwrap_or_default();
     let fhir_user = grant
         .fhir_user
@@ -82,6 +79,7 @@ pub(crate) async fn refresh(
             longest: None,
             identity: None,
             under: Some(&grant.id),
+            confirmation: &confirmation,
             context: &context,
             roles: &grant.roles,
             login: Some(Authentication::of(&grant)),
@@ -186,6 +184,7 @@ async fn requested(
     client: &Client,
     form: &Params,
     hash: &str,
+    presented: &Presented,
 ) -> Result<(String, Option<String>), Refusal> {
     // NOTE: SMART App Launch 2.2.0, Refresh access token, Request: a scope names no
     // permission the grant lacks; it is checked before the token is used up.
@@ -194,8 +193,17 @@ async fn requested(
         .refresh_token(hash)
         .await
         .map_err(|error| server_error("the refresh token cannot be read", &error))?
-        .filter(|record| record.grant.client_id == client.client_id)
-        .map(|record| (record.grant.scope, record.grant.audience));
+        .filter(|record| record.grant.client_id == client.client_id);
+    // NOTE: RFC 9449 §5, a public client's refresh token is used with a proof of
+    // the key it was bound to; this is checked before the token is used up.
+    if let Some(bound) = granted
+        .as_ref()
+        .and_then(|record| record.grant.dpop_jkt.as_deref())
+        && presented.jkt.as_deref() != Some(bound)
+    {
+        return Err(invalid("the refresh token is bound to another DPoP key"));
+    }
+    let granted = granted.map(|record| (record.grant.scope, record.grant.audience));
     let mut scope = match (&granted, form.get("scope")) {
         (Some((granted, _)), Some(requested)) => narrowed(granted, requested)?,
         (Some((granted, _)), None) => granted.clone(),
@@ -249,6 +257,7 @@ pub(crate) async fn open(
     state: &AppState,
     client: &Client,
     code: &Code,
+    presented: &Presented,
 ) -> Result<Opened, Refusal> {
     let settings = state.settings();
     let mut context = Map::new();
@@ -311,6 +320,7 @@ pub(crate) async fn open(
             basis: code.basis.as_deref(),
             roles: &code.roles,
             acr: code.acr,
+            dpop_jkt: presented.refresh_key(client).as_deref(),
         })
         .await
         .map_err(|error| server_error("the grant could not be recorded", &error))?;

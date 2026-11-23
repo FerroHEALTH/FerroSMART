@@ -80,6 +80,21 @@ fn document<'a>(entry: &'a Value, kind: &str) -> &'a Value {
         .expect("the document")
 }
 
+/// Returns the answer once the SAML metadata's read is reported failed,
+/// asking every 200 ms for ten seconds; `Value::Null` when it never is.
+async fn until_metadata_fails(server: &Server, admin: &str) -> Value {
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let (_, _, body) = server
+            .call(Method::GET, "/admin/upstreams", None, Some(admin))
+            .await;
+        if document(entry(&body, "national"), "saml_metadata").get("ok") == Some(&json!(false)) {
+            return body;
+        }
+    }
+    Value::Null
+}
+
 #[tokio::test]
 async fn each_provider_is_reported_with_its_documents_and_a_failed_read_as_failed() {
     let provider = Provider::start().await;
@@ -100,9 +115,18 @@ async fn each_provider_is_reported_with_its_documents_and_a_failed_read_as_faile
         .await;
     assert_eq!(StatusCode::UNAUTHORIZED, status);
 
-    let (status, _, body) = server
+    let described = crate::openapi::served(&server).await;
+    let answer = server
         .call(Method::GET, "/admin/upstreams", None, Some(&admin))
         .await;
+    crate::openapi::holds(
+        &described,
+        "get",
+        "/admin/upstreams",
+        "application/json",
+        &answer,
+    );
+    let (status, _, body) = answer;
     assert_eq!(StatusCode::OK, status, "{body}");
     let names: Vec<&Value> = body["upstreams"]
         .as_array()
@@ -147,17 +171,7 @@ async fn each_provider_is_reported_with_its_documents_and_a_failed_read_as_faile
         .mount(&provider.server)
         .await;
     std::fs::write(&metadata_path, "<md:EntityDescriptor/>").expect("written");
-    let mut failed = Value::Null;
-    for _ in 0..50 {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        let (_, _, body) = server
-            .call(Method::GET, "/admin/upstreams", None, Some(&admin))
-            .await;
-        if document(entry(&body, "national"), "saml_metadata")["ok"] == json!(false) {
-            failed = body;
-            break;
-        }
-    }
+    let failed = until_metadata_fails(&server, &admin).await;
     assert!(
         failed.is_object(),
         "the metadata was read again within ten seconds"

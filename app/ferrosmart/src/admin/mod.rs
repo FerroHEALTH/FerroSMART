@@ -13,6 +13,7 @@
 
 pub mod document;
 pub mod guard;
+pub mod openapi;
 pub mod register;
 pub mod upstreams;
 
@@ -24,7 +25,6 @@ use axum::extract::DefaultBodyLimit;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequestParts, Path, State};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
 use ferrohealth_server::run::chain;
 use ferrohealth_smart::resource::Access;
 use http::{HeaderValue, StatusCode, header};
@@ -37,6 +37,7 @@ use crate::store::admin::Registered;
 use crate::store::{StoreError, Transaction};
 
 use document::{ClientDocument, ClientView};
+use openapi::Operation;
 
 /// The registry.
 pub const CLIENTS_ROUTE: &str = "/admin/clients";
@@ -49,14 +50,20 @@ pub const KEYS_ROUTE: &str = "/admin/keys";
 
 /// Returns the admin routes, each behind the guard.
 pub fn router(state: &Arc<AppState>) -> Router<Arc<AppState>> {
-    Router::new()
-        .route(CLIENTS_ROUTE, get(list))
-        .route(DISABLE_ROUTE, post(disable))
-        .route(ENABLE_ROUTE, post(enable))
-        .route(KEYS_ROUTE, get(keys))
-        .route(upstreams::UPSTREAMS_ROUTE, get(upstreams::upstreams))
+    openapi::routes(table())
         .layer(DefaultBodyLimit::max(DOCUMENT_LIMIT))
         .route_layer(guard::layer(Arc::clone(state)))
+}
+
+/// Returns the operations behind the guard.
+fn table() -> Vec<Operation> {
+    vec![
+        Operation::get(CLIENTS_ROUTE, list),
+        Operation::post(DISABLE_ROUTE, disable),
+        Operation::post(ENABLE_ROUTE, enable),
+        Operation::get(KEYS_ROUTE, keys),
+        Operation::get(upstreams::UPSTREAMS_ROUTE, upstreams::upstreams),
+    ]
 }
 
 /// Why an admin request is refused, each answered with its status and an

@@ -122,6 +122,10 @@ impl GrantType {
 }
 
 /// What a registration of one client states, before it is checked.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an RFC 7591 client metadata boolean of its own"
+)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClientMetadata {
     /// The `client_id` the client is assigned ("Upon registration, the
@@ -172,6 +176,15 @@ pub struct ClientMetadata {
     /// Whether the app is the controller's own or acts for it, which only
     /// an administrator sets (`docs/architecture.md` §13.6 item 6).
     pub first_party: bool,
+    /// Whether the client may start an authorization request only by
+    /// pushing it (RFC 9126 §6).
+    pub require_pushed_authorization_requests: bool,
+    /// Whether the client sends a `DPoP` proof with every token request
+    /// (RFC 9449 §5.2).
+    pub dpop_bound_access_tokens: bool,
+    /// Whether the client's tokens are bound to its mutual-TLS certificate
+    /// (RFC 8705 §3.4).
+    pub tls_client_certificate_bound_access_tokens: bool,
 }
 
 /// A registered client, checked.
@@ -212,6 +225,15 @@ pub struct Client {
     pub registration: Registration,
     /// What the consent page shows about the app.
     pub about: About,
+    /// Whether it may start an authorization request only by pushing it
+    /// (RFC 9126 §6).
+    pub require_pushed_authorization_requests: bool,
+    /// Whether it sends a `DPoP` proof with every token request (RFC 9449
+    /// §5.2).
+    pub dpop_bound_access_tokens: bool,
+    /// Whether its tokens are bound to its mutual-TLS certificate (RFC 8705
+    /// §3.4).
+    pub tls_client_certificate_bound_access_tokens: bool,
 }
 
 /// Who registered a client.
@@ -619,6 +641,10 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
             first_party: section.first_party,
         },
         about,
+        require_pushed_authorization_requests: section.require_pushed_authorization_requests,
+        dpop_bound_access_tokens: section.dpop_bound_access_tokens,
+        tls_client_certificate_bound_access_tokens: section
+            .tls_client_certificate_bound_access_tokens,
     })
 }
 

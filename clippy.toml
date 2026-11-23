@@ -22,4 +22,4 @@ disallowed-methods = [
 
 # Product, specification and organisation names are words, not code, in
 # documentation.
-doc-valid-idents = ["OpenID", "FerroSMART", "FerroUI", "FerroBRIDGE", "FerroFED", "FerroPIX", "FerroEHR", "FerroTERM", "FerroHEALTH", "openEHR", "JWKS", "OAuth", "SMART", ".."]
+doc-valid-idents = ["OpenID", "OpenAPI", "FerroSMART", "FerroUI", "FerroBRIDGE", "FerroFED", "FerroPIX", "FerroEHR", "FerroTERM", "FerroHEALTH", "openEHR", "JWKS", "OAuth", "SMART", ".."]
