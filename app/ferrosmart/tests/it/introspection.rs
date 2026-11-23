@@ -47,7 +47,7 @@ pub(crate) type Answer = (StatusCode, http::HeaderMap, Value);
 /// a public one; and `admin`, the client of the admin API.
 pub(crate) struct Server {
     /// The application.
-    app: Router,
+    pub(crate) app: Router,
     /// The key both confidential clients sign their assertions with.
     client_key: AssertionKey,
     /// The server's own signing key, for tokens a case issues under a grant.
@@ -325,6 +325,7 @@ impl Server {
                 basis: None,
                 roles: &[],
                 acr: Some(AssuranceLevel::Substantial),
+                dpop_jkt: None,
             })
             .await
             .expect("recorded");
@@ -610,6 +611,7 @@ async fn a_person_s_token_answers_their_mapped_roles() {
             roles: &roles,
             basis: None,
             acr: None,
+            dpop_jkt: None,
         })
         .await
         .expect("recorded");

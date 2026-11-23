@@ -42,6 +42,7 @@ async fn granted(
             basis: Some("page"),
             roles: &[],
             acr: None,
+            dpop_jkt: None,
         })
         .await
         .expect("recorded");
@@ -59,6 +60,29 @@ async fn refreshed(server: &Server, token: &str) -> (StatusCode, Value) {
     ];
     let (status, _, body) = server.post("/token", &form, None).await;
     (status, body)
+}
+
+/// Sends `method` to `path` with the admin `token` and holds the answer to
+/// the schema the OpenAPI document gives `template` for its status.
+async fn checked(
+    server: &Server,
+    method: Method,
+    template: &str,
+    path: &str,
+    token: &str,
+) -> (StatusCode, http::HeaderMap, Value) {
+    let described = crate::openapi::served(server).await;
+    let answer = server.call(method.clone(), path, None, Some(token)).await;
+    if answer.0 != StatusCode::NO_CONTENT {
+        crate::openapi::holds(
+            &described,
+            &method.as_str().to_ascii_lowercase(),
+            template,
+            "application/json",
+            &answer,
+        );
+    }
+    answer
 }
 
 /// Returns the ids of the grants `body` lists.
@@ -82,14 +106,14 @@ async fn a_person_s_subject_is_found_by_provider_and_upstream_sub() {
     ))
     .await;
     let admin = server.token("admin", "system/admin", ISSUER).await;
-    let (status, _, body) = server
-        .call(
-            Method::GET,
-            "/admin/subjects?upstream=idp&sub=person-7",
-            None,
-            Some(&admin),
-        )
-        .await;
+    let (status, _, body) = checked(
+        &server,
+        Method::GET,
+        "/admin/subjects",
+        "/admin/subjects?upstream=idp&sub=person-7",
+        &admin,
+    )
+    .await;
     assert_eq!(StatusCode::OK, status, "{body}");
     assert_eq!(
         json!(ferrosmart::upstream::pairwise(
@@ -105,14 +129,14 @@ async fn a_person_s_subject_is_found_by_provider_and_upstream_sub() {
         ("upstream=idp&sub=a&sub=b", StatusCode::BAD_REQUEST),
         ("upstream=idp&sub=a&other=b", StatusCode::BAD_REQUEST),
     ] {
-        let (answered, _, body) = server
-            .call(
-                Method::GET,
-                &format!("/admin/subjects?{query}"),
-                None,
-                Some(&admin),
-            )
-            .await;
+        let (answered, _, body) = checked(
+            &server,
+            Method::GET,
+            "/admin/subjects",
+            &format!("/admin/subjects?{query}"),
+            &admin,
+        )
+        .await;
         assert_eq!(status, answered, "{query}: {body}");
     }
     let (status, _, _) = server
@@ -135,14 +159,14 @@ async fn a_revoked_grant_s_refresh_token_is_refused_and_the_record_names_the_adm
     let (ended, ended_refresh) = granted(&server, ALICE, Access::Offline, None).await;
     let (bob_s, _) = granted(&server, "bob", Access::Offline, None).await;
 
-    let (status, _, body) = server
-        .call(
-            Method::GET,
-            "/admin/subjects/alice/grants",
-            None,
-            Some(&admin),
-        )
-        .await;
+    let (status, _, body) = checked(
+        &server,
+        Method::GET,
+        "/admin/subjects/{sub}/grants",
+        "/admin/subjects/alice/grants",
+        &admin,
+    )
+    .await;
     assert_eq!(StatusCode::OK, status, "{body}");
     let mut listed = grant_ids(&body);
     listed.sort_unstable();
@@ -159,27 +183,27 @@ async fn a_revoked_grant_s_refresh_token_is_refused_and_the_record_names_the_adm
         "{grant}"
     );
 
-    let (status, _, _) = server
-        .call(
-            Method::DELETE,
-            &format!("/admin/subjects/alice/grants/{bob_s}"),
-            None,
-            Some(&admin),
-        )
-        .await;
+    let (status, _, _) = checked(
+        &server,
+        Method::DELETE,
+        "/admin/subjects/{sub}/grants/{grant_id}",
+        &format!("/admin/subjects/alice/grants/{bob_s}"),
+        &admin,
+    )
+    .await;
     assert_eq!(
         StatusCode::NOT_FOUND,
         status,
         "another person's grant is not alice's"
     );
-    let (status, _, _) = server
-        .call(
-            Method::DELETE,
-            &format!("/admin/subjects/alice/grants/{ended}"),
-            None,
-            Some(&admin),
-        )
-        .await;
+    let (status, _, _) = checked(
+        &server,
+        Method::DELETE,
+        "/admin/subjects/{sub}/grants/{grant_id}",
+        &format!("/admin/subjects/alice/grants/{ended}"),
+        &admin,
+    )
+    .await;
     assert_eq!(StatusCode::NO_CONTENT, status);
     let (status, body) = refreshed(&server, &ended_refresh).await;
     assert_eq!(StatusCode::BAD_REQUEST, status, "{body}");
@@ -190,14 +214,14 @@ async fn a_revoked_grant_s_refresh_token_is_refused_and_the_record_names_the_adm
         status,
         "the other grant still refreshes: {body}"
     );
-    let (status, _, _) = server
-        .call(
-            Method::DELETE,
-            &format!("/admin/subjects/alice/grants/{ended}"),
-            None,
-            Some(&admin),
-        )
-        .await;
+    let (status, _, _) = checked(
+        &server,
+        Method::DELETE,
+        "/admin/subjects/{sub}/grants/{grant_id}",
+        &format!("/admin/subjects/alice/grants/{ended}"),
+        &admin,
+    )
+    .await;
     assert_eq!(
         StatusCode::NOT_FOUND,
         status,
@@ -237,39 +261,39 @@ async fn withdrawing_a_consent_forgets_it_and_revokes_the_client_s_grants() {
     .expect("remembered");
     pool.close().await;
 
-    let (_, _, body) = server
-        .call(
-            Method::GET,
-            "/admin/subjects/alice/grants",
-            None,
-            Some(&admin),
-        )
-        .await;
+    let (_, _, body) = checked(
+        &server,
+        Method::GET,
+        "/admin/subjects/{sub}/grants",
+        "/admin/subjects/alice/grants",
+        &admin,
+    )
+    .await;
     assert_eq!(
         json!([{ "client_id": "app", "aud": RESOURCE, "scope": "patient/Observation.rs",
                  "granted_at": body["consents"][0]["granted_at"] }]),
         body["consents"]
     );
-    let (status, _, body) = server
-        .call(
-            Method::DELETE,
-            "/admin/subjects/alice/consents/app",
-            None,
-            Some(&admin),
-        )
-        .await;
+    let (status, _, body) = checked(
+        &server,
+        Method::DELETE,
+        "/admin/subjects/{sub}/consents/{client_id}",
+        "/admin/subjects/alice/consents/app",
+        &admin,
+    )
+    .await;
     assert_eq!(StatusCode::OK, status, "{body}");
     assert_eq!(json!({ "remembered": true, "grants": 1 }), body);
     let (status, _) = refreshed(&server, &refresh).await;
     assert_eq!(StatusCode::BAD_REQUEST, status);
-    let (_, _, body) = server
-        .call(
-            Method::GET,
-            "/admin/subjects/alice/grants",
-            None,
-            Some(&admin),
-        )
-        .await;
+    let (_, _, body) = checked(
+        &server,
+        Method::GET,
+        "/admin/subjects/{sub}/grants",
+        "/admin/subjects/alice/grants",
+        &admin,
+    )
+    .await;
     assert_eq!(
         json!({ "subject": ALICE, "grants": [], "consents": [] }),
         body
@@ -299,14 +323,14 @@ async fn ending_a_person_s_sessions_ends_their_online_access_alone() {
     let (_online, online_refresh) = granted(&server, ALICE, Access::Online, Some(&session)).await;
     let (_offline, offline_refresh) =
         granted(&server, ALICE, Access::Offline, Some(&session)).await;
-    let (status, _, body) = server
-        .call(
-            Method::DELETE,
-            "/admin/subjects/alice/sessions",
-            None,
-            Some(&admin),
-        )
-        .await;
+    let (status, _, body) = checked(
+        &server,
+        Method::DELETE,
+        "/admin/subjects/{sub}/sessions",
+        "/admin/subjects/alice/sessions",
+        &admin,
+    )
+    .await;
     assert_eq!(StatusCode::OK, status, "{body}");
     assert_eq!(json!({ "sessions": 1, "grants": 1 }), body);
     let (status, _) = refreshed(&server, &online_refresh).await;
@@ -317,14 +341,14 @@ async fn ending_a_person_s_sessions_ends_their_online_access_alone() {
     );
     let (status, body) = refreshed(&server, &offline_refresh).await;
     assert_eq!(StatusCode::OK, status, "offline access outlives it: {body}");
-    let (_, _, body) = server
-        .call(
-            Method::DELETE,
-            "/admin/subjects/alice/sessions",
-            None,
-            Some(&admin),
-        )
-        .await;
+    let (_, _, body) = checked(
+        &server,
+        Method::DELETE,
+        "/admin/subjects/{sub}/sessions",
+        "/admin/subjects/alice/sessions",
+        &admin,
+    )
+    .await;
     assert_eq!(json!({ "sessions": 0, "grants": 0 }), body);
     assert!(
         events(&records(&server.store).await).contains(&String::from("session-ended")),

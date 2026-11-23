@@ -69,6 +69,21 @@ pub fn metadata(settings: &Settings, login: bool) -> ServerMetadata {
         introspection_endpoint: Some(settings.endpoint(INTROSPECT_ROUTE)),
         revocation_endpoint: Some(settings.endpoint(REVOKE_ROUTE)),
         registration_endpoint: Some(settings.endpoint(crate::admin::register::REGISTER_ROUTE)),
+        // NOTE: RFC 9449 §5.1, the algorithms the token endpoint takes a DPoP proof in.
+        dpop_signing_alg_values_supported: Some(
+            ferrohealth_smart::sender::proof::ProofSettings::new(settings.issuer_url.clone())
+                .algorithms
+                .iter()
+                .map(|algorithm| format!("{algorithm:?}"))
+                .collect(),
+        ),
+        // NOTE: RFC 8705 §3.3, certificate-bound tokens need a listener that asks the
+        // client for its certificate.
+        tls_client_certificate_bound_access_tokens: Some(
+            settings.server.tls.as_ref().is_some_and(|tls| {
+                tls.client_auth != ferrohealth_server::section::ClientAuth::None
+            }),
+        ),
         ..ServerMetadata::default()
     };
     if login {
@@ -233,6 +248,22 @@ pub fn add_acr_values(document: &mut Value, settings: &Settings) {
     if let (false, Some(members)) = (levels.is_empty(), document.as_object_mut()) {
         let uris: Vec<&str> = levels.into_iter().map(crate::assurance::uri).collect();
         members.insert(String::from("acr_values_supported"), json!(uris));
+    }
+}
+
+/// Adds the pushed authorization request endpoint and whether every
+/// authorization request must arrive through it to `document` (RFC 9126
+/// §5), which describes the login.
+pub fn add_pushed_requests(document: &mut Value, settings: &Settings) {
+    if let Some(members) = document.as_object_mut() {
+        members.insert(
+            String::from("pushed_authorization_request_endpoint"),
+            json!(settings.endpoint(crate::authorize::par::PAR_ROUTE)),
+        );
+        members.insert(
+            String::from("require_pushed_authorization_requests"),
+            json!(settings.require_pushed_authorization_requests),
+        );
     }
 }
 

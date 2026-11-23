@@ -16,6 +16,7 @@ pub mod choose;
 pub mod consent;
 pub mod manage;
 mod oidc;
+pub mod par;
 pub mod request;
 pub mod saml;
 
@@ -112,14 +113,11 @@ async fn deny_unsigned(state: &AppState, pending: &Pending, denial: Denial) -> R
     }
 }
 
-/// Returns the request a store lookup `looked` found, or the page that says
-/// it lapsed or that the store failed.
-fn found(
-    state: &AppState,
-    looked: Result<Option<Pending>, StoreError>,
-) -> Result<Pending, Box<Response>> {
+/// Returns what a store lookup `looked` found, or the page that says it
+/// lapsed or that the store failed.
+fn found<T>(state: &AppState, looked: Result<Option<T>, StoreError>) -> Result<T, Box<Response>> {
     match looked {
-        Ok(Some(pending)) => Ok(pending),
+        Ok(Some(found)) => Ok(found),
         Ok(None) => Err(Box::new(pages::fault(state, Fault::Lapsed))),
         Err(error) => Err(Box::new(pages::server_error(state, &error))),
     }

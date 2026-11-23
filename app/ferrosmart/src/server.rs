@@ -86,6 +86,8 @@ pub struct AppState {
     /// The User Access Brands Bundle as served, when the deployment
     /// publishes one.
     brands: Option<crate::brands::Published>,
+    /// The OpenAPI document of the administration API, built once.
+    openapi: axum::body::Bytes,
 }
 
 impl AppState {
@@ -97,6 +99,7 @@ impl AppState {
         let smart = discovery::smart_configuration(&settings, &metadata, false);
         Self {
             metadata: discovery::metadata_document(&metadata),
+            openapi: crate::admin::openapi::document(&settings),
             settings,
             smart,
             openid: None,
@@ -135,9 +138,11 @@ impl AppState {
         self.smart = discovery::smart_configuration(&self.settings, &metadata, true);
         let mut openid = discovery::openid_configuration(&metadata);
         discovery::add_acr_values(&mut openid, &self.settings);
+        discovery::add_pushed_requests(&mut openid, &self.settings);
         self.openid = Some(openid);
         self.metadata = discovery::metadata_document(&metadata);
         discovery::add_acr_values(&mut self.metadata, &self.settings);
+        discovery::add_pushed_requests(&mut self.metadata, &self.settings);
         self.providers = providers;
         self
     }
@@ -164,6 +169,12 @@ impl AppState {
     #[must_use]
     pub const fn audit(&self) -> &Audit {
         &self.audit
+    }
+
+    /// Returns the OpenAPI document of the administration API.
+    #[must_use]
+    pub const fn openapi(&self) -> &axum::body::Bytes {
+        &self.openapi
     }
 
     /// Returns the store.
@@ -195,11 +206,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(JWKS_ROUTE, get(jwks))
         .route(UPSTREAM_JWKS_ROUTE, get(upstream_jwks))
         .route(TOKEN_ROUTE, post(crate::token::token))
+        .route(authorize::par::PAR_ROUTE, post(authorize::par::par))
         .route(crate::launch::LAUNCH_ROUTE, post(crate::launch::launch))
-        .route(
-            crate::audit_log::AUDIT_ROUTE,
-            get(crate::audit_log::audit_log),
-        )
         .route(INTROSPECT_ROUTE, post(crate::introspect::introspect))
         .route(REVOKE_ROUTE, post(crate::revoke::revoke))
         .route(OPENID_CONFIGURATION_ROUTE, get(openid_configuration))
@@ -259,6 +267,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .merge(crate::admin::router(&state))
         .merge(crate::admin::register::router())
+        .merge(crate::admin::openapi::routes(
+            crate::audit_log::table()
+                .into_iter()
+                .chain(crate::admin::openapi::table())
+                .collect(),
+        ))
         .with_state(Arc::clone(&state));
     if state.brands.is_some() {
         issuer = issuer.route(

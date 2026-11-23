@@ -121,6 +121,10 @@ impl ClientDocument {
 }
 
 /// The members of a [`ClientDocument`].
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an RFC 7591 client metadata boolean of its own"
+)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Fields {
@@ -160,6 +164,15 @@ pub struct Fields {
     pub tos_uri: String,
     /// Whether the app is the controller's own or acts for it.
     pub first_party: bool,
+    /// Whether the client starts an authorization request only by pushing
+    /// it (RFC 9126 §6).
+    pub require_pushed_authorization_requests: bool,
+    /// Whether the client sends a `DPoP` proof with every token request
+    /// (RFC 9449 §5.2).
+    pub dpop_bound_access_tokens: bool,
+    /// Whether the client's tokens are bound to its mutual-TLS certificate
+    /// (RFC 8705 §3.4).
+    pub tls_client_certificate_bound_access_tokens: bool,
 }
 
 impl Default for Fields {
@@ -185,13 +198,16 @@ impl Default for Fields {
             policy_uri: String::new(),
             tos_uri: String::new(),
             first_party: false,
+            require_pushed_authorization_requests: false,
+            dpop_bound_access_tokens: false,
+            tls_client_certificate_bound_access_tokens: false,
         }
     }
 }
 
 /// The members a [`ClientDocument`] reads; a registration request's other
 /// members are ignored (RFC 7591 §2).
-const MEMBERS: [&str; 19] = [
+const MEMBERS: [&str; 22] = [
     "client_id",
     "client_name",
     "token_endpoint_auth_method",
@@ -210,6 +226,9 @@ const MEMBERS: [&str; 19] = [
     "policy_uri",
     "tos_uri",
     "first_party",
+    "require_pushed_authorization_requests",
+    "dpop_bound_access_tokens",
+    "tls_client_certificate_bound_access_tokens",
     "client_secret",
 ];
 
@@ -253,6 +272,10 @@ impl Fields {
             policy_uri: self.policy_uri,
             tos_uri: self.tos_uri,
             first_party: self.first_party,
+            require_pushed_authorization_requests: self.require_pushed_authorization_requests,
+            dpop_bound_access_tokens: self.dpop_bound_access_tokens,
+            tls_client_certificate_bound_access_tokens: self
+                .tls_client_certificate_bound_access_tokens,
         };
         let material = Material {
             jwks: self.jwks,
@@ -263,6 +286,10 @@ impl Fields {
 }
 
 /// A registered client as the API answers with it.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an RFC 7591 client metadata boolean of its own"
+)]
 #[derive(Debug, Serialize)]
 pub struct ClientView<'a> {
     /// The `client_id`.
@@ -309,6 +336,12 @@ pub struct ClientView<'a> {
     tos_uri: Option<&'a str>,
     /// Whether the app is the controller's own or acts for it.
     first_party: bool,
+    /// Whether it starts an authorization request only by pushing it.
+    require_pushed_authorization_requests: bool,
+    /// Whether it sends a `DPoP` proof with every token request.
+    dpop_bound_access_tokens: bool,
+    /// Whether its tokens are bound to its mutual-TLS certificate.
+    tls_client_certificate_bound_access_tokens: bool,
     /// `admin`, or `self` for an app that registered itself (RFC 7591 §5).
     registered_by: &'static str,
     /// When it was disabled, an RFC 3339 instant; absent while enabled.
@@ -354,6 +387,10 @@ impl<'a> From<&'a Registered> for ClientView<'a> {
             policy_uri: client.about.policy.as_ref().map(Url::as_str),
             tos_uri: client.about.terms.as_ref().map(Url::as_str),
             first_party: client.first_party(),
+            require_pushed_authorization_requests: client.require_pushed_authorization_requests,
+            dpop_bound_access_tokens: client.dpop_bound_access_tokens,
+            tls_client_certificate_bound_access_tokens: client
+                .tls_client_certificate_bound_access_tokens,
             registered_by: registered.by.as_str(),
             disabled_at: registered.disabled_at.map(instant),
         }
