@@ -6,11 +6,11 @@
   },
   "client": {
     "client_id": "oidf-suite",
-    "client_secret": "synthetic-oidf-suite-secret"
+    "client_secret": "issued by FerroSMART at the run"
   },
   "client2": {
     "client_id": "oidf-suite-2",
-    "client_secret": "synthetic-oidf-suite-second-secret"
+    "client_secret": "issued by FerroSMART at the run"
   },
   "browser": [
     {

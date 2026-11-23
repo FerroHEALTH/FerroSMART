@@ -1,10 +1,8 @@
 {
   "client_id": "inferno-backend-services",
-  "name": "Inferno SMART App Launch test kit",
-  "kind": "confidential_asymmetric",
-  "scopes": [
-    "system/Practitioner.rs"
-  ],
+  "client_name": "Inferno SMART App Launch test kit",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "scope": "system/Practitioner.rs",
   "resources": [
     "https://bridge.localhost:9443/fhir"
   ],

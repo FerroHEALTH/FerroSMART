@@ -13,7 +13,7 @@ use axum::Router;
 use axum::body::Body;
 use ferrosmart::authorize::COOKIE;
 use ferrosmart::authorize::consent::{FhirUser, offer};
-use ferrosmart::clients::{ClientKind, ClientMetadata, GrantType, Material, resolve};
+use ferrosmart::clients::{AuthMethod, ClientMetadata, GrantType, Material, resolve};
 use ferrosmart::picker::Reach;
 use ferrosmart::server::{AppState, router};
 use ferrosmart::store::Store;
@@ -241,11 +241,11 @@ impl Smart {
              [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\nfhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [ferrosmart.branding]\nsmart_style_url = {STYLE:?}\n{resource}\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = {role}\n\
-             [[client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"app\"\nclient_name = \"Synthetic App\"\ntoken_endpoint_auth_method = \"none\"\n\
              client_uri = \"https://app.example.org/\"\nlogo_uri = \"https://cdn.example.org/app.png\"\n\
              policy_uri = \"https://app.example.org/privacy\"\ntos_uri = \"https://app.example.org/terms\"\n\
              redirect_uris = {redirects:?}\npost_logout_redirect_uris = [{POST_LOGOUT:?}]\n\
-             {listing}grant_types = {grants}\nscopes = {ceiling}",
+             {listing}grant_types = {grants}\nscope = {ceiling}",
             secrecy::ExposeSecret::expose_secret(&database.url),
             provider.server.uri(),
             listing = crate::support::resources_of(resource),
@@ -1288,7 +1288,7 @@ fn an_extension_scope_needs_the_ceiling_and_a_role() {
     let client = resolve(
         &ClientMetadata {
             client_id: String::from("app"),
-            kind: ClientKind::Public,
+            auth_method: AuthMethod::None,
             redirect_uris: vec![String::from(REDIRECT)],
             grant_types: vec![GrantType::AuthorizationCode],
             scopes: ["openid", "__ferroehr.platform", "__ferroehr.audit", "admin"]
@@ -1344,7 +1344,7 @@ fn the_consent_page_offers_what_the_ceiling_and_the_roles_allow() {
     let client = resolve(
         &ClientMetadata {
             client_id: String::from("app"),
-            kind: ClientKind::Public,
+            auth_method: AuthMethod::None,
             redirect_uris: vec![String::from(REDIRECT)],
             grant_types: vec![GrantType::AuthorizationCode],
             scopes: [
@@ -1772,7 +1772,7 @@ fn offline_and_online_access_are_offered_to_a_client_that_refreshes() {
     let client = resolve(
         &ClientMetadata {
             client_id: String::from("app"),
-            kind: ClientKind::Public,
+            auth_method: AuthMethod::None,
             redirect_uris: vec![String::from(REDIRECT)],
             grant_types: vec![GrantType::AuthorizationCode, GrantType::RefreshToken],
             scopes: ["openid", "offline_access", "online_access"]
@@ -2753,7 +2753,7 @@ async fn what_the_document_leaves_out_the_server_refuses() {
     let client = resolve(
         &ClientMetadata {
             client_id: String::from("app"),
-            kind: ClientKind::Public,
+            auth_method: AuthMethod::None,
             redirect_uris: vec![String::from(REDIRECT)],
             grant_types: vec![GrantType::AuthorizationCode],
             scopes: vec![
@@ -2843,7 +2843,7 @@ fn a_v1_scope_is_offered_by_its_v2_form_and_granted_as_asked() {
     let client = resolve(
         &ClientMetadata {
             client_id: String::from("app"),
-            kind: ClientKind::Public,
+            auth_method: AuthMethod::None,
             redirect_uris: vec![String::from(REDIRECT)],
             grant_types: vec![GrantType::AuthorizationCode],
             scopes: vec![String::from("user/Observation.rs")],

@@ -173,7 +173,7 @@ async fn client_apply_refuses_a_base_or_a_provider_the_configuration_lacks() {
     );
     let document = json!({
         "client_id": "app",
-        "kind": "public",
+        "token_endpoint_auth_method": "none",
         "redirect_uris": ["https://app.example.org/callback"],
         "grant_types": ["authorization_code"],
         "resources": ["https://elsewhere.example.org/fhir"],
@@ -204,7 +204,7 @@ async fn the_admin_api_refuses_a_base_no_resource_table_configures() {
     let token = server.token("admin", "system/admin", ISSUER).await;
     let document = json!({
         "client_id": "elsewhere",
-        "kind": "public",
+        "token_endpoint_auth_method": "none",
         "redirect_uris": ["https://elsewhere.example.org/callback"],
         "grant_types": ["authorization_code"],
         "resources": ["https://elsewhere.example.org/fhir"],

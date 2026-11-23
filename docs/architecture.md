@@ -3548,7 +3548,7 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 
 | Table | Key | Holds |
 |---|---|---|
-| `client` | `client_id` | type (public, symmetric, asymmetric), secret hash, `jwks` or `jwks_uri`, redirect URIs, post-logout redirect URIs, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, registered origins, scope ceiling, grant types, offline access allowed, name and logo, the organisation approval, `registered_by` (`admin` (13.27) or `self` (13.6 item 14)), disabled time |
+| `client` | `client_id` | the RFC 7591 §2 metadata (`client_name`, `token_endpoint_auth_method`, `scope`, `grant_types`, `jwks` or `jwks_uri`, `redirect_uris`, `post_logout_redirect_uris`, `default_acr_values`, the app's URLs), the secret's Argon2id hash, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, the organisation approval, `registered_by` (`admin` (13.27) or `self` (13.6 item 14)), disabled time |
 | `signing_key` | `kid` | state (`next`, `active`, `retiring`, `retired`) and the time it reached each one; the key itself stays in the files of `[ferrosmart.keys]` (13.11) |
 | `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
 | `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time |
@@ -4012,10 +4012,10 @@ the rest is FerroSMART's own API of 13.6 item 3.
    ```json
    {
      "client_id": "ehr",
-     "name": "Example EHR",
-     "kind": "confidential_asymmetric",
+     "client_name": "Example EHR",
+     "token_endpoint_auth_method": "private_key_jwt",
      "jwks_uri": "https://ehr.example.org/.well-known/jwks.json",
-     "scopes": ["system/launch.c"],
+     "scope": "system/launch.c",
      "grant_types": ["client_credentials"]
    }
    ```
@@ -4580,7 +4580,7 @@ keyword of its own, so its rows are the profile's statements.
 | A JWK Set is cached no longer than the client's `Cache-Control` allows, and cached as it allows | SHALL NOT, SHOULD | met | `token::a_jwk_set_url_is_read_and_cached_as_the_client_allows` |
 | A symmetric client sends its `client_secret` by HTTP Basic (Authentication using a `client_secret`) | profile | met, with `client_secret_post` beside it (RFC 6749 §2.3.1), never both | `symmetric::a_symmetric_client_authenticates_by_http_basic`, `symmetric::a_symmetric_client_authenticates_in_the_form`, `symmetric::two_authentication_methods_at_once_are_refused` |
 | The symmetric profile is for App Launch clients and not for Backend Services (Profile Audience and Scope) | profile | met: the client credentials grant and a JWK Set are refused to a symmetric client | `symmetric::a_symmetric_client_is_refused_the_client_credentials_grant_and_a_jwk_set` |
-| The server knows the secret (Authentication using a `client_secret`) | profile | met as its Argon2id hash at the OWASP floor, never the secret; `ferrosmart client hash-secret` makes it (13.9) | `symmetric::the_hash_secret_command_makes_a_hash_at_the_floor_with_a_fresh_salt` |
+| The server knows the secret (Authentication using a `client_secret`) | profile | met: FerroSMART issues it once and keeps its Argon2id hash at the OWASP floor (`rfc7591 §3.2.1`; 13.27) | `symmetric::an_issued_secret_is_hashed_at_the_floor_with_a_fresh_salt`, `admin::a_symmetric_client_is_issued_its_secret_once_and_keeps_its_hash` |
 
 The Inferno lane runs a symmetric client in group 2 (13.13).
 
@@ -5013,10 +5013,17 @@ change audited.
   /admin/clients` registers one (`201` with `Location`); `PUT
   /admin/clients/{client_id}` replaces one; `POST .../disable` and `POST
   .../enable` disable and enable one; `DELETE .../organisation_approval`
-  withdraws its approval. The document carries the JWK Set (`jwks`) and
-  the Argon2id hash (`secret_hash`) by value, never a secret; an answer
-  never carries the hash, and an update of a symmetric client that names
-  none keeps the stored one. An approval without `approved_at` keeps the
+  withdraws its approval. The document is RFC 7591 §2 client metadata
+  (`client_name`, `token_endpoint_auth_method`, `scope`, `grant_types`,
+  `jwks_uri` or `jwks`, `redirect_uris`, `default_acr_values` of OpenID
+  Connect Dynamic Client Registration 1.0 §2, and the URLs of the app),
+  with FerroSMART's own `resources`, `launch_uri`, `upstreams` and
+  `organisation_approval`. FerroSMART issues a `client_secret_basic` or
+  `client_secret_post` client its secret, answers it once with
+  `client_secret_expires_at` 0 and keeps its Argon2id hash (`rfc7591
+  §3.2.1`); no document or answer carries the hash, an update keeps the
+  stored secret, and `ferrosmart client secret` issues a new one. A client
+  authenticates only by its registered method. An approval without `approved_at` keeps the
   stored time when its scopes, approver and mark are unchanged, and takes
   the request's time otherwise.
 - **`ferrosmart client apply <file>...`.** Each file is one client
@@ -5080,11 +5087,13 @@ FerroHEALTH/FerroEHR#6419, #784).
 - **The minimum.** `[ferrosmart] assurance_minimum` is the deployment's
   floor, `substantial` by default after 2026/2099, `high` for a deployment
   that asks it, `none` for one outside the eIDAS area. A provider's
-  `minimum` and a client's `assurance_minimum` raise it. A provider whose
+  `minimum` raises it. A provider whose
   map reaches neither the floor nor its own minimum is refused at load.
 - **The request.** An app's `acr_values` naming an eIDAS URI asks for the
   lowest level it names, since any listed value answers it (`oidc core
-  §3.1.2.1`); the client's minimum raises it. The upstream OpenID Connect
+  §3.1.2.1`); a request without `acr_values` asks for the client's
+  `default_acr_values` (OpenID Connect Dynamic Client Registration 1.0
+  §2). The upstream OpenID Connect
   request carries as `acr_values` the provider's values at or above the
   higher of that level and the provider's minimum, lowest first. A SAML
   request keeps its configured `authn_contexts` (13.26).
@@ -5121,8 +5130,7 @@ exchange for this one case (owner decision on FerroHEALTH/FerroEHR#6419,
 choice to the server, the rules below are our own design.
 
 - **The client.** A confidential client whose `grant_types` lists
-  `token_exchange` (`urn:ietf:params:oauth:grant-type:token-exchange`,
-  `rfc8693 §2.1`), authenticated as at every grant; a public client is
+  `urn:ietf:params:oauth:grant-type:token-exchange` (`rfc8693 §2.1`), authenticated as at every grant; a public client is
   refused the grant at load and at the endpoint (`unauthorized_client`).
   Its `resources` lists the FHIR base it serves and the paired openEHR
   base, so the exchange admits only the product of that FHIR base.

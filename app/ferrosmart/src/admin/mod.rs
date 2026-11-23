@@ -110,6 +110,12 @@ pub enum AdminError {
     /// The change could not be committed with its record.
     #[error("the change cannot be recorded")]
     Record(#[source] RecordFailure),
+    /// No client secret could be issued.
+    #[error("no client secret can be issued")]
+    Secret(#[source] crate::clients::HashError),
+    /// The client authenticates with no secret.
+    #[error("the client `{0}` authenticates with no client secret")]
+    NoSecret(String),
 }
 
 impl From<StoreError> for AdminError {
@@ -130,7 +136,7 @@ impl AdminError {
     fn code(&self) -> (StatusCode, &'static str) {
         match self {
             Self::Unreadable(rejection) => (rejection.status(), "invalid_request"),
-            Self::OtherClient => (StatusCode::BAD_REQUEST, "invalid_request"),
+            Self::OtherClient | Self::NoSecret(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
             Self::Metadata(ClientError::RedirectUri { .. }) => {
                 (StatusCode::BAD_REQUEST, "invalid_redirect_uri")
             }
@@ -141,7 +147,9 @@ impl AdminError {
             Self::Exists(_) => (StatusCode::CONFLICT, "client_exists"),
             Self::LaunchUriTaken => (StatusCode::CONFLICT, "launch_uri_taken"),
             Self::Unchanged(_) => (StatusCode::CONFLICT, "unchanged"),
-            Self::Store(_) | Self::Record(_) => (StatusCode::INTERNAL_SERVER_ERROR, "server_error"),
+            Self::Store(_) | Self::Record(_) | Self::Secret(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "server_error")
+            }
         }
     }
 }
@@ -210,6 +218,21 @@ fn no_store(mut response: Response) -> Response {
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
+}
+
+/// Returns the answer naming the client `applied` wrote, with the secret
+/// it issued, if any, and `client_secret_expires_at` 0 for a secret that
+/// does not expire (RFC 7591 §3.2.1).
+fn issued(status: StatusCode, applied: &Applied) -> Response {
+    let mut body = json!(ClientView::from(&applied.registered));
+    if let (Some(secret), Some(members)) = (&applied.secret, body.as_object_mut()) {
+        members.insert(
+            String::from("client_secret"),
+            Value::from(secrecy::ExposeSecret::expose_secret(secret)),
+        );
+        members.insert(String::from("client_secret_expires_at"), Value::from(0));
+    }
+    no_store((status, Json(body)).into_response())
 }
 
 /// Returns the answer naming `registered`.
@@ -328,10 +351,11 @@ impl<'a> Change<'a> {
         &self,
         mut tx: Transaction,
         document: ClientDocument,
-    ) -> Result<Registered, AdminError> {
+    ) -> Result<Applied, AdminError> {
         let client_id = document.client_id().to_owned();
-        let (section, material) =
+        let (section, mut material) =
             document.registration(&client_id, None, jiff::Timestamp::now().as_second());
+        let secret = issue(&section, &mut material)?;
         let client = crate::clients::resolve(&section, material)?;
         check_names(self.state, &client)?;
         if !tx.create_client(&client).await? {
@@ -343,7 +367,11 @@ impl<'a> Change<'a> {
             details: described(&client),
             withdrawn: None,
         };
-        self.finish(tx, record).await
+        Ok(Applied {
+            registered: self.finish(tx, record).await?,
+            created: true,
+            secret,
+        })
     }
 
     /// Replaces the client `stored`, its row locked in `tx`, with the one
@@ -355,13 +383,14 @@ impl<'a> Change<'a> {
         mut tx: Transaction,
         stored: &Registered,
         document: ClientDocument,
-    ) -> Result<Registered, AdminError> {
+    ) -> Result<Applied, AdminError> {
         let client_id = stored.client.client_id.as_str();
-        let (section, material) = document.registration(
+        let (section, mut material) = document.registration(
             client_id,
             Some(&stored.client),
             jiff::Timestamp::now().as_second(),
         );
+        let secret = issue(&section, &mut material)?;
         let client = crate::clients::resolve(&section, material)?;
         check_names(self.state, &client)?;
         let lapsed = stored
@@ -383,8 +412,27 @@ impl<'a> Change<'a> {
             details: described(&client),
             withdrawn,
         };
-        self.finish(tx, record).await
+        Ok(Applied {
+            registered: self.finish(tx, record).await?,
+            created: false,
+            secret,
+        })
     }
+}
+
+/// Issues a client secret into `material` when `section` authenticates
+/// with one and holds none yet, and returns it (RFC 7591 §3.2.1).
+fn issue(
+    section: &crate::clients::ClientMetadata,
+    material: &mut crate::clients::Material,
+) -> Result<Option<secrecy::SecretString>, AdminError> {
+    let symmetric = section.auth_method.kind() == crate::clients::ClientKind::ConfidentialSymmetric;
+    if !symmetric || material.secret_hash.is_some() {
+        return Ok(None);
+    }
+    let issued = crate::clients::issue_secret().map_err(AdminError::Secret)?;
+    material.secret_hash = Some(issued.hash);
+    Ok(Some(issued.secret))
 }
 
 /// What [`apply`] did with one document.
@@ -394,6 +442,8 @@ pub struct Applied {
     pub registered: Registered,
     /// Whether the client was new; otherwise it replaced the stored one.
     pub created: bool,
+    /// The client secret issued with the change, which no answer repeats.
+    pub secret: Option<secrecy::SecretString>,
 }
 
 /// Writes the client `document` describes as `PUT` would, or as `POST`
@@ -411,15 +461,41 @@ pub async fn apply(state: &AppState, document: ClientDocument) -> Result<Applied
     };
     let mut tx = state.store().begin().await?;
     match tx.lock_client(document.client_id()).await? {
-        Some(stored) => Ok(Applied {
-            registered: change.replace(tx, &stored, document).await?,
-            created: false,
-        }),
-        None => Ok(Applied {
-            registered: change.create(tx, document).await?,
-            created: true,
-        }),
+        Some(stored) => change.replace(tx, &stored, document).await,
+        None => change.create(tx, document).await,
     }
+}
+
+/// Issues the confidential symmetric client `client_id` a new secret, its
+/// hash replacing the stored one, recorded as [`apply`] records a change.
+///
+/// # Errors
+/// Returns [`AdminError::NotFound`] for an unknown client,
+/// [`AdminError::NoSecret`] for one that authenticates otherwise, and an
+/// error of the store or the record.
+pub async fn issue_secret(
+    state: &AppState,
+    client_id: &str,
+) -> Result<secrecy::SecretString, AdminError> {
+    let change = Change {
+        state,
+        by: Some(APPLY_REQUESTER),
+        from: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+    };
+    let (mut tx, stored) = change.lock(client_id).await?;
+    if stored.client.kind() != crate::clients::ClientKind::ConfidentialSymmetric {
+        return Err(AdminError::NoSecret(client_id.to_owned()));
+    }
+    let issued = crate::clients::issue_secret().map_err(AdminError::Secret)?;
+    tx.set_secret(client_id, &issued.hash).await?;
+    let record = Record {
+        event: audit::Event::ClientUpdated,
+        client_id,
+        details: vec![("client_secret", String::from("issued"))],
+        withdrawn: None,
+    };
+    change.finish(tx, record).await?;
+    Ok(issued.secret)
 }
 
 /// What the record of a withdrawn `approval` holds: its scopes, approver,
@@ -445,7 +521,10 @@ fn described(client: &Client) -> Vec<(&'static str, String)> {
         .map(|grant| grant.as_str())
         .collect();
     vec![
-        ("kind", client.kind.as_str().to_owned()),
+        (
+            "token_endpoint_auth_method",
+            client.auth_method.as_str().to_owned(),
+        ),
         ("scope", client.scopes.join(" ")),
         ("grant_types", grants.join(" ")),
     ]
@@ -526,10 +605,11 @@ async fn create(
 ) -> Result<Response, AdminError> {
     let document = document(body)?;
     let tx = state.store().begin().await?;
-    let registered = Change::new(&state, &access, from)
+    let applied = Change::new(&state, &access, from)
         .create(tx, document)
         .await?;
-    let mut response = answer(StatusCode::CREATED, &registered);
+    let registered = &applied.registered;
+    let mut response = issued(StatusCode::CREATED, &applied);
     let location = state
         .settings()
         .endpoint(&format!("{CLIENTS_ROUTE}/{}", registered.client.client_id));
@@ -552,8 +632,8 @@ async fn update(
         return Err(AdminError::OtherClient);
     }
     let (tx, stored) = change.lock(client_id).await?;
-    let registered = change.replace(tx, &stored, document).await?;
-    Ok(answer(StatusCode::OK, &registered))
+    let applied = change.replace(tx, &stored, document).await?;
+    Ok(issued(StatusCode::OK, &applied))
 }
 
 /// `POST /admin/clients/{client_id}/disable`: no request finds the client

@@ -115,11 +115,11 @@ impl Smart {
              [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = {uri:?}\nclient_id = {UPSTREAM_CLIENT:?}\nfhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [ferrosmart.branding]\nsmart_style_url = {STYLE:?}\n\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = [\"user/Observation.rs\", \"patient/Observation.rs\"]\n\
-             [[client]]\nclient_id = \"ehr\"\nkind = \"confidential_asymmetric\"\n\
-             jwks = {}\nscopes = [\"system/launch.c\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"ehr\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\n\
+             jwks = {}\nscope = [\"system/launch.c\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"app\"\nclient_name = \"Synthetic App\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"patient/Observation.rs\", \"user/Observation.rs\"]\n\
+             scope = [\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"patient/Observation.rs\", \"user/Observation.rs\"]\n\
              {approval}",
             secrecy::ExposeSecret::expose_secret(&database.url),
             set,

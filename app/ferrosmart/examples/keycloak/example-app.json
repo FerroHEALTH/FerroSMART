@@ -1,16 +1,11 @@
 {
   "client_id": "example-app",
-  "name": "Example SMART app",
-  "kind": "public",
+  "client_name": "Example SMART app",
+  "token_endpoint_auth_method": "none",
   "redirect_uris": [
     "http://localhost:9000/callback"
   ],
-  "scopes": [
-    "openid",
-    "fhirUser",
-    "user/Patient.rs",
-    "user/Observation.rs"
-  ],
+  "scope": "openid fhirUser user/Patient.rs user/Observation.rs",
   "resources": [
     "http://localhost:8090/fhir"
   ],

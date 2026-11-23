@@ -256,8 +256,8 @@ async fn the_worked_example_s_rs384_and_es384_assertions_verify() {
         "https://authorize.smarthealthit.org",
         &format!(
             "[[client]]\nclient_id = \"https://bili-monitor.example.com\"\n\
-             kind = \"confidential_asymmetric\"\njwks = {set}\n\
-             scopes = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]"
+             token_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
+             scope = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]"
         ),
     )
     .await;
@@ -293,8 +293,8 @@ async fn the_app_launch_and_backend_examples_assertions_verify() {
         issuer,
         &format!(
             "[[client]]\nclient_id = \"demo_app_whatever\"\n\
-             kind = \"confidential_asymmetric\"\njwks = {set}\n\
-             scopes = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]"
+             token_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
+             scope = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]"
         ),
     )
     .await;
@@ -335,18 +335,17 @@ async fn the_symmetric_example_s_basic_credentials_authenticate() {
         .split_once(':')
         .expect("id:secret");
     assert_eq!("demo_app_whatever", client_id);
-    let hash = crate::introspection::phc(secret);
     let server = Server::start(
         "https://smart.example.org",
         &format!(
-            "[[client]]\nclient_id = {client_id:?}\nkind = \"confidential_symmetric\"\n\
-             secret_hash = {hash:?}\n\
+            "[[client]]\nclient_id = {client_id:?}\ntoken_endpoint_auth_method = \"client_secret_basic\"\n\
              redirect_uris = [\"https://sharp-lake-word.glitch.me/graph.html\"]\n\
-             scopes = [\"launch/patient\", \"patient/Observation.rs\"]\n\
+             scope = [\"launch/patient\", \"patient/Observation.rs\"]\n\
              grant_types = [\"authorization_code\"]"
         ),
     )
     .await;
+    crate::support::set_secret(&server.store, client_id, secret).await;
     // NOTE: RFC 7009 §2.2, an unknown token answers 200 to a client that authenticated.
     let (status, body) = server
         .post("/revoke", &[("token", "unknown")], Some(&authorization))

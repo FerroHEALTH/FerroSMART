@@ -17,11 +17,12 @@ const HIGH: &str = "http://eidas.europa.eu/LoA/high";
 /// The scope every case asks.
 const SCOPE: &str = "openid fhirUser user/Observation.rs";
 
-/// Starts FerroSMART whose app holds its people to `minimum`, when set.
-async fn smart_holding(minimum: Option<&str>) -> Smart {
-    let grants = minimum.map_or_else(
+/// Starts FerroSMART whose app registers `default_acr_values` of `acr`, when
+/// set.
+async fn smart_holding(acr: Option<&str>) -> Smart {
+    let grants = acr.map_or_else(
         || String::from("[\"authorization_code\"]"),
-        |level| format!("[\"authorization_code\"]\nassurance_minimum = {level:?}"),
+        |acr| format!("[\"authorization_code\"]\ndefault_acr_values = [{acr:?}]"),
     );
     Smart::start_with(
         &grants,
@@ -110,8 +111,8 @@ async fn a_login_below_the_floor_or_naming_no_mapped_value_is_refused_and_record
 }
 
 #[tokio::test]
-async fn a_client_s_minimum_is_asked_upstream_and_a_lower_login_is_refused() {
-    let smart = smart_holding(Some("high")).await;
+async fn a_client_s_default_acr_values_answer_a_request_without_acr_values() {
+    let smart = smart_holding(Some(HIGH)).await;
     let (upstream, back) = log_in(
         &smart,
         &[("scope", SCOPE)],
@@ -128,7 +129,15 @@ async fn a_client_s_minimum_is_asked_upstream_and_a_lower_login_is_refused() {
         param(&back, "error")
     );
     let (_, back) = log_in(&smart, &[("scope", SCOPE)], Some("urn:synthetic:loa:high")).await;
-    assert_eq!("/consent", back.path(), "a login at the minimum goes on");
+    assert_eq!("/consent", back.path(), "a login at the level goes on");
+    // NOTE: OpenID Connect Core 1.0 §3.1.2.1, the request's own acr_values win.
+    let (_, back) = log_in(
+        &smart,
+        &[("scope", SCOPE), ("acr_values", LOW)],
+        Some("urn:synthetic:loa:substantial"),
+    )
+    .await;
+    assert_eq!("/consent", back.path(), "the request asks for less");
     smart.stop().await;
 }
 

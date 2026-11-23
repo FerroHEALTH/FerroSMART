@@ -132,18 +132,36 @@ fn split(text: &str) -> (String, String) {
     (config, clients)
 }
 
-/// Returns the client documents the `[[client]]` tables of `text` hold.
+/// Returns the client documents the `[[client]]` tables of `text` hold. A
+/// table may write `scope` as an array, which the document joins with
+/// spaces (RFC 7591 §2).
 pub(crate) fn clients(text: &str) -> Vec<Value> {
     let (_, tables) = split(text);
     let table: toml::Table = toml::from_str(&tables).expect("the client tables read");
-    match table.get("client") {
-        Some(clients) => serde_json::to_value(clients)
-            .expect("the client tables convert")
-            .as_array()
-            .cloned()
-            .expect("an array of tables"),
-        None => Vec::new(),
+    let Some(clients) = table.get("client") else {
+        return Vec::new();
+    };
+    let mut documents: Vec<Value> =
+        serde_json::from_value(serde_json::to_value(clients).expect("the client tables convert"))
+            .expect("an array of tables");
+    for document in &mut documents {
+        if let Some(scopes) = document.get("scope").and_then(Value::as_array) {
+            let joined: Vec<&str> = scopes.iter().filter_map(Value::as_str).collect();
+            document["scope"] = Value::from(joined.join(" "));
+        }
     }
+    documents
+}
+
+/// Gives the confidential symmetric client `client_id` the secret `secret`
+/// in `store`, as a case that holds a known secret needs.
+pub(crate) async fn set_secret(store: &Store, client_id: &str, secret: &str) {
+    let hash = ferrosmart::clients::SecretHash::from(
+        ferrosmart::clients::hash_secret(secret).expect("hashed"),
+    );
+    let mut tx = store.begin().await.expect("begins");
+    tx.set_secret(client_id, &hash).await.expect("written");
+    commit(tx).await;
 }
 
 /// Writes each of `documents` to the registry as `ferrosmart client apply`

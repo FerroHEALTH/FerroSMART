@@ -50,13 +50,12 @@ async fn platform() -> Platform {
         .await;
     let fhir_base = format!("{}/fhir", fhir.uri());
     let openehr_base = format!("{}/openehr/v1", openehr.uri());
-    let hash = crate::introspection::phc(SECRET);
     let grants = format!(
         "[\"authorization_code\"]\n\
-         scopes = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\", \"user/Observation.rs\"]\n\
-         [[client]]\nclient_id = \"bridge\"\nkind = \"confidential_symmetric\"\n\
-         secret_hash = {hash:?}\nresources = [{fhir_base:?}, {openehr_base:?}]\n\
-         grant_types = [\"token_exchange\"]"
+         scope = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\", \"user/Observation.rs\"]\n\
+         [[client]]\nclient_id = \"bridge\"\ntoken_endpoint_auth_method = \"client_secret_post\"\n\
+         resources = [{fhir_base:?}, {openehr_base:?}]\n\
+         grant_types = [\"urn:ietf:params:oauth:grant-type:token-exchange\"]"
     );
     let smart = Smart::start_over(
         &grants,
@@ -70,6 +69,7 @@ async fn platform() -> Platform {
         ),
     )
     .await;
+    crate::support::set_secret(&smart.store, "bridge", SECRET).await;
     Platform {
         smart,
         fhir_base,

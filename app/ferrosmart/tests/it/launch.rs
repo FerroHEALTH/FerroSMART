@@ -70,16 +70,16 @@ impl Server {
             "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
              [[ferrosmart.resource]]\nbase = {RESOURCE:?}\n\
              [[ferrosmart.resource]]\nbase = {OPENEHR:?}\nkind = \"openehr\"\n\
-             [[client]]\nclient_id = \"ehr\"\nkind = \"confidential_asymmetric\"\n\
-             jwks = {}\nscopes = [\"system/launch.c\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[client]]\nclient_id = \"export\"\nkind = \"confidential_asymmetric\"\n\
-             jwks = {}\nscopes = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[client]]\nclient_id = \"app\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"ehr\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\n\
+             jwks = {}\nscope = [\"system/launch.c\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"export\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\n\
+             jwks = {}\nscope = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"app\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://app.example.org/callback\"]\ngrant_types = [\"authorization_code\"]\n\
              launch_uri = \"https://app.example.org/launch\"\n\
-             [[client]]\nclient_id = \"other\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"other\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://other.example.org/callback\"]\ngrant_types = [\"authorization_code\"]\n\
-             [[client]]\nclient_id = \"fhir-only\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"fhir-only\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://fhir-only.example.org/callback\"]\ngrant_types = [\"authorization_code\"]\n\
              resources = [{RESOURCE:?}]",
             secrecy::ExposeSecret::expose_secret(&database.url),

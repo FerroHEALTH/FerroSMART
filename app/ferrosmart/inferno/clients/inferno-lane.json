@@ -1,11 +1,8 @@
 {
   "client_id": "inferno-lane",
-  "name": "The Inferno lane",
-  "kind": "confidential_asymmetric",
-  "scopes": [
-    "system/introspect",
-    "system/launch.c"
-  ],
+  "client_name": "The Inferno lane",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "scope": "system/introspect system/launch.c",
   "grant_types": [
     "client_credentials"
   ]

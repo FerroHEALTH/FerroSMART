@@ -1,7 +1,7 @@
 {
   "client_id": "third-party-gateway",
-  "name": "The third-party lane's gateway",
-  "kind": "confidential_symmetric",
+  "client_name": "The third-party lane's gateway",
+  "token_endpoint_auth_method": "client_secret_basic",
   "resources": [
     "http://localhost:8090/fhir",
     "http://localhost:8092/fhir",
@@ -10,9 +10,7 @@
   "redirect_uris": [
     "http://localhost:8092/callback"
   ],
-  "scopes": [
-    "system/introspect"
-  ],
+  "scope": "system/introspect",
   "grant_types": [
     "authorization_code"
   ]

@@ -163,10 +163,6 @@ make_keys() {
   jq '{keys: [.keys[] | select(.key_ops | index("verify"))
         | {kty, kid, alg, crv, x, y, n, e} | with_entries(select(.value != null))]}' \
     "$INFERNO_KIT/lib/smart_app_launch/smart_jwks.json" > "$dir/inferno-client.jwks.json"
-  # The symmetric client's Argon2id hash of the secret smart_stu2_2.yaml
-  # gives the kit for group 2.
-  printf '%s' synthetic-inferno-ehr-secret | "$root/target/debug/ferrosmart" client hash-secret \
-    > "$dir/inferno-ehr.phc"
   chmod 0644 "$dir"/*.key "$dir"/*.pem
 }
 
@@ -187,7 +183,7 @@ lane_token() {
 run() {
   : "${INFERNO_KIT:?the kit checkout}" "${LANE_PG:?the PostgreSQL URL}" "${LANE_DIR:?the lane directory}"
   local vendored="$root/docs/specs/ferrobridge-party" cdr=http://127.0.0.1:9080/ferroehr/rest/openehr/v1
-  local password person practitioner status session
+  local password person practitioner secret status session
   mkdir -p "$LANE_DIR/mappings"
   check
   make_keys "$LANE_DIR"
@@ -245,11 +241,15 @@ run() {
   jq --slurpfile set "$LANE_DIR/inferno-client.jwks.json" '.jwks = $set[0]' \
     "$lane/clients/inferno-backend-services.json" > "$LANE_DIR/clients/inferno-backend-services.json"
   cp "$lane/clients/inferno-standalone.json" "$LANE_DIR/clients/"
-  jq --rawfile hash "$LANE_DIR/inferno-ehr.phc" '.secret_hash = ($hash | rtrimstr("\n"))' \
-    "$lane/clients/inferno-ehr.json" > "$LANE_DIR/clients/inferno-ehr.json"
+  cp "$lane/clients/inferno-ehr.json" "$LANE_DIR/clients/"
   jq --slurpfile set "$LANE_DIR/lane-client.jwks.json" '.jwks = $set[0]' \
     "$lane/clients/inferno-lane.json" > "$LANE_DIR/clients/inferno-lane.json"
-  "${smart[@]}" client apply "$LANE_DIR"/clients/*.json
+  "${smart[@]}" client apply "$LANE_DIR"/clients/*.json > "$LANE_DIR/apply.log"
+  # The secret FerroSMART issued the kit's symmetric client, given to the kit
+  # for group 2 (RFC 7591 §3.2.1).
+  secret=$(awk '$3 == "\"inferno-ehr\"" && $4 == "client_secret" { print $5 }' "$LANE_DIR/apply.log")
+  [ -n "$secret" ] || { echo "lane: FerroSMART issued inferno-ehr no secret" >&2; return 1; }
+  sed "s/INFERNO_EHR_SECRET/$secret/" "$lane/smart_stu2_2.yaml" > "$LANE_DIR/smart_stu2_2.yaml"
   SSL_CERT_FILE="$LANE_DIR/trust.pem" "${smart[@]}" serve > "$LANE_DIR/ferrosmart.log" 2>&1 &
   wait_for FerroSMART https://smart.localhost:8443/.well-known/smart-configuration
 
@@ -293,7 +293,7 @@ run() {
     curl -fsS -o /dev/null http://localhost:4567 && break
     sleep 2
   done
-  docker exec inferno-lane-kit bundle exec inferno execute_script --allow-commands /script/smart_stu2_2.yaml \
+  docker exec inferno-lane-kit bundle exec inferno execute_script --allow-commands /lane/smart_stu2_2.yaml \
     2> "$LANE_DIR/execute.log" && status=0 || status=$?
   cat "$LANE_DIR/execute.log"
   for name in kit ferroehr keycloak ferrobridge; do

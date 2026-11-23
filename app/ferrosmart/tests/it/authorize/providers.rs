@@ -31,13 +31,13 @@ impl Two {
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
              fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = [\"user/Observation.rs\"]\n\
-             [[client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"app\"\nclient_name = \"Synthetic App\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\", \"refresh_token\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\", \"online_access\"]\n\
+             scope = [\"openid\", \"fhirUser\", \"user/Observation.rs\", \"online_access\"]\n\
              upstreams = [\"staff\", \"patients\"]\n\
-             [[client]]\nclient_id = \"staff-app\"\nname = \"Staff App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"staff-app\"\nclient_name = \"Staff App\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\", \"user/Observation.rs\"]\nupstreams = [\"staff\"]",
+             scope = [\"openid\", \"user/Observation.rs\"]\nupstreams = [\"staff\"]",
             secrecy::ExposeSecret::expose_secret(&database.url),
             staff.server.uri(),
             patients.server.uri(),

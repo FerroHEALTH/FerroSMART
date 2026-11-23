@@ -81,8 +81,8 @@ steps:
           auth_type: symmetric
           use_discovery: "true"
           client_id: inferno-ehr
-          # The lane's synthetic secret; FerroSMART holds only its hash.
-          client_secret: synthetic-inferno-ehr-secret
+          # The secret FerroSMART issued, which the lane writes in (RFC 7591 §3.2.1).
+          client_secret: INFERNO_EHR_SECRET
           requested_scopes: launch openid fhirUser offline_access user/Practitioner.rs
           pkce_support: enabled
           pkce_code_challenge_method: S256

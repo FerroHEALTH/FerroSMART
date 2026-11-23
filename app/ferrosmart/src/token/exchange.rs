@@ -55,7 +55,8 @@ pub(super) async fn token_exchange(
     let client = super::grants::identify(state, headers, form).await?;
     // NOTE: RFC 8693 §2.1, the client authenticates as RFC 6749 §3.2.1 has it, so a
     // public client, which cannot, is refused.
-    if client.kind == ClientKind::Public || !client.grant_types.contains(&GrantType::TokenExchange)
+    if client.kind() == ClientKind::Public
+        || !client.grant_types.contains(&GrantType::TokenExchange)
     {
         return Err(Refusal {
             error: "unauthorized_client",
