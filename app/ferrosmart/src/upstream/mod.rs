@@ -307,7 +307,7 @@ pub enum Protocol {
     /// SAML 2.0.
     Saml(saml::SamlUpstream),
     /// The EUDI Wallet, by OpenID4VP.
-    Wallet(wallet::WalletUpstream),
+    Wallet(Box<wallet::WalletUpstream>),
 }
 
 impl Upstream {

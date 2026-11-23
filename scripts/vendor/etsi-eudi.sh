@@ -4,7 +4,8 @@
 # scripts/vendor/etsi-eudi.sh
 #
 # Pins the ETSI Technical Specifications the EUDI wallet verifier (#689)
-# reads: ETSI TS 119 472-2 V1.2.1, whose clauses 4.1, 4.2, 5 and 6
+# reads: ETSI TS 119 602 V1.1.1 and the JSON schema of its Annex A.1, the
+# model of the list of PID providers (#794); ETSI TS 119 472-2 V1.2.1, whose clauses 4.1, 4.2, 5 and 6
 # Implementing Regulation (EU) 2026/1731 Annex XII applies as the
 # presentation profiles of the wallet, and ETSI TS 119 475 V1.2.1, the
 # wallet-relying party access and registration certificate profile that
@@ -59,16 +60,29 @@ pin withheld ts_119475v010201p.pdf \
   'https://www.etsi.org/deliver/etsi_ts/119400_119499/119475/01.02.01_60/ts_119475v010201p.pdf' \
   77bf8e71715c495494113da23ccba89c0af8bf6b457fe2da38b5a12738ace55f "$etsi" \
   'Fetched on 2026-11-23 and read for #689: the wallet-relying party access certificate whose hash is the x509_hash client identifier, and the registration certificate the request carries in verifier_info.'
+pin withheld ts_119602v010101p.pdf \
+  'ETSI TS 119 602 V1.1.1 (2025-11), Electronic Signatures and Trust Infrastructures (ESI); Lists of trusted entities; Data model' \
+  'https://www.etsi.org/deliver/etsi_ts/119600_119699/119602/01.01.01_60/ts_119602v010101p.pdf' \
+  27a00765a20661ecd04076a406b26a5be1123228a2f44a2dc74caeb3041155ec "$etsi" \
+  'Fetched on 2026-11-23 and read for #794: Annex D, the profile of the list of PID providers the Commission publishes under Implementing Regulation (EU) 2024/2980 Art 5(2), the JSON binding signed as a compact JAdES baseline B signature.'
+pin withheld 1960201_json_schema.json \
+  'The JSON binding of ETSI TS 119 602 V1.1.1 Annex A.1, the scheme-explicit LoTE schema, at commit e84f427f0cde99513b574ef4b5a155ac4a38eab6 of the ETSI forge repository' \
+  'https://forge.etsi.org/rep/esi/x19_60201_lists_of_trusted_entities/-/raw/e84f427f0cde99513b574ef4b5a155ac4a38eab6/1960201_json_schema/1960201_json_schema.json' \
+  f16d60477359b936cefe0c74d5f1c598e3346daf84a6bad1846c712381ca36b4 \
+  'BSD 3-Clause, "Copyright 2025 ETSI" (the repository'"'"'s LICENSE); recorded by sha256 beside the document it binds' \
+  'The member names of the PID providers list (#794).'
 pinned_corpus etsi-eudi "ETSI EUDI wallet specifications" \
   "the ETSI specifications the wallet verifier reads" \
   "ETSI TS 119 472-2 V1.2.1 and ETSI TS 119 475 V1.2.1, the presentation
 profiles and the relying party certificate profile that Implementing
 Regulation (EU) 2026/1731 Annex XII makes the technical specifications of
-the European Digital Identity Wallet's presentations.
+the European Digital Identity Wallet's presentations, and ETSI TS 119 602
+V1.1.1 with its Annex A.1 JSON schema, the model of the list of PID
+providers the ARF points to; no published act names that structure yet.
 
 ETSI permits no reproduction without its written permission, so each
 document is recorded here by URL, version and sha256, and no copy of it
 enters the repository or the cache. Its content is cited by clause only." none \
-  "the EUDI wallet verifier (#689)"
+  "the EUDI wallet verifier (#689) and its list of PID providers (#794)"
 
 say "done"

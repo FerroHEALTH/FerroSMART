@@ -13,6 +13,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -76,8 +77,13 @@ pub struct WalletSection {
     /// request object carries (Implementing Regulation (EU) 2024/2979 Annex
     /// II as amended by 2026/1731, OIDFVP-HAIP-COMMON-REQ-RO-13).
     pub registration_certificate_file: PathBuf,
-    /// The PEM files of the PID providers' trust anchors.
+    /// The PEM files of the PID providers' trust anchors, which join the
+    /// list of PID providers when one is configured.
     pub issuer_anchor_files: Vec<PathBuf>,
+    /// `[ferrosmart.upstream.openid4vp.pid_providers_list]`: the list of PID
+    /// providers the Commission publishes; none by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid_providers_list: Option<ListSection>,
     /// Where the wallet is invoked: `eu-eaap://` by default (ETSI TS 119
     /// 472-2 OIDFVP-HAIP-REDIRECTS-03).
     pub wallet_endpoint: String,
@@ -105,6 +111,7 @@ impl Default for WalletSection {
             access_key_file: PathBuf::new(),
             registration_certificate_file: PathBuf::new(),
             issuer_anchor_files: Vec::new(),
+            pid_providers_list: None,
             wallet_endpoint: String::from("eu-eaap://"),
             vct_values: vec![String::from("urn:eudi:pid:1")],
             claims: [
@@ -129,6 +136,37 @@ impl WalletSection {
     #[must_use]
     pub fn issuer(&self) -> Option<&str> {
         self.vct_values.first().map(String::as_str)
+    }
+}
+
+/// `[ferrosmart.upstream.openid4vp.pid_providers_list]`: the list of PID providers.
+///
+/// It names where the list is read and who signs it, which the Commission
+/// publishes beside it (Implementing Regulation (EU) 2024/2980 Art 5(4)(b)
+/// and (c), as amended by 2026/1731).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ListSection {
+    /// The https URL of the list; exclusive with `file`.
+    pub url: String,
+    /// A file holding a copy of the list; exclusive with `url`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<PathBuf>,
+    /// The PEM files of the certificates that sign the list.
+    pub signing_certificate_files: Vec<PathBuf>,
+    /// How often the list is read again; `1h` by default. It is read again
+    /// at its next update too.
+    pub refresh: ferrohealth_config::units::Duration,
+}
+
+impl Default for ListSection {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            file: None,
+            signing_certificate_files: Vec::new(),
+            refresh: ferrohealth_config::units::Duration::from_hours(1),
+        }
     }
 }
 
@@ -164,8 +202,10 @@ pub struct WalletUpstream {
     pub issuer: String,
     /// The verifier.
     verifier: Arc<Verifier>,
-    /// The PID providers' anchors.
+    /// The PID providers' anchors from files.
     anchors: Arc<Anchors>,
+    /// The list of PID providers, when one is configured.
+    list: Option<ListSource>,
     /// Where the wallet is invoked.
     endpoint: Url,
     /// The request object route, with no `state`.
@@ -246,7 +286,16 @@ pub fn upstream(
         .iter()
         .map(|path| read("ferrosmart.upstream.openid4vp.issuer_anchor_files", path))
         .collect::<Result<Vec<_>, _>>()?;
-    let anchors = Anchors::from_pem(&anchor_files).map_err(WalletConfigError::Anchors)?;
+    let anchors = if anchor_files.is_empty() && section.pid_providers_list.is_some() {
+        Anchors::default()
+    } else {
+        Anchors::from_pem(&anchor_files).map_err(WalletConfigError::Anchors)?
+    };
+    let list = section
+        .pid_providers_list
+        .as_ref()
+        .map(list_source)
+        .transpose()?;
     let paths: Vec<Vec<String>> = section
         .claims
         .iter()
@@ -279,6 +328,7 @@ pub fn upstream(
         issuer: vct_issuer.to_owned(),
         verifier: Arc::new(verifier),
         anchors: Arc::new(anchors),
+        list,
         endpoint,
         request_base: route(issuer, "/wallet/request"),
         page: route(issuer, PAGE_ROUTE),
@@ -287,6 +337,71 @@ pub fn upstream(
         identifier_claim: section.identifier_claim.clone(),
         origin: issuer.origin().ascii_serialization(),
         digital_credentials_api: section.digital_credentials_api,
+    })
+}
+
+/// Where the list of PID providers is read, and who signs it.
+#[derive(Debug, Clone)]
+struct ListSource {
+    /// The URL or the file.
+    location: ListLocation,
+    /// The certificates that sign the list, DER.
+    signers: Vec<Vec<u8>>,
+    /// How often the list is read again.
+    refresh: Duration,
+}
+
+/// Where the list is read.
+#[derive(Debug, Clone)]
+enum ListLocation {
+    /// An https URL.
+    Url(Url),
+    /// A file.
+    File(PathBuf),
+}
+
+/// Returns the list source `section` describes.
+fn list_source(section: &ListSection) -> Result<ListSource, WalletConfigError> {
+    const KEY: &str = "ferrosmart.upstream.openid4vp.pid_providers_list.signing_certificate_files";
+    // NOTE: Implementing Regulation (EU) 2024/2980 Art 5(3)(c), the list is read over
+    // state-of-the-art transport encryption.
+    let location = match (section.url.as_str(), &section.file) {
+        ("", Some(file)) => ListLocation::File(file.clone()),
+        (url, None) if !url.is_empty() => match Url::parse(url) {
+            Ok(url) if url.scheme() == "https" => ListLocation::Url(url),
+            _ => {
+                return Err(WalletConfigError::Rule(
+                    "`pid_providers_list.url` is an https URL",
+                ));
+            }
+        },
+        _ => {
+            return Err(WalletConfigError::Rule(
+                "`pid_providers_list` sets one of `url` and `file`",
+            ));
+        }
+    };
+    let mut signers = Vec::new();
+    for path in &section.signing_certificate_files {
+        signers.extend(
+            crate::wallet::x509::certificates(&read(KEY, path)?)
+                .map_err(WalletConfigError::Anchors)?,
+        );
+    }
+    if signers.is_empty() {
+        return Err(WalletConfigError::Rule(
+            "`pid_providers_list.signing_certificate_files` names the list's signing certificates",
+        ));
+    }
+    if section.refresh.is_zero() {
+        return Err(WalletConfigError::Rule(
+            "`pid_providers_list.refresh` is greater than zero",
+        ));
+    }
+    Ok(ListSource {
+        location,
+        signers,
+        refresh: section.refresh.get(),
     })
 }
 
@@ -345,8 +460,22 @@ pub struct Begun {
 pub struct WalletLogin {
     /// The entry.
     upstream: WalletUpstream,
-    /// The client of `x5u` chains and status lists.
+    /// The client of `x5u` chains, status lists and the list of PID
+    /// providers.
     http: reqwest::Client,
+    /// The list of PID providers as this replica last read it.
+    held: tokio::sync::Mutex<ListRead>,
+}
+
+/// The list of PID providers as a replica last read it.
+#[derive(Debug, Clone, Default)]
+pub struct ListRead {
+    /// The last list that verified.
+    pub list: Option<crate::wallet::lote::ProvidersList>,
+    /// When the list was last read, in seconds since the epoch.
+    pub read_at: Option<i64>,
+    /// Why the last read failed, when it did.
+    pub failure: Option<String>,
 }
 
 impl WalletLogin {
@@ -362,6 +491,7 @@ impl WalletLogin {
         Ok(Self {
             upstream: upstream.clone(),
             http,
+            held: tokio::sync::Mutex::new(ListRead::default()),
         })
     }
 
@@ -470,9 +600,8 @@ impl WalletLogin {
                 self.chain_at(&url, thumbprint.as_deref()).await?
             }
         };
-        let issuer = self
-            .upstream
-            .anchors
+        let (anchors, status_anchors) = self.anchors(now).await?;
+        let issuer = anchors
             .verify(&chain, now)
             .map_err(|_untrusted| Refusal::UntrustedIssuer)?;
         let verified = read.verify(
@@ -492,14 +621,83 @@ impl WalletLogin {
                 .await
                 .map_err(|error| unreached(&error, Refusal::StatusUnavailable))?;
             let token = StatusToken::parse(&text)?;
-            let signer = self
-                .upstream
-                .anchors
+            let signer = status_anchors
                 .verify(&token.chain()?, now)
                 .map_err(|_untrusted| Refusal::StatusUnavailable)?;
             token.check(&signer, reference, now)?;
         }
         self.identity(verified)
+    }
+
+    /// Returns the anchors of credentials and of status lists at `now`: the
+    /// files', joined by the list of PID providers when one is configured.
+    ///
+    /// The list is read again once its refresh or its next update has passed.
+    /// A read that fails keeps the last list that verified until its next
+    /// update; without one, every login is refused (ETSI TS 119 602 §6.3.15).
+    async fn anchors(&self, now: i64) -> Result<(Anchors, Anchors), Refusal> {
+        let Some(source) = &self.upstream.list else {
+            let anchors = (*self.upstream.anchors).clone();
+            return Ok((anchors.clone(), anchors));
+        };
+        let mut held = self.held.lock().await;
+        let refresh = i64::try_from(source.refresh.as_secs()).unwrap_or(i64::MAX);
+        let stale = held
+            .read_at
+            .is_none_or(|at| now >= at.saturating_add(refresh))
+            || held
+                .list
+                .as_ref()
+                .is_none_or(|list| now >= list.next_update);
+        if stale {
+            held.read_at = Some(now);
+            match self.read_list(source, now).await {
+                Ok(list) => {
+                    held.list = Some(list);
+                    held.failure = None;
+                }
+                Err(failure) => {
+                    tracing::warn!(failure = %failure, "the list of PID providers could not be read; the last one that verified stays");
+                    held.failure = Some(failure);
+                }
+            }
+        }
+        let Some(list) = held.list.as_ref().filter(|list| now < list.next_update) else {
+            tracing::warn!(
+                "no list of PID providers that verified is current; the wallet login is refused"
+            );
+            return Err(Refusal::TrustedListUnavailable);
+        };
+        let issuance = Anchors::from_der(list.issuance.clone());
+        let revocation = Anchors::from_der(list.revocation.clone());
+        let anchors = self.upstream.anchors.joined(&issuance);
+        let status = anchors.joined(&revocation);
+        Ok((anchors, status))
+    }
+
+    /// Reads and verifies the list at `source` at `now`, or says why not.
+    async fn read_list(
+        &self,
+        source: &ListSource,
+        now: i64,
+    ) -> Result<crate::wallet::lote::ProvidersList, String> {
+        let text = match &source.location {
+            ListLocation::Url(url) => self
+                .fetch(url.as_str(), None)
+                .await
+                .map_err(|error| ferrohealth_server::run::chain(&error))?,
+            ListLocation::File(path) => tokio::fs::read_to_string(path)
+                .await
+                .map_err(|error| ferrohealth_server::run::chain(&error))?,
+        };
+        crate::wallet::lote::read(&text, &source.signers, now).map_err(|error| error.to_string())
+    }
+
+    /// Returns the list of PID providers as this replica last read it, none
+    /// when no list is configured.
+    pub async fn list_read(&self) -> Option<ListRead> {
+        self.upstream.list.as_ref()?;
+        Some(self.held.lock().await.clone())
     }
 
     /// Returns the person `verified` names, refusing one without the

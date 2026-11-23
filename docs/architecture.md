@@ -3431,12 +3431,16 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 # access_certificate_file = "/run/secrets/wrp-access.pem"   # the access certificate and its path, the anchor left out
 # access_key_file = "/run/secrets/wrp-access-key.pem"       # its PKCS#8 P-256 key, which signs every request object
 # registration_certificate_file = "/run/secrets/wrp-registration.jwt"   # as the registrar issued it
-# issuer_anchor_files = ["/run/secrets/pid-providers.pem"]  # the PID providers' trust anchors
+# issuer_anchor_files = ["/run/secrets/pid-providers.pem"]  # the PID providers' trust anchors, joining the list below
 # wallet_endpoint = "eu-eaap://"
 # vct_values = ["urn:eudi:pid:1"]
 # claims = ["family_name", "given_name", "birthdate", "personal_administrative_number", "issuing_country"]
 # identifier_claim = "personal_administrative_number"       # the claim the fhirUser lookup reads
 # digital_credentials_api = true            # the page offers the W3C Digital Credentials API beside the link
+# [ferrosmart.upstream.openid4vp.pid_providers_list]   # the Commission's list of PID providers (13.32)
+# url = "https://…"                         # where the Commission publishes it; or `file`
+# signing_certificate_files = ["/run/secrets/pid-providers-list-signer.pem"]
+# refresh = "1h"
 
 [[ferrosmart.role]]                           # policy as content: what a role may be granted
 name = "clinician"
@@ -5089,6 +5093,7 @@ refusal:
 | `expired` | now is before `exp` and at or after `nbf` less 60 seconds |
 | `bad_holder_binding` | a Key Binding JWT of type `kb+jwt`, ES256 under `cnf.jwk`, with the request's `nonce`, the `client_id` as `aud`, the `sd_hash` of the presentation, and an `iat` at most 300 seconds old and 60 ahead (`rfc9901 §7.3`; `openid4vp` Appendix B.3.6; the window is our own design) |
 | `revoked` | the Token Status List gives the credential's index the value valid (`tsl §7.1`) |
+| `trusted_list_unavailable` | a list of PID providers is configured, and one that verified is current |
 | `status_unavailable` | the Status List Token reads, is of type `statuslist+jwt`, is signed under a chain to the same anchors (`haip §6.1`), names the credential's `uri` as `sub`, is not expired, and holds the index (`tsl §8.3`) |
 | `replayed_nonce` | the request's nonce was not answered before (`openid4vp §14.1.2`) |
 | `no_administrative_number` | the identifier claim is disclosed |
@@ -5135,6 +5140,33 @@ names the app's origin, since that redirect follows the post (CSP Level 3
 §6.4.2). A browser without the API, or a person who cancels its dialog,
 follows the link. With `digital_credentials_api` off, the browser goes
 straight to the wallet endpoint.
+
+**The list of PID providers.** Implementing Regulation (EU) 2024/2980
+Art 5(2), as amended by 2026/1731, has the Commission publish the list of
+PID providers, signed or sealed, with the specification of its structure,
+its URL and its signing certificates (Art 5(4)). No published act names
+the structure yet. FerroSMART reads the one the Architecture and Reference
+Framework points to: ETSI TS 119 602 V1.1.1 Annex D, the JSON binding of
+Annex A.1 under a compact JAdES baseline B signature (Annex D.4), recorded
+by sha256 under `docs/specs/etsi-eudi/`. The XML binding is not read.
+`[ferrosmart.upstream.openid4vp.pid_providers_list]` names the list's
+https `url` (Art 5(3)(c)), or a `file` holding a copy, and the
+`signing_certificate_files` the Commission publishes (Art 5(4)(b) and
+(c)). A list is accepted when one of those certificates verifies its
+signature and is the one its `x5t#S256` or `x5c` names, when that
+certificate's subject names the list's `SchemeTerritory` and one of its
+`SchemeOperatorName` values (`119 602 §6.8.0`), when its `LoTEType` is the
+PID providers list's, and when its `NextUpdate` is ahead (`119 602
+§6.3.15`). The certificates of each provider's issuance services become
+anchors of credentials, and those of its revocation services also anchor
+status lists. A listed certificate is trusted itself, so a chain ends
+where it meets one (`119 602` Table D.3). The `issuer_anchor_files` join
+the list. The list is read again every `refresh` (`1h` by default) and at
+its next update. A read that fails keeps the last list that verified
+until that list's next update. Without a current list that verified,
+every wallet login is refused as `trusted_list_unavailable`, and the
+failure is logged with no credential content. `GET /admin/upstreams`
+shows each replica's last read as the `pid_providers_list` document.
 
 **The person.** The PID's `issuing_country` and identifier claim name the
 person. The FerroSMART `sub` is pairwise (13.6 item 9) over the entry's

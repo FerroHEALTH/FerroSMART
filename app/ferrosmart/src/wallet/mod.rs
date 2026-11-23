@@ -13,6 +13,7 @@
 //! (`crate::authorize::wallet`) answer the wallet.
 
 pub mod jwe;
+pub mod lote;
 pub mod request;
 pub mod sdjwt;
 pub mod status;
@@ -69,6 +70,10 @@ pub enum Refusal {
     /// The request's nonce was already answered (OpenID4VP 1.0 §14.1.2).
     #[error("replayed_nonce")]
     ReplayedNonce,
+    /// No list of PID providers that verified is current, so no issuer can
+    /// be trusted (ETSI TS 119 602 §6.3.15).
+    #[error("trusted_list_unavailable")]
+    TrustedListUnavailable,
     /// The credential discloses no value for the identifier claim.
     #[error("no_administrative_number")]
     NoAdministrativeNumber,

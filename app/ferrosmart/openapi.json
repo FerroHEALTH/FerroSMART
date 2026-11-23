@@ -1179,7 +1179,8 @@
             "enum": [
               "openid_configuration",
               "jwks",
-              "saml_metadata"
+              "saml_metadata",
+              "pid_providers_list"
             ]
           },
           "read_at": {
@@ -1201,7 +1202,7 @@
           "valid_until": {
             "type": "string",
             "format": "date-time",
-            "description": "The SAML metadata's validUntil."
+            "description": "The SAML metadata's validUntil, or the next update of the list of PID providers in use."
           },
           "certificates_expire_at": {
             "type": "array",

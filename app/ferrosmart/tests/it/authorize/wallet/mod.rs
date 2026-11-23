@@ -8,6 +8,7 @@
 
 mod api;
 pub(crate) mod kit;
+mod list;
 mod refusals;
 
 use base64::Engine as _;
@@ -102,8 +103,22 @@ fn read_jws(token: &str) -> (Value, Value) {
 
 impl Wallet {
     /// Starts FerroSMART with one wallet entry whose `[ferrosmart.upstream.openid4vp]`
-    /// table carries `extra` too.
+    /// table carries the anchor file and `extra` too.
     async fn start_with(extra: &str) -> Self {
+        let extra = extra.to_owned();
+        Self::start_built(move |pki, dir| {
+            format!(
+                "issuer_anchor_files = [{}]\n{extra}",
+                written(dir, "pid-root.pem", &pki.pid_root.pem)
+            )
+        })
+        .await
+    }
+
+    /// Starts FerroSMART with one wallet entry whose `[ferrosmart.upstream.openid4vp]`
+    /// table ends with what `table` writes for the case's certificates in its
+    /// folder.
+    async fn start_built(table: impl FnOnce(&Pki, &std::path::Path) -> String) -> Self {
         let pki = Pki::new();
         let provider = Provider::start().await;
         let status = MockServer::start().await;
@@ -136,7 +151,7 @@ impl Wallet {
              [[ferrosmart.upstream]]\nname = \"wallet\"\nlabel = \"EUDI Wallet\"\n\
              [ferrosmart.upstream.openid4vp]\naccess_certificate_file = {access}\n\
              access_key_file = {access_key}\nregistration_certificate_file = {registration}\n\
-             issuer_anchor_files = [{anchor}]\n{extra}\
+             {table}\
              [[client]]\nclient_id = \"app\"\nclient_name = \"Synthetic App\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
              {listing}scope = [\"openid\", \"fhirUser\"]\n",
@@ -144,7 +159,7 @@ impl Wallet {
             access = written(dir, "access.pem", &pki.access.pem),
             access_key = written(dir, "access-key.pem", &pki.access.key.serialize_pem()),
             registration = written(dir, "registration.jwt", "eyJhbGciOiJFUzI1NiJ9.e30.c2ln\n"),
-            anchor = written(dir, "pid-root.pem", &pki.pid_root.pem),
+            table = table(&pki, dir),
             listing = crate::support::resources_of(&resource),
         );
         let settings = config(&text, &keys).resolve().expect("resolves");

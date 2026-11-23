@@ -756,7 +756,11 @@ fn upstream(
         }
         (None, None, Some(wallet)) => {
             let resolved = crate::upstream::wallet::upstream(wallet, issuer)?;
-            (Protocol::Wallet(resolved), String::new(), Vec::new())
+            (
+                Protocol::Wallet(Box::new(resolved)),
+                String::new(),
+                Vec::new(),
+            )
         }
         _ => {
             return Err(Error::Upstream {

@@ -90,6 +90,28 @@ impl Anchors {
         Ok(Self { anchors })
     }
 
+    /// Returns the anchors of the DER certificates `certificates`.
+    #[must_use]
+    pub fn from_der(certificates: Vec<Vec<u8>>) -> Self {
+        Self {
+            anchors: certificates.into_iter().map(|der| Anchor { der }).collect(),
+        }
+    }
+
+    /// Returns these anchors and those of `other`.
+    #[must_use]
+    pub fn joined(&self, other: &Self) -> Self {
+        let mut anchors = self.anchors.clone();
+        anchors.extend(other.anchors.iter().cloned());
+        Self { anchors }
+    }
+
+    /// Whether there is no anchor.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.anchors.is_empty()
+    }
+
     /// Returns the base64url key identifier of each anchor that carries one,
     /// the values of a DCQL `aki` trusted authorities query (OpenID4VP 1.0
     /// §6.1.1.1).
@@ -132,15 +154,28 @@ impl Anchors {
         if leaf.subject().as_raw() == leaf.issuer().as_raw() {
             return Err(PathError::SelfSigned);
         }
-        for (index, certificate) in parsed.iter().enumerate() {
+        // NOTE: ETSI TS 119 602 Table D.3, a listed certificate is trusted itself, so the path
+        // ends at the first certificate an anchor equals.
+        let direct = parsed.iter().position(|certificate| {
+            self.anchors
+                .iter()
+                .any(|anchor| anchor.der == certificate.as_raw())
+        });
+        let path = parsed
+            .get(..=direct.unwrap_or(parsed.len().saturating_sub(1)))
+            .ok_or(PathError::Empty)?;
+        for (index, certificate) in path.iter().enumerate() {
             if !certificate.validity().is_valid_at(at) {
                 return Err(PathError::Expired);
             }
-            if let Some(signer) = parsed.get(index + 1) {
+            if let Some(signer) = path.get(index + 1) {
                 signed_by(certificate, signer)?;
             }
         }
-        let last = parsed.last().ok_or(PathError::Empty)?;
+        if direct.is_some() {
+            return p256(leaf).ok_or(PathError::Key);
+        }
+        let last = path.last().ok_or(PathError::Empty)?;
         let anchored = self.anchors.iter().any(|anchor| {
             X509Certificate::from_der(&anchor.der).is_ok_and(|(_, root)| {
                 root.validity().is_valid_at(at) && signed_by(last, &root).is_ok()
