@@ -2555,7 +2555,7 @@ mod saml;
 mod secret_basic;
 mod self_registered;
 mod token_exchange;
-mod wallet;
+pub(crate) mod wallet;
 
 /// The capabilities FerroSMART supports with a FHIR resource server and a
 /// SMART style document configured, each with the case that exercises it

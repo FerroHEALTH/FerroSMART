@@ -28,6 +28,7 @@ use url::Url;
 
 pub mod logout;
 pub mod saml;
+pub mod wallet;
 
 use crate::authorize::{CONSENT_ROUTE, MANAGE_ROUTE};
 use crate::clients::Client;

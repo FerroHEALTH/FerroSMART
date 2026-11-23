@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt as _;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
+use crate::authorize::wallet::kit::{Credential, Holder, Pki, now, sealed};
 use crate::authorize::{
     CHALLENGE, Provider, UPSTREAM_CLIENT, VERIFIER, form_token, location, param, set_cookie,
 };
@@ -95,6 +96,10 @@ pub(crate) struct Stack {
     database: Database,
     /// The keys, kept for the stack's length.
     _keys: Keys,
+    /// The certificates of the wallet and the PID provider.
+    pki: Pki,
+    /// The wallet holder's key.
+    holder: Holder,
     /// The server the browser reaches.
     served: tokio::task::JoinHandle<()>,
 }
@@ -121,6 +126,8 @@ impl Stack {
         let keys = Keys::new();
         let database = Database::create().await;
         let assertion = crate::support::upstream_assertion(keys.dir.path());
+        let pki = Pki::new();
+        let wallet = wallet_entry(keys.dir.path(), &pki);
         let text = format!(
             "[ferrosmart]\nname = \"Example Hospital\"\nissuer = {issuer:?}\n[ferrosmart.database]\nurl = {:?}\n\
              [[ferrosmart.upstream]]\nname = \"idp\"\nlabel = \"Hospital staff\"\n\
@@ -128,7 +135,7 @@ impl Stack {
              fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [[ferrosmart.upstream]]\nname = \"portal\"\nlabel = \"Patient portal\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
-             fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
+             fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}{wallet}\
              [ferrosmart.branding]\n\
              consent_text = \"Example Hospital records every access to your record.\"\n\
              [[ferrosmart.resource]]\nbase = {base:?}\n\
@@ -144,7 +151,10 @@ impl Stack {
              upstreams = [\"idp\"]\n\
              [[client]]\nclient_id = \"my-record\"\nclient_name = \"My Record\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{WARD_REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scope = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]",
+             scope = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]\nupstreams = [\"idp\", \"portal\"]\n\
+             [[client]]\nclient_id = \"wallet-record\"\nclient_name = \"My Record\"\ntoken_endpoint_auth_method = \"none\"\n\
+             redirect_uris = [{WARD_REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
+             scope = [\"openid\", \"fhirUser\"]\nupstreams = [\"wallet\"]",
             secrecy::ExposeSecret::expose_secret(&database.url),
             provider.server.uri(),
             portal.server.uri()
@@ -184,6 +194,8 @@ impl Stack {
             store,
             database,
             _keys: keys,
+            pki,
+            holder: Holder::new(),
             served,
         }
     }
@@ -342,9 +354,14 @@ impl Stack {
 
     /// Brings the patient app's patient picker about and returns its cookie.
     pub(crate) async fn picker(&self) -> String {
-        let path = self.authorize_path(
-            "growth-chart",
-            "openid fhirUser launch/patient patient/Observation.rs",
+        // NOTE: OpenID Connect Core 1.0 §3.1.2.1, a clinician sees the consent page of an
+        // administered app after the picker when the request asks with prompt=consent.
+        let path = format!(
+            "{}&prompt=consent",
+            self.authorize_path(
+                "growth-chart",
+                "openid fhirUser launch/patient patient/Observation.rs",
+            )
         );
         let (cookie, next) = self.log_in(&path).await;
         assert_eq!("/picker", next, "to the patient picker");
@@ -426,5 +443,68 @@ impl Stack {
     pub(crate) async fn stop(self) {
         self.served.abort();
         self.database.drop(self.store).await;
+    }
+}
+
+/// Writes the wallet's certificates of `pki` to `dir` and returns its
+/// `[[ferrosmart.upstream]]` entry, with no `fhirUser` lookup.
+fn wallet_entry(dir: &std::path::Path, pki: &Pki) -> String {
+    let written = |name: &str, text: &str| {
+        let path = dir.join(name);
+        std::fs::write(&path, text).expect("written");
+        format!("{:?}", path.display().to_string())
+    };
+    format!(
+        "[[ferrosmart.upstream]]\nname = \"wallet\"\nlabel = \"EUDI Wallet\"\n\
+         [ferrosmart.upstream.openid4vp]\naccess_certificate_file = {}\naccess_key_file = {}\n\
+         registration_certificate_file = {}\nissuer_anchor_files = [{}]\n",
+        written("wallet-access.pem", &pki.access.pem),
+        written("wallet-access-key.pem", &pki.access.key.serialize_pem()),
+        written("wallet-registration.jwt", "eyJhbGciOiJFUzI1NiJ9.e30.c2ln\n"),
+        written("wallet-anchor.pem", &pki.pid_root.pem),
+    )
+}
+
+impl Stack {
+    /// Brings the wallet page of an app whose people log in with their
+    /// EUDI Wallet about and returns its cookie.
+    pub(crate) async fn wallet(&self) -> String {
+        let path = self.authorize_path("wallet-record", "openid fhirUser");
+        let (status, headers, page) = self.get(&path, None).await;
+        assert_eq!(StatusCode::SEE_OTHER, status, "{path}: {page}");
+        assert_eq!("/wallet", location(&headers).path(), "to the wallet page");
+        set_cookie(&headers)
+    }
+
+    /// Returns the nonce of the request the wallet page of `cookie` hands the
+    /// Digital Credentials API, and the answer a wallet gives it: the PID
+    /// bound to the page's origin, encrypted to the request's key.
+    pub(crate) async fn wallet_answer(&self, cookie: &str) -> (String, Value) {
+        let (status, _, page) = self.get("/wallet", Some(cookie)).await;
+        assert_eq!(StatusCode::OK, status, "{page}");
+        let (_, rest) = page.split_once("data-request=\"").expect("the request");
+        let (request, _) = rest.split_once('"').expect("a closing quote");
+        let payload = request.split('.').nth(1).expect("a payload");
+        let claims: Value = serde_json::from_slice(
+            &base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, payload)
+                .expect("base64url"),
+        )
+        .expect("JSON");
+        let nonce = claims
+            .get("nonce")
+            .and_then(Value::as_str)
+            .expect("a nonce");
+        let jwk = claims
+            .pointer("/client_metadata/jwks/keys/0")
+            .expect("a key");
+        let presentation = Credential::pid().present(
+            &self.pki.issuer,
+            &self.holder,
+            &format!("origin:{}", self.issuer),
+            nonce,
+            now(),
+        );
+        let response = sealed(&json!({"vp_token": {"pid": [presentation]}}), jwk);
+        (nonce.to_owned(), json!({"response": response}))
     }
 }

@@ -6,7 +6,8 @@
 //! bringing the response code back, the `fhirUser` the PID's administrative
 //! number finds, and the `110122` Login record of each outcome.
 
-mod kit;
+mod api;
+pub(crate) mod kit;
 mod refusals;
 
 use base64::Engine as _;
@@ -73,6 +74,18 @@ impl Begun {
             .expect("a key")
             .clone()
     }
+}
+
+/// Returns the value of the first attribute `name` in `page` whose value
+/// starts with `starts`, its entities read.
+fn attribute(page: &str, name: &str, starts: &str) -> String {
+    let marker = format!("{name}=\"{starts}");
+    let (_, rest) = page.split_once(&marker).expect("the attribute");
+    let (rest, _) = rest.split_once('"').expect("a closing quote");
+    format!("{starts}{rest}")
+        .replace("&#38;", "&")
+        .replace("&#34;", "\"")
+        .replace("&#39;", "'")
 }
 
 /// Returns the header and claims of the compact JWS `token`.
@@ -176,8 +189,17 @@ impl Wallet {
         let path = authorize_path(&[("scope", SCOPE), ("aud", &self.base())]);
         let (status, headers, page) = self.smart.get(&path, None).await;
         assert_eq!(StatusCode::SEE_OTHER, status, "{page}");
-        let invocation = location(&headers);
         let cookie = set_cookie(&headers);
+        let to_page = location(&headers);
+        assert_eq!(
+            "/wallet",
+            to_page.path(),
+            "the wallet page offers both lanes"
+        );
+        let (status, _, page) = self.smart.get("/wallet", Some(&cookie)).await;
+        assert_eq!(StatusCode::OK, status, "{page}");
+        let invocation =
+            Url::parse(&attribute(&page, "href", "eu-eaap:")).expect("the wallet link");
         let request_uri =
             Url::parse(&param(&invocation, "request_uri").expect("a request_uri")).expect("a URL");
         let (status, headers, token) = self.smart.get(request_uri.path(), None).await;

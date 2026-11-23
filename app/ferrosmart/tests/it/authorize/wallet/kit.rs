@@ -17,24 +17,24 @@ use rcgen::{
 use serde_json::{Value, json};
 
 /// The PID's credential type.
-pub(super) const PID: &str = "urn:eudi:pid:1";
+pub(crate) const PID: &str = "urn:eudi:pid:1";
 
 /// A certificate with its key.
-pub(super) struct Authority {
+pub(crate) struct Authority {
     /// The parameters it was made from, which sign under it.
     params: CertificateParams,
     /// Its key.
-    pub(super) key: KeyPair,
+    pub(crate) key: KeyPair,
     /// The certificate, DER.
-    pub(super) der: Vec<u8>,
+    pub(crate) der: Vec<u8>,
     /// The certificate, PEM.
-    pub(super) pem: String,
+    pub(crate) pem: String,
 }
 
 impl Authority {
     /// Makes a certificate named `name`, a certificate authority when `ca`,
     /// signed by `signer` or by itself.
-    pub(super) fn new(name: &str, ca: bool, signer: Option<&Self>) -> Self {
+    pub(crate) fn new(name: &str, ca: bool, signer: Option<&Self>) -> Self {
         let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("a key");
         let mut params = CertificateParams::new(Vec::<String>::new()).expect("params");
         params.distinguished_name.push(DnType::CommonName, name);
@@ -58,7 +58,7 @@ impl Authority {
     }
 
     /// Signs `claims` under `header` with this certificate's key.
-    pub(super) fn sign(&self, header: &Header, claims: &Value) -> String {
+    pub(crate) fn sign(&self, header: &Header, claims: &Value) -> String {
         jsonwebtoken::encode(
             header,
             claims,
@@ -69,7 +69,7 @@ impl Authority {
 
     /// Returns the header of a JWS this certificate signs, carrying it as
     /// `x5c`.
-    pub(super) fn header(&self, typ: &str) -> Header {
+    pub(crate) fn header(&self, typ: &str) -> Header {
         let mut header = Header::new(Algorithm::ES256);
         header.typ = Some(typ.to_owned());
         header.x5c = Some(vec![STANDARD.encode(&self.der)]);
@@ -78,20 +78,20 @@ impl Authority {
 }
 
 /// The certificates of a case.
-pub(super) struct Pki {
+pub(crate) struct Pki {
     /// The verifier's access certificate.
-    pub(super) access: Authority,
+    pub(crate) access: Authority,
     /// The PID providers' anchor FerroSMART is configured with.
-    pub(super) pid_root: Authority,
+    pub(crate) pid_root: Authority,
     /// The PID provider, under the anchor.
-    pub(super) issuer: Authority,
+    pub(crate) issuer: Authority,
     /// A provider under another root.
-    pub(super) stranger: Authority,
+    pub(crate) stranger: Authority,
 }
 
 impl Pki {
     /// Makes the certificates.
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let rp_root = Authority::new("rp-root", true, None);
         let access = Authority::new("ferrosmart-access", false, Some(&rp_root));
         let pid_root = Authority::new("pid-root", true, None);
@@ -108,21 +108,21 @@ impl Pki {
 }
 
 /// The holder's key, which the PID binds.
-pub(super) struct Holder {
+pub(crate) struct Holder {
     /// The key.
     key: KeyPair,
 }
 
 impl Holder {
     /// Makes a key.
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             key: KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("a key"),
         }
     }
 
     /// Returns the public JWK.
-    pub(super) fn jwk(&self) -> Value {
+    pub(crate) fn jwk(&self) -> Value {
         let point = self.key.public_key_raw();
         json!({
             "kty": "EC",
@@ -134,7 +134,7 @@ impl Holder {
 
     /// Returns the Key Binding JWT over `hashed` for `aud` and `nonce`,
     /// issued at `iat`.
-    pub(super) fn bind(&self, hashed: &str, aud: &str, nonce: &str, iat: i64) -> String {
+    pub(crate) fn bind(&self, hashed: &str, aud: &str, nonce: &str, iat: i64) -> String {
         let mut header = Header::new(Algorithm::ES256);
         header.typ = Some(String::from("kb+jwt"));
         let sd_hash = URL_SAFE_NO_PAD.encode(aws_lc_rs::digest::digest(
@@ -152,27 +152,27 @@ impl Holder {
 }
 
 /// Returns the time now in seconds since the epoch.
-pub(super) fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     jiff::Timestamp::now().as_second()
 }
 
 /// A PID as its provider issues it.
-pub(super) struct Credential {
+pub(crate) struct Credential {
     /// The type.
-    pub(super) vct: String,
+    pub(crate) vct: String,
     /// The selectively disclosable claims, by name.
-    pub(super) claims: Vec<(String, Value)>,
+    pub(crate) claims: Vec<(String, Value)>,
     /// The names of the claims the holder leaves out of the presentation.
-    pub(super) withheld: Vec<String>,
+    pub(crate) withheld: Vec<String>,
     /// The `exp`.
-    pub(super) exp: i64,
+    pub(crate) exp: i64,
     /// The `status` claim, if any.
-    pub(super) status: Option<Value>,
+    pub(crate) status: Option<Value>,
 }
 
 impl Credential {
     /// Returns a PID of a Dutch person, valid for a day, with no status.
-    pub(super) fn pid() -> Self {
+    pub(crate) fn pid() -> Self {
         Self {
             vct: String::from(PID),
             claims: vec![
@@ -194,7 +194,7 @@ impl Credential {
     /// Returns the presentation `signer` issued, bound by `holder` for
     /// `aud` and `nonce` at `iat`: the SD-JWT with its disclosures and Key
     /// Binding JWT.
-    pub(super) fn present(
+    pub(crate) fn present(
         &self,
         signer: &Authority,
         holder: &Holder,
@@ -209,7 +209,7 @@ impl Credential {
 
     /// Returns the SD-JWT `signer` issued for `holder`, with the disclosures
     /// the holder presents and the closing `~`.
-    pub(super) fn issued(&self, signer: &Authority, holder: &Holder) -> String {
+    pub(crate) fn issued(&self, signer: &Authority, holder: &Holder) -> String {
         let mut digests = Vec::new();
         let mut disclosed = Vec::new();
         for (index, (name, value)) in self.claims.iter().enumerate() {
@@ -247,7 +247,7 @@ impl Credential {
 
 /// Returns a Status List Token for `uri` that `signer` signs, in which
 /// each index of `revoked` is invalid among `size` credentials, one bit each.
-pub(super) fn status_list(signer: &Authority, uri: &str, size: usize, revoked: &[usize]) -> String {
+pub(crate) fn status_list(signer: &Authority, uri: &str, size: usize, revoked: &[usize]) -> String {
     let mut bytes = vec![0_u8; size.div_ceil(8)];
     for index in revoked {
         *bytes.get_mut(index / 8).expect("within the list") |= 1 << (index % 8);
@@ -266,6 +266,6 @@ pub(super) fn status_list(signer: &Authority, uri: &str, size: usize, revoked: &
 
 /// Returns the encrypted answer a wallet posts: `payload` sealed to the
 /// request's `jwk` with A256GCM.
-pub(super) fn sealed(payload: &Value, jwk: &Value) -> String {
+pub(crate) fn sealed(payload: &Value, jwk: &Value) -> String {
     ferrosmart::wallet::jwe::encrypt(payload.to_string().as_bytes(), jwk, "A256GCM").expect("seals")
 }

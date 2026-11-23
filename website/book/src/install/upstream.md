@@ -374,6 +374,13 @@ records: the request URI, the response URI `{issuer}/wallet/response`, the
 redirect URI `{issuer}/wallet/complete`, the credential types and the
 attributes.
 
+The browser first shows a page with an "Open your wallet" link. Where the
+browser has the W3C Digital Credentials API, a press asks the browser for
+the PID, which offers a wallet on the device or on a phone nearby; any
+other browser follows the link to the wallet app. Set
+`digital_credentials_api = false` to send the browser straight to the
+wallet.
+
 ```toml
 [[ferrosmart.upstream]]
 name = "wallet"

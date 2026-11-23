@@ -29,11 +29,14 @@ use crate::pages::{self, Fault};
 use crate::server::AppState;
 use crate::store::wallet::Answer;
 use crate::store::{Pending, Purpose};
-use crate::upstream::wallet::{COMPLETE_ROUTE, REQUEST_ROUTE, RESPONSE_ROUTE, WalletLogin};
+use crate::upstream::wallet::{
+    COMPLETE_ROUTE, DIGITAL_CREDENTIALS_ROUTE, MODULE_ROUTE, PAGE_ROUTE, REQUEST_ROUTE,
+    RESPONSE_ROUTE, WalletLogin,
+};
 use crate::upstream::{Identity, LoginProvider};
 use crate::wallet::Refusal;
 use crate::wallet::jwe::{self, EphemeralKey};
-use crate::wallet::request::{CREDENTIAL_ID, MEDIA_TYPE};
+use crate::wallet::request::{CREDENTIAL_ID, Lane, MEDIA_TYPE};
 
 use super::{COOKIE, Denial, cookie, deny_unsigned, forget, found, now, random, sha256};
 
@@ -43,6 +46,9 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(REQUEST_ROUTE, get(request_object).post(request_object))
         .route(RESPONSE_ROUTE, post(response))
         .route(COMPLETE_ROUTE, get(complete))
+        .route(PAGE_ROUTE, get(page))
+        .route(MODULE_ROUTE, get(module))
+        .route(DIGITAL_CREDENTIALS_ROUTE, post(digital_credentials))
 }
 
 /// The longest `wallet_nonce` taken (no specification sets one: our own
@@ -84,7 +90,9 @@ pub async fn request_object(
         &pending.upstream_state,
         &pending.upstream_nonce,
         &pending.upstream_verifier,
-        wallet_nonce.as_deref(),
+        Lane::Redirect {
+            wallet_nonce: wallet_nonce.as_deref(),
+        },
         pending.expires_at,
     ) {
         Ok(object) => no_store(object, MEDIA_TYPE),
@@ -183,18 +191,26 @@ async fn answered(
     let Some(login) = provider.wallet() else {
         return refusal_body(Refusal::MalformedResponse);
     };
-    match presented(login, pending, payload).await {
+    match presented(
+        login,
+        pending,
+        payload,
+        &Lane::Redirect { wallet_nonce: None },
+    )
+    .await
+    {
         Ok(identity) => accept(state, pending, provider, &identity).await,
         Err(refusal) => refused(state, provider, refusal).await,
     }
 }
 
 /// Checks the one presentation of the VP Token in `payload` for `pending`
-/// and returns the person it names (OpenID4VP 1.0 §8.1, §8.6).
+/// in `lane` and returns the person it names (OpenID4VP 1.0 §8.1, §8.6).
 async fn presented(
     login: &WalletLogin,
     pending: &Pending,
     payload: &Value,
+    lane: &Lane<'_>,
 ) -> Result<Identity, Refusal> {
     let Some([Value::String(presentation)]) = payload
         .get("vp_token")
@@ -204,8 +220,9 @@ async fn presented(
     else {
         return Err(Refusal::MalformedResponse);
     };
+    let audience = login.upstream().audience(lane);
     login
-        .verify(presentation, &pending.upstream_nonce, now())
+        .verify(presentation, &pending.upstream_nonce, &audience, now())
         .await
 }
 
@@ -397,4 +414,161 @@ async fn back_declined(state: &AppState, pending: &Pending) -> Response {
         description: "the login was declined",
     };
     deny_unsigned(state, pending, denial).await
+}
+
+/// Returns the browser's live request at the wallet and its provider, or
+/// the page that says why there is none.
+async fn at_wallet<'a>(
+    state: &'a AppState,
+    headers: &HeaderMap,
+) -> Result<(Pending, &'a LoginProvider), Box<Response>> {
+    let Some(id) = cookie(headers, COOKIE) else {
+        return Err(Box::new(pages::fault(state, Fault::Lapsed)));
+    };
+    let pending = found(state, state.store().pending(&id).await)?;
+    match wallet_of(state, &pending) {
+        Some(provider) if provider.wallet().is_some() => Ok((pending, provider)),
+        _ => Err(Box::new(pages::fault(state, Fault::Lapsed))),
+    }
+}
+
+/// `GET {issuer}/wallet`: the page that offers the wallet by redirect and,
+/// where the browser has it, through the Digital Credentials API.
+pub async fn page(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let (pending, provider) = match at_wallet(&state, &headers).await {
+        Ok(found) => found,
+        Err(page) => return *page,
+    };
+    let Some(login) = provider.wallet() else {
+        return pages::fault(&state, Fault::Lapsed);
+    };
+    let origin = login.upstream().origin().to_owned();
+    let invocation = login.invocation(&pending.upstream_state);
+    let request = login.request_object(
+        &pending.upstream_state,
+        &pending.upstream_nonce,
+        &pending.upstream_verifier,
+        Lane::DigitalCredentials { origin: &origin },
+        pending.expires_at,
+    );
+    match (invocation, request) {
+        (Ok(invocation), Ok(request)) => {
+            pages::wallet::page(&state, &headers, &pending, &invocation, &request)
+        }
+        (Err(error), _) | (_, Err(error)) => pages::server_error(&state, &error),
+    }
+}
+
+/// `GET {issuer}/wallet/dc.js`: the page's module.
+pub async fn module() -> Response {
+    pages::wallet::module()
+}
+
+/// `POST {issuer}/wallet/dc`: the wallet's answer through the Digital
+/// Credentials API, posted by the page's form in the browser that began
+/// the request (OpenID4VP 1.0 Appendix A.4; HAIP 1.0 §5.2).
+pub async fn digital_credentials(
+    State(state): State<Arc<AppState>>,
+    Connected(from): Connected,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let Ok(form) = Params::parse(&body, &[]) else {
+        return pages::fault(&state, Fault::BadRequest);
+    };
+    let (pending, provider) = match at_wallet(&state, &headers).await {
+        Ok(found) => found,
+        Err(page) => return *page,
+    };
+    let sent = form.get("form_token").unwrap_or_default();
+    if !super::constant_eq(sent.as_bytes(), pending.form_token.as_bytes()) {
+        return pages::fault(&state, Fault::BadRequest);
+    }
+    let data: Value = match form.get("data").map(serde_json::from_str) {
+        Some(Ok(data)) => data,
+        _ => return pages::fault(&state, Fault::BadRequest),
+    };
+    // NOTE: OpenID4VP 1.0 Appendix A.4, a wallet's error is an object with one error member.
+    if data.get("error").is_some() {
+        if let Err(response) = super::callback::record_login(
+            &state,
+            provider.upstream(),
+            Err("the person declined at the wallet"),
+        )
+        .await
+        {
+            return *response;
+        }
+        return back_declined(&state, &pending).await;
+    }
+    match api_answer(&state, &pending, provider, &data).await {
+        Ok(identity) => {
+            super::callback::complete(&state, &pending, provider, &identity, from).await
+        }
+        Err(refusal) => api_refused(&state, &pending, provider, refusal).await,
+    }
+}
+
+/// Opens and checks the Digital Credentials API answer `data` to `pending`
+/// and takes its nonce (OpenID4VP 1.0 §14.1.2), returning the person it
+/// names.
+async fn api_answer(
+    state: &AppState,
+    pending: &Pending,
+    provider: &LoginProvider,
+    data: &Value,
+) -> Result<Identity, Refusal> {
+    let login = provider.wallet().ok_or(Refusal::MalformedResponse)?;
+    // NOTE: HAIP 1.0 §5.2, the answer comes as dc_api.jwt, encrypted.
+    let sealed = data
+        .get("response")
+        .and_then(Value::as_str)
+        .ok_or(Refusal::UnencryptedResponse)?;
+    let key = EphemeralKey::from_stored(&pending.upstream_verifier)
+        .map_err(|_unread| Refusal::MalformedResponse)?;
+    let plain = key
+        .decrypt(sealed, &pending.upstream_state)
+        .map_err(|_unopened| Refusal::MalformedResponse)?;
+    let payload: Value =
+        serde_json::from_slice(&plain).map_err(|_unread| Refusal::MalformedResponse)?;
+    let origin = login.upstream().origin().to_owned();
+    let lane = Lane::DigitalCredentials { origin: &origin };
+    let identity = presented(login, pending, &payload, &lane).await?;
+    let answer = Answer {
+        pending_id: pending.id.clone(),
+        identity: serde_json::to_value(&identity)
+            .map_err(|_unwritten| Refusal::MalformedResponse)?,
+    };
+    let code = random().map_err(|_failed| Refusal::MalformedResponse)?;
+    let first = state
+        .store()
+        .first_answer(&pending.upstream_nonce, &sha256(&code), &answer, pending.expires_at)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %ferrohealth_server::run::chain(&error), "a wallet answer could not be recorded");
+            Refusal::MalformedResponse
+        })?;
+    if first {
+        Ok(identity)
+    } else {
+        Err(Refusal::ReplayedNonce)
+    }
+}
+
+/// Records the refusal `refusal` of a Digital Credentials API answer and
+/// ends `pending`, sending the app `access_denied` (RFC 6749 §4.1.2.1).
+async fn api_refused(
+    state: &AppState,
+    pending: &Pending,
+    provider: &LoginProvider,
+    refusal: Refusal,
+) -> Response {
+    tracing::warn!(reason = %refusal, "a wallet presentation was refused");
+    let reason = format!("the wallet presentation is refused: {refusal}");
+    if let Err(response) =
+        super::callback::record_login(state, provider.upstream(), Err(&reason)).await
+    {
+        return *response;
+    }
+    back_declined(state, pending).await
 }

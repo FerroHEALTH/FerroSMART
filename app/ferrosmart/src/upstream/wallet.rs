@@ -20,10 +20,21 @@ use url::Url;
 use super::{Identity, UPSTREAM_TIMEOUT};
 use crate::wallet::Refusal;
 use crate::wallet::jwe::EphemeralKey;
-use crate::wallet::request::{Asks, Request, Verifier, VerifierError};
+use crate::wallet::request::{Asks, Lane, Request, Verifier, VerifierError};
 use crate::wallet::sdjwt::{Expected, IssuerKey, Presentation, Verified};
 use crate::wallet::status::StatusToken;
 use crate::wallet::x509::{AnchorError, Anchors};
+
+/// The login page that offers the wallet by redirect and through the
+/// Digital Credentials API.
+pub const PAGE_ROUTE: &str = "/wallet";
+
+/// The route the page posts the Digital Credentials API's answer to
+/// (OpenID4VP 1.0 Appendix A.4).
+pub const DIGITAL_CREDENTIALS_ROUTE: &str = "/wallet/dc";
+
+/// The route of the page's script module.
+pub const MODULE_ROUTE: &str = "/wallet/dc.js";
 
 /// The route a wallet fetches a request object at, by the request's
 /// `state` (OpenID4VP 1.0 §5.10).
@@ -79,6 +90,12 @@ pub struct WalletSection {
     /// The claim whose value is the person's identifier, which the
     /// `fhirUser` lookup reads; `personal_administrative_number` by default.
     pub identifier_claim: String,
+    /// Whether the login page offers the wallet through the W3C Digital
+    /// Credentials API beside the redirect, as a relying party "shall"
+    /// (Implementing Regulation (EU) 2024/2979 Annex II as amended by
+    /// 2026/1731, OIDFVP-HAIP-SUPPORT-05); `true` by default. Off, the browser
+    /// goes straight to `wallet_endpoint`.
+    pub digital_credentials_api: bool,
 }
 
 impl Default for WalletSection {
@@ -101,6 +118,7 @@ impl Default for WalletSection {
             .map(String::from)
             .collect(),
             identifier_claim: String::from("personal_administrative_number"),
+            digital_credentials_api: true,
         }
     }
 }
@@ -152,12 +170,18 @@ pub struct WalletUpstream {
     endpoint: Url,
     /// The request object route, with no `state`.
     request_base: Url,
+    /// The login page that offers the wallet.
+    page: Url,
     /// The credential types accepted.
     vct_values: Vec<String>,
     /// The claims asked for, by name.
     claims: Vec<String>,
     /// The identifier claim.
     identifier_claim: String,
+    /// The origin of the issuer, where the login page is served.
+    origin: String,
+    /// Whether the login page offers the Digital Credentials API.
+    digital_credentials_api: bool,
 }
 
 impl WalletUpstream {
@@ -165,6 +189,29 @@ impl WalletUpstream {
     #[must_use]
     pub fn client_id(&self) -> &str {
         self.verifier.client_id()
+    }
+
+    /// Returns the origin of the login page.
+    #[must_use]
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+
+    /// Returns the audience a presentation names in `lane`: the client
+    /// identifier by redirect, `origin:` and the page's origin over the
+    /// Digital Credentials API (OpenID4VP 1.0 Appendix A.4, B.3.6).
+    #[must_use]
+    pub fn audience(&self, lane: &Lane<'_>) -> String {
+        match lane {
+            Lane::Redirect { .. } => self.client_id().to_owned(),
+            Lane::DigitalCredentials { origin } => format!("origin:{origin}"),
+        }
+    }
+
+    /// Whether the login page offers the Digital Credentials API.
+    #[must_use]
+    pub const fn digital_credentials_api(&self) -> bool {
+        self.digital_credentials_api
     }
 }
 
@@ -234,9 +281,12 @@ pub fn upstream(
         anchors: Arc::new(anchors),
         endpoint,
         request_base: route(issuer, "/wallet/request"),
+        page: route(issuer, PAGE_ROUTE),
         vct_values: section.vct_values.clone(),
         claims: section.claims.clone(),
         identifier_claim: section.identifier_claim.clone(),
+        origin: issuer.origin().ascii_serialization(),
+        digital_credentials_api: section.digital_credentials_api,
     })
 }
 
@@ -271,13 +321,17 @@ pub enum WalletError {
     /// The random source failed.
     #[error("the random source failed")]
     Random,
+    /// The request URI cannot carry a `state`.
+    #[error("the request URI cannot carry the request's state")]
+    Url,
 }
 
 /// A login begun at the wallet.
 #[derive(Debug, Clone)]
 pub struct Begun {
-    /// The URL that invokes the wallet.
-    pub invocation: Url,
+    /// Where the browser goes: the wallet, or the login page that offers
+    /// it through the Digital Credentials API too.
+    pub departure: Url,
     /// The request's `state`, which names the request.
     pub state: String,
     /// The request's `nonce`.
@@ -336,24 +390,40 @@ impl WalletLogin {
         let key = EphemeralKey::generate()
             .and_then(|key| key.stored())
             .map_err(WalletError::Key)?;
-        let mut request_uri = self.upstream.request_base.clone();
-        request_uri
-            .path_segments_mut()
-            .map_err(|()| WalletError::Random)?
-            .push(&state);
+        let departure = if self.upstream.digital_credentials_api {
+            self.upstream.page.clone()
+        } else {
+            self.invocation(&state)?
+        };
         Ok(Begun {
-            invocation: self
-                .upstream
-                .verifier
-                .invocation(&self.upstream.endpoint, &request_uri),
+            departure,
             state,
             nonce,
             key,
         })
     }
 
+    /// Returns the URL that invokes the wallet with the request `state`
+    /// (OpenID4VP 1.0 §5.10, §9).
+    ///
+    /// # Errors
+    /// Returns [`WalletError::Url`] when the request URI cannot carry the
+    /// `state`.
+    pub fn invocation(&self, state: &str) -> Result<Url, WalletError> {
+        let mut request_uri = self.upstream.request_base.clone();
+        request_uri
+            .path_segments_mut()
+            .map_err(|()| WalletError::Url)?
+            .push(state);
+        Ok(self
+            .upstream
+            .verifier
+            .invocation(&self.upstream.endpoint, &request_uri))
+    }
+
     /// Returns the signed request object of the request `state` with
-    /// `nonce` and the stored ephemeral `key`, lapsing at `expires_at`.
+    /// `nonce` and the stored ephemeral `key` for `lane`, lapsing at
+    /// `expires_at`.
     ///
     /// # Errors
     /// Returns [`WalletError`] when the key does not read back or the
@@ -363,7 +433,7 @@ impl WalletLogin {
         state: &str,
         nonce: &str,
         key: &str,
-        wallet_nonce: Option<&str>,
+        lane: Lane<'_>,
         expires_at: i64,
     ) -> Result<String, WalletError> {
         let key = EphemeralKey::from_stored(key).map_err(WalletError::Key)?;
@@ -373,7 +443,7 @@ impl WalletLogin {
                 state,
                 nonce,
                 key: &key,
-                wallet_nonce,
+                lane,
                 issued_at: jiff::Timestamp::now().as_second(),
                 expires_at,
             })
@@ -381,7 +451,8 @@ impl WalletLogin {
     }
 
     /// Checks the one presentation `presentation` against the request's
-    /// `nonce` at `now` and returns the person it names.
+    /// `nonce` and the `audience` of its lane at `now`, and returns the
+    /// person it names.
     ///
     /// # Errors
     /// Returns the [`Refusal`] of the first check that fails.
@@ -389,6 +460,7 @@ impl WalletLogin {
         &self,
         presentation: &str,
         nonce: &str,
+        audience: &str,
         now: i64,
     ) -> Result<Identity, Refusal> {
         let read = Presentation::parse(presentation)?;
@@ -407,7 +479,7 @@ impl WalletLogin {
             &issuer,
             &Expected {
                 nonce,
-                audience: self.upstream.client_id(),
+                audience,
                 vct_values: &self.upstream.vct_values,
                 now,
             },
