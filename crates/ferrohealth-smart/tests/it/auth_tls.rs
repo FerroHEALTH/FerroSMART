@@ -46,7 +46,7 @@ fn section(issuer: &str, ca_file: Option<std::path::PathBuf>) -> AuthSection {
 fn entry(issuer: &str) -> IssuerEntry {
     IssuerEntry {
         issuer: ferrohealth_secret::secret_url::SecretUrl::new(issuer),
-        kind: Some(IssuerKind::Persons),
+        kind: Some(IssuerKind::Smart),
         audience: vec![AUDIENCE.to_owned()],
         ..IssuerEntry::default()
     }
@@ -176,7 +176,7 @@ async fn introspection_reads_an_issuer_behind_a_private_authority_over_the_grant
 #[test]
 fn the_retired_ca_file_is_an_unknown_key() {
     let read = toml::from_str::<AuthSection>(
-        "ca_file = \"/run/ca.pem\"\n[issuer.i1]\nissuer = \"https://idp.example\"\nkind = \"persons\"\naudience = [\"a\"]\n",
+        "ca_file = \"/run/ca.pem\"\n[issuer.i1]\nissuer = \"https://idp.example\"\naudience = [\"a\"]\n",
     );
     assert!(read.is_err(), "ca_file is no key of the section");
 }

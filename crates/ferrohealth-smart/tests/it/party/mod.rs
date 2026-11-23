@@ -3,22 +3,20 @@
 
 //! The party binding through the public API: a caller in, its login looked
 //! up through a test `PartySource`, and one typed outcome or a typed source
-//! error out. Every source and adapter is a fake that records each call, so
-//! a case asserts how often, and in which order, the library asked.
+//! error out. Every source is a fake that records each call, so a case
+//! asserts how often the library asked.
 
 use std::error::Error as StdError;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
 
 use argon2::Argon2;
 use argon2::password_hash::PasswordHasher;
 use ferrohealth_smart::basic::PasswordStore;
 use ferrohealth_smart::config::AuthSection;
 use ferrohealth_smart::config::ConfigError;
-use ferrohealth_smart::kind::Actor;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::party::Bound;
@@ -30,8 +28,6 @@ use ferrohealth_smart::party::Outcome;
 use ferrohealth_smart::party::PartyRef;
 use ferrohealth_smart::party::PartyState;
 use ferrohealth_smart::party::Represented;
-use ferrohealth_smart::party::adapter::AdapterError;
-use ferrohealth_smart::party::adapter::IdpAdapter;
 use ferrohealth_smart::party::binding::PartyBinding;
 use ferrohealth_smart::party::config::PartyError;
 use ferrohealth_smart::party::config::PartySection;
@@ -40,16 +36,12 @@ use ferrohealth_smart::party::source::PartyRecord;
 use ferrohealth_smart::party::source::PartySource;
 use ferrohealth_smart::party::source::Query;
 use ferrohealth_smart::party::source::SourceError;
-use ferrohealth_smart::profile::Profile;
 use ferrohealth_smart::resource::Caller;
-use http::StatusCode;
 use secrecy::SecretString;
 use serde_json::Value;
 use serde_json::json;
 
 mod config;
-#[cfg(feature = "idp-entra")]
-mod entra;
 mod federation;
 mod groups;
 #[cfg(all(feature = "axum", feature = "fetch"))]
@@ -91,8 +83,6 @@ pub(crate) struct FakeSource {
     answer: Mutex<Answer>,
     /// Every query, in order.
     seen: Mutex<Vec<Seen>>,
-    /// The calls of the source and the adapter, in order.
-    log: Arc<Mutex<Vec<&'static str>>>,
 }
 
 impl FakeSource {
@@ -108,7 +98,6 @@ impl FakeSource {
         Arc::new(Self {
             answer: Mutex::new(Box::new(answer)),
             seen: Mutex::new(Vec::new()),
-            log: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -126,11 +115,6 @@ impl FakeSource {
     pub(crate) fn calls(&self) -> usize {
         self.seen.lock().expect("not poisoned").len()
     }
-
-    /// Returns the order the source and the adapter were called in.
-    fn log(&self) -> Vec<&'static str> {
-        self.log.lock().expect("not poisoned").clone()
-    }
 }
 
 impl PartySource for FakeSource {
@@ -144,28 +128,8 @@ impl PartySource for FakeSource {
             value: query.value.to_owned(),
             group_identifier_issuer: query.group_identifier_issuer.map(str::to_owned),
         });
-        self.log.lock().expect("not poisoned").push("source");
         let answer = (self.answer.lock().expect("not poisoned"))(query);
         Box::pin(std::future::ready(answer))
-    }
-}
-
-/// An identity provider's adapter, faked: it records each call in the
-/// source's log and answers with `answer`.
-struct FakeAdapter {
-    /// What it answers.
-    answer: Result<Vec<String>, AdapterError>,
-    /// The log it shares with the source.
-    log: Arc<Mutex<Vec<&'static str>>>,
-}
-
-impl IdpAdapter for FakeAdapter {
-    fn resolve_groups<'a>(
-        &'a self,
-        _caller: &'a Caller,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, AdapterError>> + Send + 'a>> {
-        self.log.lock().expect("not poisoned").push("adapter");
-        Box::pin(std::future::ready(self.answer.clone()))
     }
 }
 
@@ -178,14 +142,6 @@ pub(crate) fn table() -> PartySection {
         identifier_type: String::from("guid"),
         group_claim: String::from("groups"),
         group_identifier_issuer: String::from(GROUPS),
-        ..PartySection::default()
-    }
-}
-
-/// The profile of the issuer: the defaults, with the deployment's client.
-fn profile() -> Profile {
-    Profile {
-        ..Profile::default()
     }
 }
 
@@ -199,29 +155,28 @@ fn binding_of(source: &Arc<FakeSource>, table: PartySection) -> PartyBinding {
     let concrete = Arc::clone(source);
     let source: Arc<dyn PartySource> = concrete;
     PartyBinding::new(source)
-        .with_issuer(table, IssuerKind::Persons, &profile())
+        .with_issuer(table, IssuerKind::Smart)
         .expect("the table binds")
 }
 
-/// Returns a caller of the issuer of `kind`, whose person key is `key` and
-/// whose token carries `claims`.
+/// Returns a caller of the issuer of `kind`, whose `sub` is `key` (blank
+/// for none) and whose token carries `claims`.
 fn caller(kind: CallerKind, key: Option<&str>, claims: &Value) -> Caller {
     let claims = claims.as_object().cloned().unwrap_or_default();
     Caller::new(
-        String::from("pairwise-sub"),
+        key.unwrap_or_default().to_owned(),
         Some(String::from(CLIENT)),
         "user/*.rs",
         None,
         kind,
     )
     .with_issuer(String::from(ISSUER))
-    .with_person_key(key.map(str::to_owned), None)
     .with_claims(claims)
 }
 
-/// Returns a person caller carrying [`LOGIN`] and `claims`.
+/// Returns a practitioner caller carrying [`LOGIN`] and `claims`.
 fn person(claims: &Value) -> Caller {
-    caller(CallerKind::Person, Some(LOGIN), claims)
+    caller(CallerKind::Practitioner, Some(LOGIN), claims)
 }
 
 /// Returns the reference of the `PERSON` `id`.
@@ -265,7 +220,7 @@ async fn one_match_binds_its_party_and_every_request_reads_the_source() -> Outco
     assert_eq!("guid", first.identifier.identifier_type());
     assert_eq!(LOGIN, first.identifier.value());
     assert_eq!(Markers::PROFESSIONAL, first.markers);
-    assert!(!first.provisional && !first.guest);
+    assert!(!first.provisional);
     assert_eq!(1, source.calls(), "one call per request");
     source.answer_with(Lookup::Parties(vec![record("p-2", Markers::PROFESSIONAL)]));
     let second = bound(binding.resolve(&caller).await?)?;
@@ -359,15 +314,15 @@ async fn an_inactive_or_abandoned_party_is_refused_with_its_reference_and_incomp
     Ok(())
 }
 
-// NOTE: Microsoft, "Access token claims reference": "Claims are present only if a value
-// exists to fill it", so a token without the key claim is refused before any lookup.
+// NOTE: RFC 7519 §4.1.2: `sub` identifies the principal, so a blank one is refused
+// before any lookup.
 #[tokio::test]
 async fn a_token_without_the_key_claim_is_key_claim_missing() -> Outcome2 {
     let source = FakeSource::answering(one_professional());
     let binding = binding(&source);
     for key in [None, Some(""), Some("  ")] {
         let outcome = binding
-            .resolve(&caller(CallerKind::Person, key, &json!({})))
+            .resolve(&caller(CallerKind::Practitioner, key, &json!({})))
             .await?;
         assert!(
             matches!(outcome, Some(Outcome::KeyClaimMissing)),
@@ -378,16 +333,18 @@ async fn a_token_without_the_key_claim_is_key_claim_missing() -> Outcome2 {
     Ok(())
 }
 
-/// Returns a representative caller asserting the subject `represented`.
+/// Returns a `RelatedPerson` caller with `represented` in context.
 fn representative(represented: &str) -> Caller {
-    caller(
-        CallerKind::Representative {
-            represented: represented.to_owned(),
-            ground: None,
-        },
-        Some(LOGIN),
-        &json!({}),
+    let claims = json!({}).as_object().cloned().unwrap_or_default();
+    Caller::new(
+        String::from(LOGIN),
+        Some(String::from(CLIENT)),
+        "user/*.rs",
+        Some(represented.to_owned()),
+        CallerKind::RelatedPerson,
     )
+    .with_issuer(String::from(ISSUER))
+    .with_claims(claims)
 }
 
 // NOTE: no specification governs the binding: our own design, in which a representative
@@ -420,8 +377,8 @@ async fn a_representative_is_looked_up_by_its_own_login() -> Outcome2 {
     Ok(())
 }
 
-// NOTE: no specification governs the markers: our own design; a Representative needs
-// `representative`, a Person or Delegated caller `professional`, and both bind either.
+// NOTE: no specification governs the markers: our own design; a RelatedPerson needs
+// `representative`, a Practitioner or a Person `professional`, and both bind either.
 #[tokio::test]
 async fn a_caller_on_a_party_without_its_marker_is_wrong_marker_and_both_bind_either() -> Outcome2 {
     let professional =
@@ -443,12 +400,8 @@ async fn a_caller_on_a_party_without_its_marker_is_wrong_marker_and_both_bind_ei
     )]));
     for kind in [
         CallerKind::Person,
-        CallerKind::Delegated {
-            actor: Actor {
-                issuer: String::from("https://as.example.org"),
-                sub: String::from("actor-1"),
-            },
-        },
+        CallerKind::Practitioner,
+        CallerKind::User,
     ] {
         let outcome = binding(&represents)
             .resolve(&caller(kind.clone(), Some(LOGIN), &json!({})))
@@ -465,24 +418,12 @@ async fn a_caller_on_a_party_without_its_marker_is_wrong_marker_and_both_bind_ei
         );
     }
     let both = FakeSource::answering(Lookup::Parties(vec![record("p-3", Markers::BOTH)]));
-    for kind in [
-        CallerKind::Person,
-        CallerKind::Delegated {
-            actor: Actor {
-                issuer: String::from("https://as.example.org"),
-                sub: String::from("actor-1"),
-            },
-        },
-        CallerKind::Representative {
-            represented: String::from("subject-1"),
-            ground: None,
-        },
+    for caller in [
+        caller(CallerKind::Person, Some(LOGIN), &json!({})),
+        caller(CallerKind::PractitionerRole, Some(LOGIN), &json!({})),
+        representative("subject-1"),
     ] {
-        let party = bound(
-            binding(&both)
-                .resolve(&caller(kind, Some(LOGIN), &json!({})))
-                .await?,
-        )?;
+        let party = bound(binding(&both).resolve(&caller).await?)?;
         assert_eq!(person_ref("p-3"), party.party);
     }
     Ok(())
@@ -494,12 +435,7 @@ async fn a_caller_on_a_party_without_its_marker_is_wrong_marker_and_both_bind_ei
 async fn callers_that_are_never_looked_up_never_reach_the_source() -> Outcome2 {
     let source = FakeSource::answering(one_professional());
     let binding = binding(&source);
-    for kind in [
-        CallerKind::Patient,
-        CallerKind::System,
-        CallerKind::Guest(Box::new(CallerKind::Person)),
-        CallerKind::Guest(Box::new(CallerKind::System)),
-    ] {
+    for kind in [CallerKind::Patient, CallerKind::System] {
         let outcome = binding
             .resolve(&caller(kind.clone(), Some(LOGIN), &json!({})))
             .await?;
@@ -510,25 +446,6 @@ async fn callers_that_are_never_looked_up_never_reach_the_source() -> Outcome2 {
         assert!(outcome.is_none(), "{:?}: {outcome:?}", external.kind());
     }
     assert_eq!(0, source.calls(), "no call reached the source");
-    Ok(())
-}
-
-// NOTE: no specification governs guests: our own design, in which a guest is looked up
-// only when its issuer's table admits guests, and binds with the guest mark.
-#[tokio::test]
-async fn an_admitted_guest_binds_with_the_guest_mark() -> Outcome2 {
-    let source = FakeSource::answering(one_professional());
-    let admits = PartySection {
-        guests: true,
-        ..table()
-    };
-    let guest = caller(
-        CallerKind::Guest(Box::new(CallerKind::Person)),
-        Some(LOGIN),
-        &json!({}),
-    );
-    let party = bound(binding_of(&source, admits).resolve(&guest).await?)?;
-    assert!(party.guest, "the guest mark");
     Ok(())
 }
 
@@ -584,13 +501,13 @@ async fn a_failing_source_is_an_error_and_never_unbound() -> Outcome2 {
 }
 
 // NOTE: RFC 6749 §4.4: a machine authenticates with the client credentials grant, so a
-// Basic credential is a person's, looked up through the person path by its mapped key.
+// Basic credential is a user's, looked up through the user path by its mapped key.
 #[tokio::test]
 async fn a_basic_user_is_a_person_looked_up_by_its_mapped_key() -> Outcome2 {
     let source = FakeSource::answering(one_professional());
     let binding = binding(&source).with_basic_user("clinician", IDENTIFIERS, LOGIN)?;
     let basic = Caller::basic(String::from("clinician"), "user/*.rs");
-    assert_eq!(&CallerKind::Person, basic.kind(), "never a System");
+    assert_eq!(&CallerKind::User, basic.kind(), "never a System");
     let party = bound(binding.resolve(&basic).await?)?;
     assert_eq!(person_ref("p-1"), party.party);
     assert_eq!(

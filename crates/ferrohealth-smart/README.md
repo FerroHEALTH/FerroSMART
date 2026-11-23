@@ -44,20 +44,18 @@ ferrohealth-smart = { version = "=0.33.1", features = ["axum", "openehr"] }
   `Caller::with_granted_scope` from its own data); the route
   table checks them with `Requirement::Role`, `AnyRole`, `WithoutRole` and
   `All`.
-- **`kind`** and **`profile`**: who stands behind a token. Each
-  `[auth.issuer.<name>]` declares its `kind` (`persons`, `patients`, `machines`,
-  `federation`; the preset's when unset) and a profile: a `preset`
-  (`rfc9068`, `entra`, `keycloak`, `okta`, `ferrosmart`, shipped under
-  `profiles/` with each value's source), a deployment's `profile_file` over
-  it, and the keys of its `[auth.issuer.<name>.profile]` table over both:
-  the token types, the required claims, the scope claim, the
-  person key, the client claims and the app-only and guest markers.
-  `Caller::kind` answers `Patient`,
-  `System`, `Delegated`, `Representative`, `Person`,
-  `PatientRepresentative`, `Guest`, `ExternalPerson` or
-  `ExternalOrganisation`, the patient's representative only on a patients
-  issuer that reads one and the last two only on a federation issuer, and a token that matches no step is refused as
-  `Rejection::Unclassified`. A Basic credential is a person's, never a
+- **`kind`** and **`profile`**: who stands behind a token, read from its
+  standard claims the same way for every issuer. An `[auth.issuer.<name>]`
+  is a SMART authorization server unless it declares
+  `kind = "federation"`; a product trusts FerroSMART with a table naming
+  only its `issuer`. `Caller::kind` answers `System`, `Patient`,
+  `Practitioner`, `PractitionerRole`, `RelatedPerson`, `Person`, `User`,
+  `ExternalPerson` or `ExternalOrganisation`, and the last two arise only
+  on a federation issuer. A user is named by the type of their `fhirUser`,
+  `User` when the token names none. `Caller::actor` is the RFC 8693 actor beside the user,
+  `Caller::patient` the launch context, and `Caller::represented` the
+  patient a `RelatedPerson` acts for. A token that reads as none is refused
+  as `Rejection::Unclassified`. A Basic credential is a user's, never a
   system's, and carries no `system/` scope: a Basic grant holding one fails
   to load.
 - **One list of clients**: the authorization server's registry. A token
@@ -66,10 +64,10 @@ ferrohealth-smart = { version = "=0.33.1", features = ["axum", "openehr"] }
   product's own policy, and an RFC 8693 `act` is read as the issuer
   asserts it.
 - **`party`**: the party a person's login belongs to. One `[auth.issuer.<name>.party]`
-  table per `persons` issuer names the identifiers its logins are matched
+  table per SMART issuer names the identifiers its logins are matched
   against; the product implements `PartySource` over its own store, and
   `PartyBinding::resolve` (or `Gate::with_party` behind the guard) looks the
-  issuer profile's `person_key` up on every request, with no cache, into one
+  token's `sub` up on every request, with no cache, into one
   `Outcome`: `Party`, `WrongMarker`, `Unbound`, `Ambiguous`, `Inactive`,
   `Abandoned`, `Deprovisioned`, `KeyClaimMissing` or `GroupsUnavailable`. A
   source failure is a `SourceError`, never no match.
@@ -94,22 +92,11 @@ ferrohealth-smart = { version = "=0.33.1", features = ["axum", "openehr"] }
   refusal's `code()` is its §1.25 code name. The caller authenticates the
   presenting party as acting for the issuer, since sender-vouches names no
   presenter (eHDSI Messaging Profile 10.0.0 §5.5.2).
-- **`idp::entra`** (feature `idp-entra`): the vendor adapter for a
-  Microsoft Entra ID groups overage. An `entra` issuer with
-  `adapter = "idp-entra"` reads the groups of a token carrying
-  `_claim_names` or `hasgroups` from Microsoft Graph `getMemberObjects` at
-  a URL built from its `oid` and `idtyp`, never from `_claim_sources`. The
-  product builds a `GraphAdapter` from a `GraphSection` and registers it
-  with `PartyBinding::with_adapter`. Every Graph failure is
-  `GroupsUnavailable` with the status, the `Retry-After` of a `429` or the
-  timeout (2 s by default); nothing is cached, so every request of a user
-  above the overage limit costs one Graph round trip and draws on the
-  application's Graph throttling allowance.
 - **Feature `test-support`**, for a downstream crate's tests only:
   `federation::External::new` builds the party the two external caller
   kinds carry, which otherwise only a `federation` token yields.
 - **The person's own access**: `Caller::is_the_person`, a `Patient` caller
-  of a `patients` issuer, with `Caller::person` naming the patient the request is bound to and a
+  whose `fhirUser` is the patient in its launch context, with no actor, with `Caller::person` naming the patient the request is bound to and a
   deployment's patient claim attached as a `resource::PatientClaim`.
 - **`assurance`**: the assurance level behind a token (`AssuranceSection`
   on each issuer, its claim mapped to low, substantial or high, a minimum
@@ -197,7 +184,7 @@ fn classify(_method: &Method, uri: &Uri, _extensions: &Extensions) -> Option<Tar
 let settings = Settings::new(
     "https://as.example.org/realms/ferro",
     "https://bridge.example.org/fhir",
-    IssuerKind::Persons,
+    IssuerKind::Smart,
 );
 let verifier: Arc<dyn Verifier> = Arc::new(ResourceServer::discover(settings).await?);
 let gate = Gate::open().with_bearer(verifier).with_realm("ferrobridge");

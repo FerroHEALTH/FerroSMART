@@ -111,7 +111,7 @@ fn a_blank_role_claim_path_is_refused() {
         String::from("i1"),
         IssuerEntry {
             issuer: ferrohealth_secret::secret_url::SecretUrl::new("https://as.example.org"),
-            kind: Some(IssuerKind::Persons),
+            kind: Some(IssuerKind::Smart),
             audience: vec![String::from("a")],
             role_claims: Some(vec![String::from("realm_access..roles")]),
             ..IssuerEntry::default()

@@ -5,18 +5,16 @@
 //! product supplies, with one match rule, one duplicate rule and one
 //! stable-claim rule, and one typed [`Outcome`].
 //!
-//! A `Person`, `Delegated` or `Representative` caller of a `persons` issuer
-//! that has an `[auth.issuer.<name>.party]` table ([`PartySection`]) is looked up by the
-//! value of its issuer profile's `person_key` (OpenID Connect Core 1.0 §5.7:
-//! `email`, `phone_number`, `preferred_username` and `name` are never a
-//! key), put in the canonical form its `identifier_type` declares, against
-//! the identifiers of the table's `identifier_issuer` in the product's
-//! [`PartySource`]. A Basic user is looked up by the key the product maps it
-//! to, through the same path. A representative is looked up by their own
-//! login, never by the subject they represent. `Patient`, `System`,
-//! `ExternalPerson` and `ExternalOrganisation` callers, and a guest the
-//! table does not admit, are never looked up: a `federation` token's `sub`
-//! names a user in another issuer's namespace.
+//! A user other than a `Patient` of an issuer that has an
+//! `[auth.issuer.<name>.party]` table ([`PartySection`]) is looked up by the
+//! token's `sub` (OpenID Connect Core 1.0 §5.7), put in the canonical form
+//! its `identifier_type` declares, against the identifiers of the table's
+//! `identifier_issuer` in the product's [`PartySource`]. A Basic user is
+//! looked up by the key the product maps it to, through the same path. A
+//! `RelatedPerson` is looked up by their own login, never by the patient
+//! they represent. `Patient`, `System`, `ExternalPerson` and
+//! `ExternalOrganisation` callers are never looked up: a `federation`
+//! token's `sub` names a user in another issuer's namespace.
 //!
 //! The library calls the source on every request and holds no cache. Two
 //! parties carrying one login are [`Outcome::Ambiguous`], never resolved to
@@ -30,7 +28,6 @@
 
 use std::fmt;
 
-pub mod adapter;
 pub mod binding;
 pub mod config;
 pub mod source;
@@ -320,8 +317,6 @@ pub struct Bound {
     pub represents: Vec<Represented>,
     /// The party's record is incomplete ([`PartyState::Incomplete`]).
     pub provisional: bool,
-    /// The caller is a guest the issuer's table admits.
-    pub guest: bool,
 }
 
 impl fmt::Debug for Bound {
@@ -330,7 +325,6 @@ impl fmt::Debug for Bound {
             .field("party", &self.party)
             .field("markers", &self.markers)
             .field("provisional", &self.provisional)
-            .field("guest", &self.guest)
             .finish_non_exhaustive()
     }
 }
@@ -340,11 +334,8 @@ impl fmt::Debug for Bound {
 #[non_exhaustive]
 pub enum GroupsCause {
     /// The token carries a groups overage marker in place of the group
-    /// claim, and the issuer's profile names no adapter.
+    /// claim.
     Overage,
-    /// The issuer's adapter failed, with the upstream status when it
-    /// answered.
-    Adapter(adapter::AdapterError),
     /// The group claim is not an array of strings.
     Malformed,
 }

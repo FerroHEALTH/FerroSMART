@@ -88,13 +88,12 @@ fn the_line_carries_the_caller_kind_and_the_client_and_never_a_claim()
         Some(String::from("partner-app")),
         "user/Observation.rs",
         None,
-        CallerKind::Delegated {
-            actor: KindActor {
-                issuer: String::from("https://as.example.org"),
-                sub: String::from("actor-1"),
-            },
-        },
+        CallerKind::Practitioner,
     )
+    .with_actor(KindActor {
+        issuer: String::from("https://as.example.org"),
+        sub: String::from("actor-1"),
+    })
     .with_claims(claims);
     let access = Access::Caller(Arc::new(caller));
     tracing::subscriber::with_default(subscriber, || {
@@ -105,7 +104,7 @@ fn the_line_carries_the_caller_kind_and_the_client_and_never_a_claim()
     let bytes = buffer.0.lock().expect("not poisoned").clone();
     let text = String::from_utf8(bytes)?;
     let line: serde_json::Value = serde_json::from_str(&text)?;
-    assert_eq!("delegated", line["kind"], "the caller kind: {text}");
+    assert_eq!("practitioner", line["kind"], "the caller kind: {text}");
     assert_eq!("partner-app", line["client"], "the client");
     assert!(
         !text.contains("NEVER-LOGGED"),

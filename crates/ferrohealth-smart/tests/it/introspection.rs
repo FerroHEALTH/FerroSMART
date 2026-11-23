@@ -66,13 +66,10 @@ fn settings(issuer: &Issuer) -> IntrospectionSettings {
     persons(issuer, client(issuer))
 }
 
-/// Returns introspection settings for the `persons` issuer `issuer` under
-/// `auth`, whose first-party client is the synthetic one.
+/// Returns introspection settings for the SMART issuer `issuer` under
+/// `auth`.
 fn persons(issuer: &Issuer, auth: IntrospectionAuth) -> IntrospectionSettings {
-    let mut settings =
-        IntrospectionSettings::new(issuer.uri(), AUDIENCE, auth, IssuerKind::Persons);
-    settings.profile.patient_context = true;
-    settings
+    IntrospectionSettings::new(issuer.uri(), AUDIENCE, auth, IssuerKind::Smart)
 }
 
 /// Returns an active response for `issuer`, expiring in `seconds`.
@@ -481,7 +478,7 @@ fn section(issuer: &str) -> AuthSection {
             String::from("i1"),
             IssuerEntry {
                 issuer: ferrohealth_secret::secret_url::SecretUrl::new(issuer),
-                kind: Some(IssuerKind::Persons),
+                kind: Some(IssuerKind::Smart),
                 audience: vec![String::from(AUDIENCE)],
                 mode: AuthMode::Introspection,
                 introspection: Some(IntrospectionSection {
@@ -518,7 +515,7 @@ fn the_auth_section_resolves_introspection_mode() -> Result<(), Box<dyn StdError
         .next()
         .ok_or("the introspection settings")?;
     assert_eq!("https://as.example.org", settings.issuer);
-    assert_eq!(IssuerKind::Persons, settings.kind);
+    assert_eq!(IssuerKind::Smart, settings.kind);
     assert_eq!(vec![String::from(AUDIENCE)], settings.audience);
     assert_eq!(Duration::from_secs(60), settings.cache_max_age);
     let IntrospectionAuth::Client(credentials) = settings.auth else {
@@ -591,7 +588,6 @@ fn the_introspection_table_reads_from_toml() -> Result<(), Box<dyn StdError>> {
         r#"
         [issuer.i1]
         issuer = "https://as.example.org"
-        kind = "persons"
         audience = ["http://ferro.invalid/fhir"]
         mode = "introspection"
 
