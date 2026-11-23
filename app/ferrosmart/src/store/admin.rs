@@ -244,6 +244,7 @@ impl Transaction {
             "DELETE FROM authorization_code WHERE client_id = $1 AND redeemed_at IS NULL",
             "DELETE FROM launch WHERE client_id = $1 AND used_at IS NULL",
             "DELETE FROM pending_authorization WHERE client_id = $1",
+            "DELETE FROM pushed_request WHERE client_id = $1",
         ] {
             sqlx::query(statement)
                 .bind(client_id)

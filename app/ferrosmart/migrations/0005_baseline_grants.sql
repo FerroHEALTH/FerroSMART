@@ -26,7 +26,9 @@ CREATE TABLE authorization_grant (
     basis text CONSTRAINT authorization_grant_basis_check
         CHECK (basis IN ('page', 'remembered', 'administrative', 'first-party')),
     acr text CONSTRAINT authorization_grant_acr_check
-        CHECK (acr IN ('low', 'substantial', 'high'))
+        CHECK (acr IN ('low', 'substantial', 'high')),
+    -- The DPoP key a public client's refresh tokens are bound to (RFC 9449 §5).
+    dpop_jkt text
 );
 CREATE INDEX authorization_grant_first_party ON authorization_grant (client_id)
     WHERE basis = 'first-party';

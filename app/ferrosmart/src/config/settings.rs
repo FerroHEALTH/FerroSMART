@@ -79,6 +79,8 @@ pub struct Settings {
     pub saml: Option<Arc<crate::upstream::saml::ServiceProviderSettings>>,
     /// The scopes each role may be granted.
     pub roles: BTreeMap<String, Vec<String>>,
+    /// Whether every authorization request arrives pushed (RFC 9126 §4).
+    pub require_pushed_authorization_requests: bool,
     /// The deployment's name.
     pub name: String,
     /// The deployment's words on the pages.
@@ -215,34 +217,44 @@ impl Config {
             upstreams: upstreams(&section.upstream, &keys, section.assurance_minimum)?,
             saml: service_provider(section)?,
             roles: roles(&section.role)?,
+            require_pushed_authorization_requests: section.require_pushed_authorization_requests,
             name: section.name.clone(),
             branding: branding(&section.branding)?,
             registration: registration(&section.registration)?,
-            brand: section
-                .brand
-                .as_ref()
-                .map(|brand| {
-                    let fhir: Vec<String> = section
-                        .resource
-                        .iter()
-                        .filter(|resource| resource.kind == crate::config::ResourceKind::Fhir)
-                        .map(|resource| resource.base.clone())
-                        .collect();
-                    let bundle = format!(
-                        "{}{}",
-                        section.issuer.trim_end_matches('/'),
-                        crate::brands::BRANDS_ROUTE
-                    );
-                    let mut brand = brand.clone();
-                    if brand.name.trim().is_empty() {
-                        brand.name.clone_from(&section.name);
-                    }
-                    crate::brands::Brands::resolve(&brand, &fhir, &bundle)
-                })
-                .transpose()?,
+            brand: brand(section)?,
             audit: audit(&section.audit, &issuer)?,
         })
     }
+}
+
+/// Returns the User Access Brand `section` publishes over its FHIR bases,
+/// named by the deployment's name when it names none of its own.
+fn brand(
+    section: &crate::config::FerroSmartSection,
+) -> Result<Option<crate::brands::Brands>, Error> {
+    section
+        .brand
+        .as_ref()
+        .map(|brand| {
+            let fhir: Vec<String> = section
+                .resource
+                .iter()
+                .filter(|resource| resource.kind == crate::config::ResourceKind::Fhir)
+                .map(|resource| resource.base.clone())
+                .collect();
+            let bundle = format!(
+                "{}{}",
+                section.issuer.trim_end_matches('/'),
+                crate::brands::BRANDS_ROUTE
+            );
+            let mut brand = brand.clone();
+            if brand.name.trim().is_empty() {
+                brand.name.clone_from(&section.name);
+            }
+            crate::brands::Brands::resolve(&brand, &fhir, &bundle)
+        })
+        .transpose()
+        .map_err(Error::from)
 }
 
 /// Returns the audit lane `section` describes for the server at `issuer`.

@@ -20,6 +20,7 @@ use axum::response::{IntoResponse, Response};
 use http::{HeaderValue, StatusCode, header};
 use serde_json::{Value, json};
 
+use crate::admin::openapi::Operation;
 use crate::introspect::{Refused, bearer, presented};
 use crate::server::AppState;
 use crate::store::audit::{AuditCursor, AuditQuery};
@@ -37,6 +38,12 @@ pub const DEFAULT_COUNT: i64 = 100;
 
 /// The most records one answer holds.
 pub const MAX_COUNT: i64 = 1000;
+
+/// Returns the operation of the audit records.
+#[must_use]
+pub fn table() -> Vec<Operation> {
+    vec![Operation::get(AUDIT_ROUTE, audit_log)]
+}
 
 /// `GET {issuer}/audit?subject=&client=&event=&outcome=&since=&until=&_count=&cursor=`.
 pub async fn audit_log(

@@ -46,6 +46,22 @@ revoked or expired, issued for its own issuer, and its client still
 registered and enabled. A request without a token answers `401
 invalid_token`, a token without `system/admin` `403 insufficient_scope`.
 
+## The OpenAPI document
+
+`GET {issuer}/admin/openapi.json` answers, without a token, the OpenAPI
+3.1 document of the registration endpoint, the admin routes and the audit
+records, with their request and answer schemas, their scopes and their
+refusals. Its server is your issuer, so a console or a client generator
+can read it straight from the deployment:
+
+```sh
+curl -s https://smart.example.org/admin/openapi.json
+```
+
+The standard endpoints (`/authorize`, `/token`, `/introspect`, `/revoke`
+and the discovery documents) are described by their RFCs and are not in
+it.
+
 ## The routes
 
 | Request | What it does |

@@ -14,12 +14,26 @@ use serde_json::{Value, json};
 use crate::introspection::{GATEWAY_SECRET, ISSUER, Server};
 use crate::support::{RESOURCE, events, records};
 
-/// Returns the search `query` answers, with the auditor's `token`.
+/// The route of a client's new secret.
+const SECRET: &str = "/admin/clients/{client_id}/secret";
+
+/// Returns the search `query` answers, with the auditor's `token`, a found
+/// page held to its schema.
 async fn search(server: &Server, query: &str, token: &str) -> (StatusCode, Value) {
-    let (status, _, body) = server
+    let described = crate::openapi::served(server).await;
+    let answer = server
         .call(Method::GET, &format!("/audit?{query}"), None, Some(token))
         .await;
-    (status, body)
+    if answer.0 == StatusCode::OK {
+        crate::openapi::holds(
+            &described,
+            "get",
+            "/audit",
+            "application/fhir+json",
+            &answer,
+        );
+    }
+    (answer.0, answer.2)
 }
 
 /// Returns the `url` of the link `relation` of `bundle`.
@@ -183,7 +197,8 @@ async fn a_symmetric_client_gets_a_new_secret_once_and_others_are_refused() {
     let server = Server::start().await;
     let admin = server.token("admin", "system/admin", ISSUER).await;
     assert_eq!(StatusCode::OK, introspects(&server, GATEWAY_SECRET).await);
-    let (status, headers, body) = server
+    let described = crate::openapi::served(&server).await;
+    let answer = server
         .call(
             Method::POST,
             "/admin/clients/gateway/secret",
@@ -191,6 +206,8 @@ async fn a_symmetric_client_gets_a_new_secret_once_and_others_are_refused() {
             Some(&admin),
         )
         .await;
+    crate::openapi::holds(&described, "post", SECRET, "application/json", &answer);
+    let (status, headers, body) = answer;
     assert_eq!(StatusCode::OK, status, "{body}");
     assert_eq!(
         Some("no-store"),
@@ -220,7 +237,7 @@ async fn a_symmetric_client_gets_a_new_secret_once_and_others_are_refused() {
         ("app", StatusCode::BAD_REQUEST, "invalid_request"),
         ("nobody", StatusCode::NOT_FOUND, "not_found"),
     ] {
-        let (answered, _, body) = server
+        let answer = server
             .call(
                 Method::POST,
                 &format!("/admin/clients/{client}/secret"),
@@ -228,6 +245,8 @@ async fn a_symmetric_client_gets_a_new_secret_once_and_others_are_refused() {
                 Some(&admin),
             )
             .await;
+        crate::openapi::holds(&described, "post", SECRET, "application/json", &answer);
+        let (answered, _, body) = answer;
         assert_eq!(status, answered, "{client}: {body}");
         assert_eq!(json!(error), body["error"], "{client}");
     }

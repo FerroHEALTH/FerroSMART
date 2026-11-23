@@ -235,12 +235,25 @@ impl Smart {
         resource: &str,
         redirects: &[&str],
     ) -> Self {
+        Self::start_setting(grants, ceiling, role, resource, redirects, "").await
+    }
+
+    /// Starts the server of [`Smart::start_full`] with the `[ferrosmart]`
+    /// keys `settings`, each a line.
+    async fn start_setting(
+        grants: &str,
+        ceiling: &str,
+        role: &str,
+        resource: &str,
+        redirects: &[&str],
+        settings: &str,
+    ) -> Self {
         let provider = Provider::start().await;
         let keys = Keys::new();
         let database = Database::create().await;
         let assertion = crate::support::upstream_assertion(keys.dir.path());
         let text = format!(
-            "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
+            "[ferrosmart]\nissuer = {ISSUER:?}\n{settings}[ferrosmart.database]\nurl = {:?}\n\
              [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\nfhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [ferrosmart.branding]\nsmart_style_url = {STYLE:?}\n{resource}\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = {role}\n\
@@ -2531,6 +2544,7 @@ mod encounter_picker;
 mod fhir_user_lookup;
 mod logout;
 mod paired_picker;
+mod par;
 mod picker_purpose;
 mod picker_shortcuts;
 mod preset;

@@ -60,4 +60,11 @@ impl Params {
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.0.iter().map(|(name, _)| name.as_str())
     }
+
+    /// Returns every parameter as a name and a value, in order.
+    pub fn pairs(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+    }
 }

@@ -116,6 +116,33 @@ token request from one of its registered origins, the origins of its
 redirect URIs, gets a CORS answer for that origin; any other origin gets
 none.
 
+### A pushed request
+
+An app can push its authorization request first (RFC 9126): it posts the
+same parameters to `POST {issuer}/par`, authenticating as it does at the
+token endpoint, and gets `201` with a `request_uri` that lives 60 seconds.
+It then sends the browser to `/authorize` with its `client_id` and that
+`request_uri` alone. FerroSMART takes the pushed request once; a second use,
+a lapsed one or another client's answers the page that says the request
+lapsed. A deployment that sets `require_pushed_authorization_requests`, or
+a client registered with it, refuses a request that was not pushed with
+`invalid_request`.
+
+### Sender-constrained tokens
+
+A token request that carries a `DPoP` proof of `POST {issuer}/token` gets a
+token of type `DPoP` whose `cnf.jkt` is the thumbprint of the proof's key
+(RFC 9449 §5, §6.1); a proof that does not hold, or one used before, is
+refused with `invalid_dpop_proof`. A public client's refresh token is bound
+to that key too, and refreshing it takes a proof of the same key. A client
+registered with `tls_client_certificate_bound_access_tokens` gets a token
+whose `cnf` carries the `x5t#S256` of the certificate its mutual-TLS
+connection presented (RFC 8705 §3.1), and is refused without one.
+Introspection answers the token's `cnf`. The metadata names
+`dpop_signing_alg_values_supported`, and
+`tls_client_certificate_bound_access_tokens` is `true` when `[server.tls]`
+asks clients for a certificate.
+
 ## The EHR launch
 
 The EHR first gives FerroSMART the context and gets a `launch` value back,
