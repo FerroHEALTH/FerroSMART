@@ -724,6 +724,21 @@
             "default": false,
             "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
           },
+          "require_pushed_authorization_requests": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client starts an authorization request only by pushing it (RFC 9126 §6)."
+          },
+          "dpop_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
+          },
+          "tls_client_certificate_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client's tokens are bound to its mutual-TLS certificate (RFC 8705 §3.4)."
+          },
           "client_secret": {
             "type": "string",
             "description": "On an update (RFC 7592 §2.2), the secret the client holds."
@@ -743,6 +758,9 @@
           "scope",
           "grant_types",
           "first_party",
+          "require_pushed_authorization_requests",
+          "dpop_bound_access_tokens",
+          "tls_client_certificate_bound_access_tokens",
           "registered_by"
         ],
         "properties": {
@@ -851,6 +869,21 @@
             "type": "boolean",
             "default": false,
             "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
+          },
+          "require_pushed_authorization_requests": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client starts an authorization request only by pushing it (RFC 9126 §6)."
+          },
+          "dpop_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
+          },
+          "tls_client_certificate_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client's tokens are bound to its mutual-TLS certificate (RFC 8705 §3.4)."
           },
           "registered_by": {
             "type": "string",
@@ -977,6 +1010,21 @@
             "default": false,
             "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
           },
+          "require_pushed_authorization_requests": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client starts an authorization request only by pushing it (RFC 9126 §6)."
+          },
+          "dpop_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
+          },
+          "tls_client_certificate_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client's tokens are bound to its mutual-TLS certificate (RFC 8705 §3.4)."
+          },
           "registered_by": {
             "type": "string",
             "enum": [
@@ -1020,6 +1068,9 @@
           "scope",
           "grant_types",
           "first_party",
+          "require_pushed_authorization_requests",
+          "dpop_bound_access_tokens",
+          "tls_client_certificate_bound_access_tokens",
           "registered_by"
         ]
       },
