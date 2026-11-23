@@ -465,6 +465,38 @@
           }
         }
       }
+    },
+    "/admin/upstreams": {
+      "get": {
+        "operationId": "listUpstreams",
+        "summary": "The state of each upstream provider, in configuration order.",
+        "description": "An OpenID Connect provider's discovery document and key set are read when the request is answered; a SAML provider's metadata is reported as this replica last read it, with the copy in use.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The providers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpstreamList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -692,6 +724,21 @@
             "default": false,
             "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
           },
+          "require_pushed_authorization_requests": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client starts an authorization request only by pushing it (RFC 9126 §6)."
+          },
+          "dpop_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
+          },
+          "tls_client_certificate_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client's tokens are bound to its mutual-TLS certificate (RFC 8705 §3.4)."
+          },
           "client_secret": {
             "type": "string",
             "description": "On an update (RFC 7592 §2.2), the secret the client holds."
@@ -711,6 +758,9 @@
           "scope",
           "grant_types",
           "first_party",
+          "require_pushed_authorization_requests",
+          "dpop_bound_access_tokens",
+          "tls_client_certificate_bound_access_tokens",
           "registered_by"
         ],
         "properties": {
@@ -819,6 +869,21 @@
             "type": "boolean",
             "default": false,
             "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
+          },
+          "require_pushed_authorization_requests": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client starts an authorization request only by pushing it (RFC 9126 §6)."
+          },
+          "dpop_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
+          },
+          "tls_client_certificate_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client's tokens are bound to its mutual-TLS certificate (RFC 8705 §3.4)."
           },
           "registered_by": {
             "type": "string",
@@ -945,6 +1010,21 @@
             "default": false,
             "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
           },
+          "require_pushed_authorization_requests": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client starts an authorization request only by pushing it (RFC 9126 §6)."
+          },
+          "dpop_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
+          },
+          "tls_client_certificate_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client's tokens are bound to its mutual-TLS certificate (RFC 8705 §3.4)."
+          },
           "registered_by": {
             "type": "string",
             "enum": [
@@ -988,6 +1068,9 @@
           "scope",
           "grant_types",
           "first_party",
+          "require_pushed_authorization_requests",
+          "dpop_bound_access_tokens",
+          "tls_client_certificate_bound_access_tokens",
           "registered_by"
         ]
       },
@@ -1078,6 +1161,113 @@
                   }
                 }
               }
+            }
+          }
+        }
+      },
+      "UpstreamDocument": {
+        "type": "object",
+        "required": [
+          "document",
+          "read_at",
+          "ok"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "type": "string",
+            "enum": [
+              "openid_configuration",
+              "jwks",
+              "saml_metadata"
+            ]
+          },
+          "read_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string",
+            "description": "Why the read failed."
+          },
+          "last_good_read_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the SAML metadata in use was read."
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The SAML metadata's validUntil."
+          },
+          "certificates_expire_at": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "The notAfter of each signing certificate the document carries."
+          }
+        }
+      },
+      "Upstream": {
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "protocol",
+          "issuer",
+          "clients",
+          "documents"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "oidc",
+              "saml"
+            ]
+          },
+          "issuer": {
+            "type": "string",
+            "description": "The issuer identifier or the SAML entity ID."
+          },
+          "clients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The clients that name the provider in their upstreams."
+          },
+          "documents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpstreamDocument"
+            }
+          }
+        }
+      },
+      "UpstreamList": {
+        "type": "object",
+        "required": [
+          "upstreams"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Upstream"
             }
           }
         }

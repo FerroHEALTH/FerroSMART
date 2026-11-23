@@ -15,6 +15,7 @@ pub mod document;
 pub mod guard;
 pub mod openapi;
 pub mod register;
+pub mod upstreams;
 
 use std::sync::Arc;
 
@@ -61,6 +62,7 @@ fn table() -> Vec<Operation> {
         Operation::post(DISABLE_ROUTE, disable),
         Operation::post(ENABLE_ROUTE, enable),
         Operation::get(KEYS_ROUTE, keys),
+        Operation::get(upstreams::UPSTREAMS_ROUTE, upstreams::upstreams),
     ]
 }
 
