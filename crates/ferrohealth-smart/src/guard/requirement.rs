@@ -51,14 +51,13 @@ impl Requirement {
                 resource,
             } => {
                 access.caller().is_some_and(|caller| {
-                    caller.admitted_without_scope()
-                        || crate::openehr::granted(
-                            &caller.openehr_scopes(),
-                            *family,
-                            *permission,
-                            resource.as_deref(),
-                            honoured,
-                        )
+                    crate::openehr::granted(
+                        &caller.openehr_scopes(),
+                        *family,
+                        *permission,
+                        resource.as_deref(),
+                        honoured,
+                    )
                 }) || matches!(access, Access::Open)
             }
             Self::Scope(scope) => access.has_scope(scope),
@@ -156,7 +155,6 @@ mod tests {
             Some(String::from("client-1")),
             scope,
             None,
-            false,
             CallerKind::Person,
         )))
     }
@@ -194,15 +192,8 @@ mod tests {
 
     fn holding(roles: &[&str]) -> Access {
         Access::Caller(Arc::new(
-            Caller::new(
-                String::from("sub"),
-                None,
-                "",
-                None,
-                false,
-                CallerKind::Person,
-            )
-            .with_roles(roles.iter().map(|role| (*role).to_owned()).collect()),
+            Caller::new(String::from("sub"), None, "", None, CallerKind::Person)
+                .with_roles(roles.iter().map(|role| (*role).to_owned()).collect()),
         ))
     }
 
@@ -269,7 +260,7 @@ mod tests {
 
     #[cfg(feature = "openehr")]
     #[test]
-    fn an_openehr_requirement_admits_an_allowlisted_caller_with_no_resource_scope() {
+    fn an_openehr_requirement_admits_a_system_caller_by_its_openehr_scope_alone() {
         use crate::openehr::smart_scopes::{Permission, ResourceFamily};
         let none = Honoured::default();
         let read = Requirement::OpenEhr {
@@ -277,27 +268,25 @@ mod tests {
             permission: Permission::Read,
             resource: None,
         };
-        let caller = |scope: &str, scopeless: bool| {
+        let caller = |scope: &str| {
             Access::Caller(Arc::new(Caller::new(
                 String::from("svc"),
                 None,
                 scope,
                 None,
-                scopeless,
                 CallerKind::System,
             )))
         };
-        assert!(read.met_by(&caller("openid", true), none), "allowlisted");
-        assert!(!read.met_by(&caller("openid", false), none), "not listed");
+        assert!(!read.met_by(&caller("openid"), none), "no resource scope");
         assert!(
-            !read.met_by(&caller("system/template-*.r", true), none),
+            !read.met_by(&caller("system/template-*.r"), none),
             "an openEHR scope: only its scopes"
         );
         assert!(
-            !read.met_by(&caller("system/Observation.r", true), none),
+            !read.met_by(&caller("system/Observation.r"), none),
             "a FHIR scope: only its scopes"
         );
-        assert!(read.met_by(&caller("system/composition-*.r", false), none));
+        assert!(read.met_by(&caller("system/composition-*.r"), none));
     }
 
     #[test]

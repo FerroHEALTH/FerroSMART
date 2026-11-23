@@ -296,7 +296,6 @@ async fn a_live_keycloak_token_is_classified_under_the_keycloak_profile() -> Out
     let http = reqwest::Client::new();
     let mut profile = Profile::resolve(Preset::Keycloak, &ProfileKeys::default())?;
     profile.app_only = vec![Marker::Subjects(vec![service_account])];
-    profile.first_party_clients = vec![String::from("first-party-app")];
     let mut settings = Settings::new(
         format!("{base}/realms/{REALM}"),
         AUDIENCE,

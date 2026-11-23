@@ -461,7 +461,6 @@ async fn a_caller_without_a_verified_token_is_refused_before_anything_is_sent() 
         None,
         "user/*.rs",
         None,
-        false,
         CallerKind::Person,
     );
     assert!(matches!(

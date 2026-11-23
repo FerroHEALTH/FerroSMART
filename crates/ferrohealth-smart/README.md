@@ -51,8 +51,8 @@ ferrohealth-smart = { version = "=0.33.1", features = ["axum", "openehr"] }
   `profiles/` with each value's source), a deployment's `profile_file` over
   it, and the keys of its `[auth.issuer.<name>.profile]` table over both:
   the token types, the required claims, the scope claim, the
-  person key, the client claims, the app-only and guest markers, the
-  first-party clients and the delegates. `Caller::kind` answers `Patient`,
+  person key, the client claims and the app-only and guest markers.
+  `Caller::kind` answers `Patient`,
   `System`, `Delegated`, `Representative`, `Person`,
   `PatientRepresentative`, `Guest`, `ExternalPerson` or
   `ExternalOrganisation`, the patient's representative only on a patients
@@ -60,17 +60,11 @@ ferrohealth-smart = { version = "=0.33.1", features = ["axum", "openehr"] }
   `Rejection::Unclassified`. A Basic credential is a person's, never a
   system's, and carries no `system/` scope: a Basic grant holding one fails
   to load.
-- **`kind::standing`**: who answers the standing questions: through which
-  clients a person's token is admitted, which RFC 8693 actors are declared
-  delegates, and which system subjects are admitted without a scope. By
-  default the issuer's `first_party_clients` and `delegates` and the
-  section's `scopeless_subjects` answer them; under the `ferrosmart`
-  preset, `audience_delegates = true` reads every client of a token for
-  this resource server as a delegate. A product that keeps them as
-  its own data implements `Standing`, asked on every request with no
-  cache, and reads `[auth]` as `config::ProductStandingSection`, where those
-  keys are unknown; `ProductStandingSection::resolve` hands every
-  issuer the product's standing.
+- **One list of clients**: the authorization server's registry. A token
+  from a trusted issuer whose `aud` names the resource server admits its
+  client (RFC 9068 §4, RFC 8707), recorded as `Caller::client_id` for the
+  product's own policy, and an RFC 8693 `act` is read as the issuer
+  asserts it.
 - **`party`**: the party a person's login belongs to. One `[auth.issuer.<name>.party]`
   table per `persons` issuer names the identifiers its logins are matched
   against; the product implements `PartySource` over its own store, and
