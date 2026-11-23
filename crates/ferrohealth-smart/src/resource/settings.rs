@@ -109,14 +109,14 @@ mod tests {
 
     #[test]
     fn the_settings_rules_refuse_the_start() {
-        let mut settings = Settings::new("https://as.example.org", "aud", IssuerKind::Persons);
+        let mut settings = Settings::new("https://as.example.org", "aud", IssuerKind::Smart);
         assert!(settings.validate().is_ok());
         settings.clock_skew = MAX_CLOCK_SKEW + Duration::from_secs(1);
         assert!(matches!(
             settings.validate(),
             Err(ResourceError::ClockSkew { .. })
         ));
-        let mut settings = Settings::new("https://as.example.org", "", IssuerKind::Persons);
+        let mut settings = Settings::new("https://as.example.org", "", IssuerKind::Smart);
         assert!(matches!(
             settings.validate(),
             Err(ResourceError::NoAudience)

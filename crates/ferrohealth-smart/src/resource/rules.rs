@@ -23,7 +23,7 @@ pub(super) fn check_issuer_rules(
     sender_constraint: SenderConstraint,
     role_claims: &[String],
 ) -> Result<(), ResourceError> {
-    profile.validate(kind)?;
+    profile.validate()?;
     match (kind, federation) {
         (IssuerKind::Federation, Some(section)) => {
             section.validate()?;
@@ -73,7 +73,7 @@ pub(super) fn check_attributes(
             key: "attributes",
             kind,
         }),
-        (_, Some(section)) => Ok(section.validate_for(kind)?),
+        (_, Some(section)) => Ok(section.validate()?),
         (_, None) => Ok(()),
     }
 }

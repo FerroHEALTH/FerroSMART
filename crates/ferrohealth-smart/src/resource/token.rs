@@ -102,8 +102,8 @@ pub(super) async fn verify(
     if !settings.algorithms.contains(&header.alg) {
         return Err(invalid(Reason::Algorithm));
     }
-    // NOTE: RFC 9068 §4 has the `typ` header checked; which values an issuer
-    // writes is its profile's (`token_types`), compared without regard to case.
+    // NOTE: RFC 9068 §4 has the `typ` header checked, compared without regard
+    // to case; a federation issuer's table may name its own values.
     if !settings.profile.accepts_type(header.typ.as_deref()) {
         return Err(invalid(Reason::Type));
     }
@@ -250,8 +250,11 @@ pub(super) fn admit(
         admission.issuer,
     )
     .map_err(|reason| Rejection::Unclassified { reason })?;
-    let professional =
-        admission.kind == IssuerKind::Persons && classified.kind != CallerKind::System;
+    let professional = classified.kind.is_user()
+        && !matches!(
+            classified.kind,
+            CallerKind::Patient | CallerKind::RelatedPerson
+        );
     let attributes = match admission.attributes {
         Some(section) => Some(
             section
@@ -260,27 +263,12 @@ pub(super) fn admit(
         ),
         None => None,
     };
-    let scope_claim = if classified.app_only {
-        admission
-            .profile
-            .app_only_scope_claim
-            .as_ref()
-            .unwrap_or(&admission.profile.scope_claim)
-    } else {
-        &admission.profile.scope_claim
-    };
-    let scope = scope_claim
-        .read(&claims)
-        .map_err(|_form| Rejection::Unclassified {
-            reason: Unclassified::ScopeForm {
-                claim: scope_claim.claim.clone(),
-            },
-        })?;
+    let scope = Profile::scope(&claims).map_err(|_form| Rejection::Unclassified {
+        reason: Unclassified::ScopeForm,
+    })?;
     // NOTE: SMART App Launch 2.2.0, Scopes and Launch Context, `launch/patient`: the
-    // authorization server sets the patient context, read only from an issuer trusted to.
-    let patient = admission
-        .profile
-        .patient_context
+    // SMART authorization server sets the patient context; another party's does not.
+    let patient = (admission.kind == IssuerKind::Smart)
         .then(|| text(&claims, "patient"))
         .flatten();
     let scopes = match admission.resource_types {
@@ -292,17 +280,13 @@ pub(super) fn admit(
         .with_scopes(scopes)
         .with_roles(roles)
         .with_assurance(assurance)
-        .with_person_key(
-            text(&claims, &admission.profile.person_key),
-            admission
-                .profile
-                .tenant_claim
-                .as_deref()
-                .and_then(|claim| text(&claims, claim)),
-        )
         .with_issuer(admission.issuer.to_owned())
         .with_claims(claims)
         .with_extensions(admission.extensions.clone());
+    let caller = match classified.actor {
+        Some(actor) => caller.with_actor(actor),
+        None => caller,
+    };
     Ok(match attributes {
         Some(attributes) => caller.with_attributes(attributes),
         None => caller,
@@ -399,7 +383,7 @@ mod tests {
     }
 
     async fn server(path: &std::path::Path, max_age: Duration) -> ResourceServer {
-        let mut settings = Settings::new(ISSUER, AUDIENCE, IssuerKind::Persons);
+        let mut settings = Settings::new(ISSUER, AUDIENCE, IssuerKind::Smart);
         settings.jwks_file = Some(path.to_owned());
         settings.jwks_max_age = max_age;
         settings.jwks_refresh_interval = Duration::from_secs(3600);

@@ -44,7 +44,6 @@ use crate::client::TokenError;
 use crate::federation::Field;
 use crate::kind::Actor;
 use crate::kind::CallerKind;
-use crate::kind::IssuerKind;
 use crate::kind::Unclassified;
 use crate::profile::onward::PreviewVariant;
 use crate::resource::Caller;
@@ -370,17 +369,11 @@ pub enum Rejected {
     /// plus 60 s of drift.
     #[error("the issued token outlives the caller's {0}")]
     AssertionWindow(AssertionWindow),
-    /// A claim of the profile's `expect` is absent or holds another value.
-    #[error("the claim {claim} does not hold the value the profile expects")]
-    Expected {
-        /// The claim.
-        claim: String,
-    },
     /// The token names another actor than the requesting client, or none.
     #[error("the issued token does not name the requesting client as its actor")]
     Actor,
-    /// A claim of the profile's `person_equality` differs between the
-    /// subject token and the issued token, or is absent from one.
+    /// `iss` or `sub` differs between the subject token and the issued
+    /// token, or is absent from one.
     #[error("the issued token names another person: {claim} differs")]
     Person {
         /// The claim.
@@ -406,12 +399,12 @@ pub enum Rejected {
     /// chained route, or its correlation id, with the same value.
     #[error("the issued token does not carry the subject token's correlation claim")]
     Correlation,
-    /// The token of a `patients` issuer does not read as a patient token of
-    /// that issuer.
-    #[error("the issued token is not a patient token of the issuer")]
-    Patient(#[source] Unclassified),
+    /// The token issued for a patient's own token does not name a
+    /// `Patient` as its `fhirUser`.
+    #[error("the issued token is not a patient's token")]
+    Patient,
     /// A claim of the subject token's patient context differs on the token
-    /// of a `patients` issuer, or is absent from it.
+    /// issued for a patient's own token, or is absent from it.
     #[error("the issued token names another patient: {claim} differs")]
     PatientContext {
         /// The claim.
@@ -459,14 +452,6 @@ pub enum OnwardError {
     /// The issuer's settings break a rule.
     #[error("the onward issuer's settings break a rule")]
     Settings(#[source] Box<ResourceError>),
-    /// The issuer's kind issues no onward token: only a `persons` issuer
-    /// (a delegated exchange), a `patients` issuer and a `federation`
-    /// issuer do.
-    #[error("a {kind} issuer issues no onward token")]
-    IssuerKind {
-        /// The kind.
-        kind: IssuerKind,
-    },
     /// The issuer's profile sets no `max_onward_lifetime`.
     #[error("the onward issuer's profile sets no max_onward_lifetime")]
     MaxOnwardLifetime,
@@ -480,10 +465,6 @@ pub enum OnwardError {
     /// The caller holds no verified token to exchange.
     #[error("the caller holds no verified token to exchange")]
     NoSubjectToken,
-    /// A `patients` issuer was asked to exchange the token of a caller that
-    /// is not a patient.
-    #[error("a patients issuer exchanges a patient's own token only")]
-    PatientRequired,
     /// A patient's token names no patient context for the issued token to
     /// keep.
     #[error("the patient's token names no patient context")]

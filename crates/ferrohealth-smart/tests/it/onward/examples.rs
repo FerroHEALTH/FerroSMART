@@ -67,15 +67,11 @@ const FIGURE_14: &str = "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3At
 /// `persons` issuer whose onward tokens live at most an hour, the longest
 /// lifetime the Appendix A responses name.
 fn as_example_com(keys: ProfileKeys) -> Settings {
-    let mut settings = Settings::new(AS, "rs08", IssuerKind::Persons);
-    settings.profile = ferrohealth_smart::profile::Profile::resolve(
-        ferrohealth_smart::profile::Preset::Rfc9068,
-        &ProfileKeys {
-            max_onward_lifetime: Some(ferrohealth_config::units::Duration::from_hours(1)),
-            ..keys
-        },
-    )
-    .expect("the preset reads");
+    let mut settings = Settings::new(AS, "rs08", IssuerKind::Smart);
+    settings.profile = ferrohealth_smart::profile::Profile::default().with_keys(ProfileKeys {
+        max_onward_lifetime: Some(ferrohealth_config::units::Duration::from_hours(1)),
+        ..keys
+    });
     settings
 }
 
@@ -390,18 +386,13 @@ async fn rfc7523_section_4_is_reproduced_with_the_section_2_2_client_assertion()
     let mut settings = Settings::new(
         "https://jwt-rp.example.net",
         "https://jwt-rp.example.net",
-        IssuerKind::Persons,
+        IssuerKind::Smart,
     );
-    settings.profile = ferrohealth_smart::profile::Profile::resolve(
-        ferrohealth_smart::profile::Preset::Rfc9068,
-        &ProfileKeys {
-            onward_grant: Some(OnwardGrant::JwtBearer),
-            max_onward_lifetime: Some(ferrohealth_config::units::Duration::from_hours(1)),
-            ..ProfileKeys::default()
-        },
-    )
-    .expect("the preset reads");
-    settings.profile.person_equality = vec![String::from("sub")];
+    settings.profile = ferrohealth_smart::profile::Profile::default().with_keys(ProfileKeys {
+        onward_grant: Some(OnwardGrant::JwtBearer),
+        max_onward_lifetime: Some(ferrohealth_config::units::Duration::from_hours(1)),
+        ..ProfileKeys::default()
+    });
     let issued = json!({
         "iss": "https://jwt-rp.example.net", "sub": "mailto:mike@example.com",
         "aud": "https://api.example.net", "client_id": "s6BhdRkqt3",
@@ -426,10 +417,13 @@ async fn rfc7523_section_4_is_reproduced_with_the_section_2_2_client_assertion()
     let subject = subject_of(&assertion, &assertion_claims, CallerKind::Person);
     let target =
         Target::new(["https://api.example.net"]).with_scope("https://api.example.net/read");
-    onward
-        .token(&subject, None, &target)
-        .await
-        .expect("accepted");
+    // NOTE: OpenID Connect Core 1.0 §5.7: `iss` and `sub` together name one user, so
+    // the token the RP issues for another issuer's assertion names another person.
+    let outcome = onward.token(&subject, None, &target).await;
+    assert!(
+        matches!(&outcome, Err(OnwardError::Rejected(Rejected::Person { claim })) if claim == "iss"),
+        "{outcome:?}"
+    );
     let sent = received(&server).await;
     let form = sent.first().expect("one request");
     assert_eq!(

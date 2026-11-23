@@ -14,11 +14,6 @@ use base64::Engine as _;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::metadata::DiscoveryError;
 use ferrohealth_smart::metadata::ServerMetadata;
-use ferrohealth_smart::profile::Preset;
-use ferrohealth_smart::profile::Profile;
-use ferrohealth_smart::profile::ProfileKeys;
-use ferrohealth_smart::profile::ScopeClaim;
-use ferrohealth_smart::profile::ScopeForm;
 use ferrohealth_smart::refusal::Denied;
 use ferrohealth_smart::refusal::Reason;
 use ferrohealth_smart::refusal::Refusal;
@@ -692,31 +687,26 @@ async fn metadata_naming_another_issuer_no_key_set_or_an_insecure_one_refuses_th
 }
 
 #[tokio::test]
-async fn the_scp_array_is_read_only_where_the_profile_names_it() -> Result<(), Box<dyn StdError>> {
+async fn a_scope_claim_under_another_name_grants_nothing() -> Result<(), Box<dyn StdError>> {
     let key = ec_key("k1", Algorithm::ES256);
     let issuer = Issuer::start(&[&key]).await;
     let mut claims = issuer.claims("");
     claims.as_object_mut().ok_or("an object")?.remove("scope");
     claims["scp"] = serde_json::json!(["system/Observation.c", "__operator"]);
-    let strict = server(issuer.settings()).await;
-    let caller = strict.authenticate(&mint(&key, &claims)).await?;
+    let mut settings = issuer.settings();
+    settings
+        .profile
+        .required_claims
+        .retain(|claim| claim != "scope");
+    let caller = server(settings)
+        .await
+        .authenticate(&mint(&key, &claims))
+        .await?;
     assert!(
         !caller.has_scope("__operator"),
         "RFC 9068 §2.2.3 names scope alone"
     );
     assert_eq!(None, caller.reach(Permission::Create, "Observation"));
-    let mut settings = issuer.settings();
-    settings.profile.scope_claim = ScopeClaim {
-        claim: String::from("scp"),
-        form: ScopeForm::Array,
-    };
-    let lenient = server(settings).await;
-    let caller = lenient.authenticate(&mint(&key, &claims)).await?;
-    assert!(caller.has_scope("__operator"));
-    assert_eq!(
-        Some(Compartment::Any),
-        caller.reach(Permission::Create, "Observation")
-    );
     Ok(())
 }
 
@@ -855,32 +845,25 @@ async fn the_smart_configuration_republishes_the_issuer() -> Result<(), Box<dyn 
 // NOTE: RFC 9068 §2.2 requires `sub`, and RFC 7519 §4.1.2 has it identify a
 // principal, which an empty or whitespace-only value does not.
 #[tokio::test]
-async fn a_blank_sub_is_refused_under_every_preset() -> Result<(), Box<dyn StdError>> {
+async fn a_blank_sub_is_refused() -> Result<(), Box<dyn StdError>> {
     let key = ec_key("k1", Algorithm::ES256);
     let issuer = Issuer::start(&[&key]).await;
-    for profile in [Preset::Rfc9068, Preset::Entra] {
-        let mut settings = issuer.settings();
-        settings.profile = Profile::resolve(profile, &ProfileKeys::default())?;
-        settings.profile.token_types = vec![String::from("at+jwt")];
-        settings.profile.required_claims = vec![String::from("sub")];
-        settings.profile.expect.clear();
-        let server = server(settings).await;
-        for blank in ["", " ", "\t \n"] {
-            let mut claims = issuer.claims("system/Condition.r");
-            claims["sub"] = serde_json::json!(blank);
-            let outcome = server.authenticate(&mint(&key, &claims)).await;
-            let case = format!("{profile:?} with sub {blank:?}");
-            assert_invalid(&outcome, &case);
-            assert!(
-                matches!(
-                    outcome,
-                    Err(Rejection::Invalid {
-                        reason: Reason::BlankSubject
-                    })
-                ),
-                "{case}"
-            );
-        }
+    let server = server(issuer.settings()).await;
+    for blank in ["", " ", "\t \n"] {
+        let mut claims = issuer.claims("system/Condition.r");
+        claims["sub"] = serde_json::json!(blank);
+        let outcome = server.authenticate(&mint(&key, &claims)).await;
+        let case = format!("sub {blank:?}");
+        assert_invalid(&outcome, &case);
+        assert!(
+            matches!(
+                outcome,
+                Err(Rejection::Invalid {
+                    reason: Reason::BlankSubject
+                })
+            ),
+            "{case}"
+        );
     }
     Ok(())
 }
