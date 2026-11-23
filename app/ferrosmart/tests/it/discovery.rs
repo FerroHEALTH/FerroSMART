@@ -177,7 +177,7 @@ async fn the_jwk_set_publishes_bare_rs256_keys_and_may_be_cached() {
     let keys = Keys::new();
     let next = rsa_key(keys.dir.path(), "next.pem");
     let text = format!(
-        "{ROOT}\n[ferrosmart.keys]\nprivate_key_file = {:?}\nkid = \"2026-11\"\nnext_private_key_file = {:?}",
+        "{ROOT}\n[ferrosmart.keys]\nprivate_key_files = [{:?}, {:?}]",
         keys.current.display().to_string(),
         next.display().to_string()
     );
@@ -190,8 +190,11 @@ async fn the_jwk_set_publishes_bare_rs256_keys_and_may_be_cached() {
             .and_then(|v| v.to_str().ok())
     );
     let published = body["keys"].as_array().expect("keys");
-    assert_eq!(2, published.len(), "the current key, then the next one");
-    assert_eq!(json!("2026-11"), published[0]["kid"]);
+    assert_eq!(
+        1,
+        published.len(),
+        "the first key until the store names the ring"
+    );
     for key in published {
         // NOTE: SMART App Launch 2.2.0, bare JWK keys; RFC 9068 §2.1, RS256.
         assert_eq!(json!("RSA"), key["kty"]);

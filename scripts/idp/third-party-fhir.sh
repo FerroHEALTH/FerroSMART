@@ -102,7 +102,7 @@ curl -fsS -o /dev/null -X PUT http://localhost:8091/fhir/Patient/example \
 
 "$root/target/debug/ferrosmart" --config "$lane/ferrosmart.toml" \
   --set server.listen=127.0.0.1:8080 \
-  --set "ferrosmart.keys.private_key_file=$LANE_DIR/signing.pem" \
+  --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem" \
   --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem" \
   --set "ferrosmart.database.url=$LANE_PG/ferrosmart_third_party" \
   --set "ferrosmart.client[1].jwks_file=$LANE_DIR/client.jwks.json" \

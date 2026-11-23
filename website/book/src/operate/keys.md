@@ -29,34 +29,49 @@ Make a key with OpenSSL:
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out rs256.pem
 ```
 
-A key is published under the `kid` you configure, or its RFC 7638
-thumbprint. `{issuer}/jwks` answers with `Cache-Control: public,
-max-age=3600`, so a resource server may hold the key set for an hour, and a
-resource server refetches it when a token names a `kid` it has not seen.
+Each key is published under its RFC 7638 thumbprint as its `kid`.
+`{issuer}/jwks` answers with `Cache-Control: public, max-age=3600`, so a
+resource server may hold the key set for an hour, and a resource server
+refetches it when a token names a `kid` it has not seen.
 
 ## Rotating the token keys
 
-A rotation never leaves a resource server holding a token whose key it
-cannot find:
+The token keys rotate on a schedule. List the key files in the order they
+take over, and set how long each one signs:
 
-1. **Publish the next key.** Set `next_private_key_file` to the new key and
-   restart. The next key is published at `{issuer}/jwks` and signs nothing.
-   Wait at least an hour, the key set's cache lifetime, so every resource
-   server has seen it.
-2. **Make it current.** Move the new key to `private_key_file`, the old one
-   to `previous_private_key_file`, remove `next_private_key_file`, and
-   restart. The new key signs; the old one is still published.
-3. **Retire the old key.** Keep the previous key published for the
-   longest-lived token it signed plus the cache lifetime: with the
-   default `access_token_lifetime` of five minutes, an hour and five
-   minutes. `previous_key_overlap` removes it by itself after that long; at
-   `0s` it stays until you remove `previous_private_key_file` and restart.
+```toml
+[ferrosmart.keys]
+private_key_files = ["/run/secrets/rs256-1.pem", "/run/secrets/rs256-2.pem"]
+rotation_period = "90d"
+```
 
-Every replica must run the same three files. Restart the replicas one at a
-time; each one drains before it stops ([operations](operations.md)).
-`GET {issuer}/admin/keys` shows each replica's ring as it runs: every public
-key with its state, `active`, `next` or `retiring`
-([the admin API](../configure/admin-api.md)).
+The replicas share where each key stands through the database, so every
+replica signs with the same key, and each replica reads it every minute.
+A key moves through four states:
+
+1. **`next`.** The first start signs with the first key and publishes the
+   second as `next` at once. Later, whenever no key is `next`, the first
+   key of the list the database has never seen becomes it. A next key is
+   published at `{issuer}/jwks` and signs nothing.
+2. **`active`.** After `rotation_period`, the next key takes over, once it
+   has been published for at least an hour and a minute (the key set's
+   cache lifetime and the refresh interval), so every resource server has
+   seen it.
+3. **`retiring`.** The old key stays published for the longest-lived token
+   it signed plus that hour and a minute: with the default
+   `access_token_lifetime` of five minutes, an hour and six minutes.
+   A `rotation_period` shorter than that is refused at start.
+4. **`retired`.** The key is no longer published and never signs again,
+   even while its file stays in the list.
+
+To keep the rotation going, add a fresh key file to the end of the list
+on every replica before the current next key takes over, and remove a
+retired key's file when you like. With no unused key left, the active key
+keeps signing past its period. Every replica must run the same key files:
+a replica whose files lack the next key never makes it sign, and a replica
+whose files lack the active key keeps the ring it had and logs an error.
+`GET {issuer}/admin/keys` shows the replica's ring: every public key it
+publishes with its state ([the admin API](../configure/admin-api.md)).
 
 ## The assertion keys
 
@@ -68,8 +83,17 @@ algorithm is the one the provider's registration names (`algorithm`,
 `RS256` by default), and `certificate_file` names the current key's X.509
 certificate for a provider that knows the key that way.
 
-The assertion ring rotates the same way. A provider that reads
-`{issuer}/upstream-jwks`, as Keycloak does, sees the next key before it
-signs. A provider that stores a certificate, as Microsoft Entra ID does,
-needs the next key's certificate uploaded before step 2, and the old one
-removed after step 3.
+The assertion ring rotates by its files, with a restart at each step:
+
+1. **Publish the next key.** Set `next_private_key_file` to the new key and
+   restart. The next key is published at `{issuer}/upstream-jwks` and signs
+   nothing. A provider that reads that set, as Keycloak does, sees it there;
+   a provider that stores a certificate, as Microsoft Entra ID does, needs
+   the next key's certificate uploaded now.
+2. **Make it current.** Move the new key to `private_key_file`, the old one
+   to `previous_private_key_file`, remove `next_private_key_file`, and
+   restart. The new key signs; the old one is still published.
+3. **Retire the old key.** `previous_key_overlap` removes the previous key
+   by itself after that long; at `0s` it stays until you remove
+   `previous_private_key_file` and restart. Remove an old certificate from
+   the provider after this step.
