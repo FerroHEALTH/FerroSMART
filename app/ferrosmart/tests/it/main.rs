@@ -10,6 +10,7 @@
 )]
 
 mod admin;
+mod admin_subjects;
 mod audit;
 mod authorize;
 mod brands;
@@ -36,3 +37,4 @@ mod symmetric;
 mod token;
 mod upstream_config;
 mod upstream_vendors;
+mod upstreams;

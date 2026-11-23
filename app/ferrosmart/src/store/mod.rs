@@ -19,6 +19,7 @@ pub mod logout;
 pub mod pushed;
 pub mod recent;
 pub mod signing;
+pub mod subjects;
 
 use std::collections::BTreeMap;
 use std::time::Duration;

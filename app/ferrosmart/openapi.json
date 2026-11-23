@@ -465,6 +465,296 @@
           }
         }
       }
+    },
+    "/admin/upstreams": {
+      "get": {
+        "operationId": "listUpstreams",
+        "summary": "The state of each upstream provider, in configuration order.",
+        "description": "An OpenID Connect provider's discovery document and key set are read when the request is answered; a SAML provider's metadata is reported as this replica last read it, with the copy in use.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The providers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpstreamList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/admin/subjects": {
+      "get": {
+        "operationId": "findSubject",
+        "summary": "A person's FerroSMART subject: the pairwise subject of their sub at a provider.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "upstream",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The provider's name."
+          },
+          {
+            "name": "sub",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The person's subject at the provider."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The subject.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is missing, named twice, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "No provider is configured under the name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/subjects/{sub}/grants": {
+      "parameters": [
+        {
+          "name": "sub",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The person's FerroSMART subject."
+        }
+      ],
+      "get": {
+        "operationId": "listSubjectAccess",
+        "summary": "A person's live grants, newest first, and the consents they remembered.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The person's access.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectAccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/admin/subjects/{sub}/grants/{grant_id}": {
+      "parameters": [
+        {
+          "name": "sub",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The person's FerroSMART subject."
+        },
+        {
+          "name": "grant_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "delete": {
+        "operationId": "revokeSubjectGrant",
+        "summary": "Revokes one of the person's live grants with every token under it.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The grant is revoked."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "The person holds no live grant under the id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/subjects/{sub}/consents/{client_id}": {
+      "parameters": [
+        {
+          "name": "sub",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The person's FerroSMART subject."
+        },
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "delete": {
+        "operationId": "withdrawSubjectConsent",
+        "summary": "Disconnects the client from the person: their remembered consent is forgotten and the client's grants about them revoked (GDPR Art 7(3)).",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What was ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Withdrawn"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/admin/subjects/{sub}/sessions": {
+      "parameters": [
+        {
+          "name": "sub",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The person's FerroSMART subject."
+        }
+      ],
+      "delete": {
+        "operationId": "endSubjectSessions",
+        "summary": "Ends every upstream session of the person with the online_access grants in it.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What was ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndedSessions"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -692,6 +982,21 @@
             "default": false,
             "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
           },
+          "require_pushed_authorization_requests": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client starts an authorization request only by pushing it (RFC 9126 §6)."
+          },
+          "dpop_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
+          },
+          "tls_client_certificate_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client's tokens are bound to its mutual-TLS certificate (RFC 8705 §3.4)."
+          },
           "client_secret": {
             "type": "string",
             "description": "On an update (RFC 7592 §2.2), the secret the client holds."
@@ -711,6 +1016,9 @@
           "scope",
           "grant_types",
           "first_party",
+          "require_pushed_authorization_requests",
+          "dpop_bound_access_tokens",
+          "tls_client_certificate_bound_access_tokens",
           "registered_by"
         ],
         "properties": {
@@ -819,6 +1127,21 @@
             "type": "boolean",
             "default": false,
             "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
+          },
+          "require_pushed_authorization_requests": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client starts an authorization request only by pushing it (RFC 9126 §6)."
+          },
+          "dpop_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
+          },
+          "tls_client_certificate_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client's tokens are bound to its mutual-TLS certificate (RFC 8705 §3.4)."
           },
           "registered_by": {
             "type": "string",
@@ -945,6 +1268,21 @@
             "default": false,
             "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
           },
+          "require_pushed_authorization_requests": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client starts an authorization request only by pushing it (RFC 9126 §6)."
+          },
+          "dpop_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
+          },
+          "tls_client_certificate_bound_access_tokens": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the client's tokens are bound to its mutual-TLS certificate (RFC 8705 §3.4)."
+          },
           "registered_by": {
             "type": "string",
             "enum": [
@@ -988,6 +1326,9 @@
           "scope",
           "grant_types",
           "first_party",
+          "require_pushed_authorization_requests",
+          "dpop_bound_access_tokens",
+          "tls_client_certificate_bound_access_tokens",
           "registered_by"
         ]
       },
@@ -1079,6 +1420,267 @@
                 }
               }
             }
+          }
+        }
+      },
+      "UpstreamDocument": {
+        "type": "object",
+        "required": [
+          "document",
+          "read_at",
+          "ok"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "type": "string",
+            "enum": [
+              "openid_configuration",
+              "jwks",
+              "saml_metadata"
+            ]
+          },
+          "read_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string",
+            "description": "Why the read failed."
+          },
+          "last_good_read_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the SAML metadata in use was read."
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The SAML metadata's validUntil."
+          },
+          "certificates_expire_at": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "The notAfter of each signing certificate the document carries."
+          }
+        }
+      },
+      "Upstream": {
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "protocol",
+          "issuer",
+          "clients",
+          "documents"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "oidc",
+              "saml"
+            ]
+          },
+          "issuer": {
+            "type": "string",
+            "description": "The issuer identifier or the SAML entity ID."
+          },
+          "clients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The clients that name the provider in their upstreams."
+          },
+          "documents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpstreamDocument"
+            }
+          }
+        }
+      },
+      "UpstreamList": {
+        "type": "object",
+        "required": [
+          "upstreams"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Upstream"
+            }
+          }
+        }
+      },
+      "Subject": {
+        "type": "object",
+        "required": [
+          "upstream",
+          "subject"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "upstream": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        }
+      },
+      "SubjectGrant": {
+        "type": "object",
+        "required": [
+          "grant_id",
+          "client_id",
+          "aud",
+          "scope",
+          "issued_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "grant_id": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "aud": {
+            "type": "string",
+            "format": "uri"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "page",
+              "remembered",
+              "administrative",
+              "first-party"
+            ]
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "offline",
+              "online"
+            ]
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When a token was last issued under the grant."
+          }
+        }
+      },
+      "SubjectConsent": {
+        "type": "object",
+        "required": [
+          "client_id",
+          "aud",
+          "scope",
+          "granted_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "aud": {
+            "type": "string",
+            "format": "uri"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SubjectAccess": {
+        "type": "object",
+        "required": [
+          "subject",
+          "grants",
+          "consents"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubjectGrant"
+            }
+          },
+          "consents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubjectConsent"
+            }
+          }
+        }
+      },
+      "Withdrawn": {
+        "type": "object",
+        "required": [
+          "remembered",
+          "grants"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "remembered": {
+            "type": "boolean"
+          },
+          "grants": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "EndedSessions": {
+        "type": "object",
+        "required": [
+          "sessions",
+          "grants"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "grants": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       }

@@ -181,3 +181,74 @@ public JWK of each key with its state, `active` (signs), `next` (published
 ahead of the rotation that makes it sign) and `retiring` (published until
 the tokens it signed have expired). The private keys stay in the files
 `[ferrosmart.keys]` names ([keys and rotation](../operate/keys.md)).
+
+## The upstream providers
+
+`GET /admin/upstreams` shows whether each provider people log in at can
+still be read, in configuration order, without reading the logs. Each
+entry carries the provider's `name`, `label`, `protocol` (`oidc` or
+`saml`), its `issuer` (the issuer identifier or the SAML entity ID), the
+`clients` that name it in their `upstreams` (a client that names none may
+use every provider), and its `documents`:
+
+- an OpenID Connect provider's `openid_configuration` and `jwks`, read
+  when the request is answered, since the key set is read at each login
+  and FerroSMART holds no copy of it;
+- a SAML provider's `saml_metadata` as this replica last read it, with
+  `last_good_read_at` (the copy in use) and the metadata's `valid_until`.
+
+Each document has `read_at`, `ok` and, for a failed read, `error`. A key
+set or metadata also lists `certificates_expire_at`, the `notAfter` of
+each signing certificate it carries. A failed SAML read leaves the last
+good copy in use until its `validUntil`. The providers' configuration and
+secrets stay in the file and are never answered.
+
+```json
+{
+  "upstreams": [
+    {
+      "name": "national",
+      "label": "National login",
+      "protocol": "saml",
+      "issuer": "https://idp.example.org/saml",
+      "clients": ["clinic"],
+      "documents": [
+        {
+          "document": "saml_metadata",
+          "read_at": "2026-11-23T10:00:00Z",
+          "ok": false,
+          "error": "the identity provider's metadata cannot be fetched",
+          "last_good_read_at": "2026-11-22T10:00:00Z",
+          "certificates_expire_at": ["2027-06-01T00:00:00Z"]
+        }
+      ]
+    }
+  ]
+}
+```
+## A person's access
+
+An administrator finds a person and ends their access through the API,
+as the person can on the management page. Withdrawing is as easy as
+giving (GDPR Art 7(3)), and each change commits with its record naming
+the admin client and the person.
+
+- `GET /admin/subjects?upstream=<name>&sub=<sub>` answers the person's
+  FerroSMART `subject`: the pairwise subject of their `sub` at the
+  provider `name`, as `ferrosmart subject` prints it.
+- `GET /admin/subjects/{subject}/grants` lists their live grants, newest
+  first (`grant_id`, `client_id`, `aud`, `scope`, `basis`, `access`,
+  `issued_at` and `last_used_at`, the last token issued under it), and the
+  `consents` they remembered (`client_id`, `aud`, `scope`, `granted_at`).
+  A grant is live while a refresh token or an access token under it is.
+- `DELETE /admin/subjects/{subject}/grants/{grant_id}` revokes one grant
+  with every token under it, answering `204`; a grant that is not the
+  person's or no longer live answers `404`.
+- `DELETE /admin/subjects/{subject}/consents/{client_id}` disconnects the
+  app from the person: their remembered consent is forgotten and every
+  grant and token of the app about them is revoked. The answer counts
+  them: `{"remembered": true, "grants": 1}`.
+- `DELETE /admin/subjects/{subject}/sessions` ends every upstream login
+  the person's grants were issued in, with the `online_access` grants in
+  them, as a logout at the provider would. `offline_access` grants stay.
+  The answer counts them: `{"sessions": 1, "grants": 1}`.
