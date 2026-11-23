@@ -184,7 +184,7 @@ async fn answered(
         return refusal_body(Refusal::MalformedResponse);
     };
     match presented(login, pending, payload).await {
-        Ok(identity) => accept(state, pending, provider, Some(&identity)).await,
+        Ok(identity) => accept(state, pending, provider, &identity).await,
         Err(refusal) => refused(state, provider, refusal).await,
     }
 }
@@ -209,19 +209,19 @@ async fn presented(
         .await
 }
 
-/// Keeps the answer `identity` to `pending` (none when declined) under a
-/// fresh response code and answers the wallet with the `redirect_uri` that
-/// brings it back, or refuses a nonce already answered.
+/// Keeps the person `identity` for `pending` under a fresh response code
+/// and answers the wallet with the `redirect_uri` that brings it back, or
+/// refuses a nonce already answered.
 async fn accept(
     state: &AppState,
     pending: &Pending,
     provider: &LoginProvider,
-    identity: Option<&Identity>,
+    identity: &Identity,
 ) -> Response {
     let Ok(code) = random() else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let identity = match identity.map(serde_json::to_value).transpose() {
+    let identity = match serde_json::to_value(identity) {
         Ok(identity) => identity,
         Err(error) => return failed(&error),
     };
@@ -243,23 +243,20 @@ async fn accept(
         Ok(false) => return refused(state, provider, Refusal::ReplayedNonce).await,
         Err(error) => return failed(&error),
     }
-    let mut back = state.settings().endpoint_url(COMPLETE_ROUTE);
-    back.query_pairs_mut().append_pair("response_code", &code);
     tracing::info!(
         target: "ferrosmart::audit",
         event = "wallet.answer",
         client_id = ?pending.client_id,
-        declined = answer.identity.is_none(),
-        "a wallet answer was admitted"
+        "a wallet presentation was admitted"
     );
-    no_store(
-        Json(json!({"redirect_uri": back.as_str()})),
-        "application/json",
-    )
+    back(state, &[("response_code", &code)])
 }
 
-/// Records that the wallet declined `pending` and keeps the refusal for
-/// the browser, which sends it back to the app (OpenID4VP 1.0 §8.5).
+/// Records that the wallet declined `pending` and sends the browser back
+/// with the error and the request's `state`, which the cookie's request
+/// must name (OpenID4VP 1.0 §8.5; RFC 6749 §4.1.2.1); the nonce stays
+/// unanswered, so an error posted against the public `state` blocks no
+/// presentation.
 async fn declined(state: &AppState, pending: &Pending, provider: &LoginProvider) -> Response {
     if let Err(response) = super::callback::record_login(
         state,
@@ -270,7 +267,24 @@ async fn declined(state: &AppState, pending: &Pending, provider: &LoginProvider)
     {
         return *response;
     }
-    accept(state, pending, provider, None).await
+    back(
+        state,
+        &[
+            ("error", "access_denied"),
+            ("state", &pending.upstream_state),
+        ],
+    )
+}
+
+/// Answers the wallet with the `redirect_uri` of [`COMPLETE_ROUTE`]
+/// carrying `pairs` (OpenID4VP 1.0 §8.2).
+fn back(state: &AppState, pairs: &[(&str, &str)]) -> Response {
+    let mut url = state.settings().endpoint_url(COMPLETE_ROUTE);
+    url.query_pairs_mut().extend_pairs(pairs);
+    no_store(
+        Json(json!({"redirect_uri": url.as_str()})),
+        "application/json",
+    )
 }
 
 /// Records the refusal `refusal` of a presentation at `provider` and
@@ -309,9 +323,11 @@ fn failed(error: &(dyn std::error::Error + 'static)) -> Response {
     StatusCode::INTERNAL_SERVER_ERROR.into_response()
 }
 
-/// `GET {issuer}/wallet/complete?response_code=…`: the browser that began
-/// the request brings the wallet's answer back, and the login completes
-/// (OpenID4VP 1.0 §14.2; HAIP 1.0 §5.1).
+/// `GET {issuer}/wallet/complete`: the browser that began the request comes back.
+///
+/// With a `response_code` it brings the wallet's answer and the login
+/// completes (OpenID4VP 1.0 §14.2; HAIP 1.0 §5.1); with `error` and `state`
+/// the wallet declined.
 pub async fn complete(
     State(state): State<Arc<AppState>>,
     Connected(from): Connected,
@@ -322,7 +338,7 @@ pub async fn complete(
         return pages::fault(&state, Fault::BadRequest);
     };
     let Some(code) = params.get("response_code") else {
-        return pages::fault(&state, Fault::BadRequest);
+        return declined_back(&state, &headers, &params).await;
     };
     let answer = match found(&state, state.store().take_answer(&sha256(code)).await) {
         Ok(answer) => answer,
@@ -339,13 +355,34 @@ pub async fn complete(
     let Some(provider) = wallet_of(&state, &pending) else {
         return pages::fault(&state, Fault::Lapsed);
     };
-    match answer.identity.map(serde_json::from_value::<Identity>) {
-        Some(Ok(identity)) => {
+    match serde_json::from_value::<Identity>(answer.identity) {
+        Ok(identity) => {
             super::callback::complete(&state, &pending, provider, &identity, from).await
         }
-        Some(Err(error)) => pages::server_error(&state, &error),
-        None => back_declined(&state, &pending).await,
+        Err(error) => pages::server_error(&state, &error),
     }
+}
+
+/// Answers the way back of a declined request: the cookie's request, sent
+/// to the wallet under the `state` the query names, ends with
+/// `access_denied` for the app.
+async fn declined_back(state: &AppState, headers: &HeaderMap, params: &Params) -> Response {
+    let (Some(_), Some(named)) = (params.get("error"), params.get("state")) else {
+        return pages::fault(state, Fault::BadRequest);
+    };
+    let Some(id) = cookie(headers, COOKIE) else {
+        return pages::fault(state, Fault::OtherBrowser);
+    };
+    let pending = match found(state, state.store().pending(&id).await) {
+        Ok(pending) => pending,
+        Err(response) => return *response,
+    };
+    let at_wallet = wallet_of(state, &pending).is_some_and(|provider| provider.wallet().is_some());
+    // NOTE: RFC 6749 §10.12, the state ties the answer to the browser's own request.
+    if !at_wallet || !super::constant_eq(named.as_bytes(), pending.upstream_state.as_bytes()) {
+        return pages::fault(state, Fault::OtherBrowser);
+    }
+    back_declined(state, &pending).await
 }
 
 /// Ends `pending`, which the wallet declined, and sends the browser back to

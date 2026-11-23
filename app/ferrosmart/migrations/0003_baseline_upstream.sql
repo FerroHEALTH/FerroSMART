@@ -40,14 +40,15 @@ CREATE TABLE seen_saml_assertion (
 );
 CREATE INDEX seen_saml_assertion_expires_at ON seen_saml_assertion (expires_at);
 
--- An EUDI Wallet's answer (section 13.32), kept under its request's nonce so
--- the nonce is answered once (OpenID4VP 1.0 section 14.1.2), and taken once
--- by the browser that brings the response code back (section 14.2).
+-- An EUDI Wallet's accepted presentation (section 13.32), kept under its
+-- request's nonce so the nonce is answered once (OpenID4VP 1.0 section
+-- 14.1.2), and taken once by the browser that brings the response code back
+-- (section 14.2).
 CREATE TABLE wallet_answer (
     nonce text PRIMARY KEY,
     pending_id text NOT NULL,
     response_code_hash text NOT NULL CONSTRAINT wallet_answer_response_code_hash_key UNIQUE,
-    identity jsonb,
+    identity jsonb NOT NULL,
     taken_at timestamptz,
     expires_at timestamptz NOT NULL
 );

@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! The wallet's answers between the response URI and the browser.
+//! The wallet's accepted presentations between the response URI and the
+//! browser.
 //!
 //! An answer is kept under its request's nonce, so the nonce is answered
 //! once (OpenID4VP 1.0 §14.1.2), and under the SHA-256 of the response code
@@ -20,15 +21,13 @@ use crate::store::{Store, StoreError};
 pub struct Answer {
     /// The pending authorization request it answers.
     pub pending_id: String,
-    /// The person the presentation names, none when the wallet declined.
-    pub identity: Option<serde_json::Value>,
+    /// The person the presentation names.
+    pub identity: serde_json::Value,
 }
 
 impl std::fmt::Debug for Answer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Answer")
-            .field("declined", &self.identity.is_none())
-            .finish_non_exhaustive()
+        f.debug_struct("Answer").finish_non_exhaustive()
     }
 }
 
@@ -54,7 +53,7 @@ impl Store {
         .bind(nonce)
         .bind(&answer.pending_id)
         .bind(code_hash)
-        .bind(answer.identity.as_ref().map(Json))
+        .bind(Json(&answer.identity))
         .bind(expires_at)
         .execute(&self.pool)
         .await?;
@@ -76,10 +75,10 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?;
         row.map(|row| {
-            let identity: Option<Json<serde_json::Value>> = row.try_get("identity")?;
+            let Json(identity) = row.try_get("identity")?;
             Ok(Answer {
                 pending_id: row.try_get("pending_id")?,
-                identity: identity.map(|Json(identity)| identity),
+                identity,
             })
         })
         .transpose()

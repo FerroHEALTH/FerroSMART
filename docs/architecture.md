@@ -3314,7 +3314,7 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 | `upstream_session` | id | upstream issuer, upstream `sid` and `sub`, last seen, end |
 | `seen_jti` | issuer, `jti` | client assertions and launch JWTs, until their `exp` |
 | `seen_saml_assertion` | identity provider, assertion `ID` | the SAML assertions a login was admitted with, until the bearer confirmation's `NotOnOrAfter` (`saml-profiles §4.1.4.5`) |
-| `wallet_answer` | the request's nonce | an EUDI Wallet's answer: the pending request, the SHA-256 of the response code, the person the PID names (none when the wallet declined), when the browser took it, expiry; kept until expiry, so a nonce is answered once (13.32) |
+| `wallet_answer` | the request's nonce | an EUDI Wallet's accepted presentation: the pending request, the SHA-256 of the response code, the person the PID names, when the browser took it, expiry; kept until expiry, so a nonce is answered once (13.32) |
 | `pending_logout` | random id (the logout cookie) | a logout waiting for the person's answer: the client, the hint's `sub`, the registered post-logout redirect and its `state`, the form token, the `state` sent upstream, expiry |
 | `brand_bundle` | one row for the contents and one per resource, by `Type/id` | the digest a replica last started with, and when it became so: the Bundle's `timestamp` and each resource's `meta.lastUpdated` |
 
@@ -5067,7 +5067,10 @@ FerroHEALTH/FerroSMART#794.
 request's key (`openid4vp §8.3.1`), to `POST {issuer}/wallet/response`.
 FerroSMART finds the request by the JWE's `kid`, opens it, checks its
 `state`, and reads one presentation for `pid`. A wallet's error, sealed or
-in the clear, ends as `access_denied` for the app (`openid4vp §8.5`). A
+in the clear, sends the browser back with `error` and the request's
+`state`, which must name the cookie's request, and the app gets
+`access_denied` (`openid4vp §8.5`; `rfc6749 §4.1.2.1`). An error takes no
+nonce, so one posted against the public `state` blocks no presentation. A
 VP Token posted in the clear is refused (`haip §5.1`). The presentation is
 then checked in this order, and the first check that fails is the
 refusal:

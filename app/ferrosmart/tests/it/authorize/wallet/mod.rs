@@ -450,11 +450,65 @@ async fn a_declined_presentation_sends_the_app_access_denied() {
     let back = location(&headers);
     assert!(back.as_str().starts_with(REDIRECT), "{back}");
     assert_eq!(Some("access_denied".to_owned()), param(&back, "error"));
+    assert_eq!(
+        Some("synthetic-state".to_owned()),
+        param(&back, "state"),
+        "the app's own state"
+    );
     let recorded = logins(&wallet.smart.store).await;
     assert!(
         recorded.last().expect("recorded").contains("declined"),
         "{recorded:?}"
     );
+    wallet.stop().await;
+}
+
+#[tokio::test]
+async fn an_error_posted_against_the_public_state_blocks_no_presentation() {
+    let wallet = Wallet::start().await;
+    let begun = wallet.begin().await;
+    // NOTE: OpenID4VP 1.0 §8.3.1, an error may come in the clear, by anyone holding the state.
+    let (status, forged) = wallet
+        .post(&[("error", "access_denied"), ("state", &begun.text("state"))])
+        .await;
+    assert_eq!(StatusCode::OK, status, "{forged}");
+    let (status, headers, _) = wallet.come_back(&forged, None).await;
+    assert_ne!(StatusCode::SEE_OTHER, status, "no browser, no request ends");
+    assert!(
+        headers.get(header::LOCATION).is_none(),
+        "nothing redirected"
+    );
+    let presentation = wallet.presentation(&Credential::pid(), &begun);
+    let (status, body) = wallet.answer(&begun, &presentation).await;
+    assert_eq!(
+        StatusCode::OK,
+        status,
+        "the nonce is still the person's: {body}"
+    );
+    let (status, headers, page) = wallet.come_back(&body, Some(&begun.cookie)).await;
+    assert_eq!(StatusCode::SEE_OTHER, status, "{page}");
+    assert_eq!("/consent", location(&headers).path());
+    wallet.stop().await;
+}
+
+#[tokio::test]
+async fn a_declined_answer_naming_another_state_ends_nothing() {
+    let wallet = Wallet::start().await;
+    let begun = wallet.begin().await;
+    let path = "/wallet/complete?error=access_denied&state=another-state";
+    let (status, headers, _) = wallet.smart.get(path, Some(&begun.cookie)).await;
+    assert_ne!(StatusCode::SEE_OTHER, status);
+    assert!(
+        headers.get(header::LOCATION).is_none(),
+        "nothing redirected"
+    );
+    let pending = wallet
+        .smart
+        .store
+        .pending(&begun.cookie)
+        .await
+        .expect("reads");
+    assert!(pending.is_some(), "the request stays");
     wallet.stop().await;
 }
 
