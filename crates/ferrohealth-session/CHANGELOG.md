@@ -14,6 +14,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.29.0] - Unreleased
+
 ## [0.28.1] - 2026-11-23
 
 A security patch: the crate requires the `cookie` release that fixes
