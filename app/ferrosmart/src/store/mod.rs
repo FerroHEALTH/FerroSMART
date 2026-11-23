@@ -404,13 +404,16 @@ pub(crate) async fn write_client(
         "INSERT INTO client (client_id, client_name, token_endpoint_auth_method, jwks_uri, jwks, redirect_uris, scope, grant_types, secret_hash, \
          launch_uri, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
          post_logout_redirect_uris, upstreams, registered_by, resources, default_acr_values, \
-         require_pushed_authorization_requests) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) \
+         require_pushed_authorization_requests, dpop_bound_access_tokens, \
+         tls_client_certificate_bound_access_tokens) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, \
+         $22, $23) \
          ON CONFLICT (client_id) DO UPDATE SET client_name = $2, token_endpoint_auth_method = $3, jwks_uri = $4, jwks = $5, \
          redirect_uris = $6, scope = $7, grant_types = $8, secret_hash = $9, launch_uri = $10, first_party = $11, \
          client_uri = $12, logo_uri = $13, policy_uri = $14, tos_uri = $15, post_logout_redirect_uris = $16, upstreams = $17, \
          registered_by = $18, resources = $19, default_acr_values = $20, \
-         require_pushed_authorization_requests = $21, updated_at = now()",
+         require_pushed_authorization_requests = $21, dpop_bound_access_tokens = $22, \
+         tls_client_certificate_bound_access_tokens = $23, updated_at = now()",
     )
     .bind(&client.client_id)
     .bind(&client.name)
@@ -433,6 +436,8 @@ pub(crate) async fn write_client(
     .bind(&client.resources)
     .bind(&client.default_acr_values)
     .bind(client.require_pushed_authorization_requests)
+    .bind(client.dpop_bound_access_tokens)
+    .bind(client.tls_client_certificate_bound_access_tokens)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -441,7 +446,8 @@ pub(crate) async fn write_client(
 /// The columns [`read_client`] reads.
 pub(crate) const CLIENT_COLUMNS: &str = "client_id, client_name, token_endpoint_auth_method, jwks_uri, jwks, secret_hash, redirect_uris, \
      post_logout_redirect_uris, upstreams, resources, scope, grant_types, launch_uri, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
-     default_acr_values, registered_by, require_pushed_authorization_requests";
+     default_acr_values, registered_by, require_pushed_authorization_requests, dpop_bound_access_tokens, \
+     tls_client_certificate_bound_access_tokens";
 
 /// Reads a `client` row.
 pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreError> {
@@ -506,6 +512,9 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
         },
         require_pushed_authorization_requests: row
             .try_get("require_pushed_authorization_requests")?,
+        dpop_bound_access_tokens: row.try_get("dpop_bound_access_tokens")?,
+        tls_client_certificate_bound_access_tokens: row
+            .try_get("tls_client_certificate_bound_access_tokens")?,
         client_id,
     })
 }

@@ -11,6 +11,7 @@ use serde_json::{Map, Value};
 use crate::clients::Client;
 use crate::server::AppState;
 
+use super::sender::Confirmation;
 use super::{Issued, Refusal, TokenResponse, server_error};
 
 /// The claims of an RFC 9068 access token.
@@ -55,6 +56,10 @@ struct AccessClaims<'a> {
     /// The eIDAS level of the login (RFC 9068 §2.2.1).
     #[serde(skip_serializing_if = "Option::is_none")]
     acr: Option<&'static str>,
+    /// The key and the certificate the token is bound to (RFC 9449 §6.1,
+    /// RFC 8705 §3.1).
+    #[serde(skip_serializing_if = "Confirmation::is_empty")]
+    cnf: &'a Confirmation,
 }
 
 /// The person's login a token is issued on, which every token issued on it
@@ -107,6 +112,8 @@ pub(crate) struct Grant<'a> {
     pub(crate) roles: &'a [String],
     /// The person's login; none for a client credentials token.
     pub(crate) login: Option<Authentication>,
+    /// What the token is bound to.
+    pub(crate) confirmation: &'a Confirmation,
 }
 
 /// What an ID Token carries of the login (OpenID Connect Core 1.0 §2,
@@ -162,6 +169,7 @@ pub(crate) fn mint(state: &AppState, client: &Client, grant: Grant<'_>) -> Resul
         roles: grant.roles,
         auth_time,
         acr,
+        cnf: grant.confirmation,
     };
     // NOTE: RFC 9068 §2.1, typ at+jwt.
     let access_token = settings
@@ -200,7 +208,12 @@ pub(crate) fn mint(state: &AppState, client: &Client, grant: Grant<'_>) -> Resul
     Ok(Issued {
         response: TokenResponse {
             access_token,
-            token_type: grant.token_type,
+            // NOTE: RFC 9449 §5, a DPoP-bound token's token_type is DPoP.
+            token_type: if grant.confirmation.jkt.is_some() {
+                "DPoP"
+            } else {
+                grant.token_type
+            },
             expires_in: lifetime,
             scope: grant.scope.to_owned(),
             id_token,

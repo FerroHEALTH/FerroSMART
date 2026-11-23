@@ -16,6 +16,7 @@ pub mod exchange;
 pub mod grants;
 pub mod mint;
 pub mod secret;
+pub mod sender;
 
 use self::grants::{authorization_code, client_credentials};
 
@@ -158,10 +159,12 @@ pub(crate) fn uses_basic(headers: &HeaderMap) -> bool {
 pub async fn token(
     State(state): State<Arc<AppState>>,
     Connected(from): Connected,
+    certificates: Option<axum::Extension<ferrohealth_server::tls::PeerCertificates>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let answer = issue(&state, &headers, &body, from).await;
+    let certificates = certificates.map(|axum::Extension(chain)| chain);
+    let answer = issue(&state, &headers, &body, from, certificates.as_ref()).await;
     // NOTE: a form that cannot be read names no client; the record then says so.
     let form = Params::parse(&body, &[]).ok();
     let endpoint = state.settings().endpoint_url(TOKEN_ROUTE);
@@ -373,6 +376,7 @@ async fn issue(
     headers: &HeaderMap,
     body: &[u8],
     from: std::net::IpAddr,
+    certificates: Option<&ferrohealth_server::tls::PeerCertificates>,
 ) -> Result<Issued, Refusal> {
     let form = read_form(headers, body)?;
     let grant = form
@@ -385,11 +389,14 @@ async fn issue(
     if !grant_types(!state.providers().is_empty()).contains(&grant) {
         return Err(unsupported);
     }
+    let presented = sender::presented(state, headers, certificates).await?;
     match grant {
-        "client_credentials" => client_credentials(state, &form).await,
-        "authorization_code" => authorization_code(from, state, headers, &form).await,
-        "refresh_token" => crate::refresh::refresh(state, headers, &form, from).await,
-        exchange::TOKEN_EXCHANGE => exchange::token_exchange(state, headers, &form, from).await,
+        "client_credentials" => client_credentials(state, &form, &presented).await,
+        "authorization_code" => authorization_code(from, state, headers, &form, &presented).await,
+        "refresh_token" => crate::refresh::refresh(state, headers, &form, from, &presented).await,
+        exchange::TOKEN_EXCHANGE => {
+            exchange::token_exchange(state, headers, &form, from, &presented).await
+        }
         _ => Err(unsupported),
     }
 }

@@ -3302,7 +3302,7 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 | `signing_key` | `kid` | state (`next`, `active`, `retiring`, `retired`) and the time it reached each one; the key itself stays in the files of `[ferrosmart.keys]` (13.11) |
 | `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
 | `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time, the basis of its consent (13.6 item 6) |
-| `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), the basis of its consent, creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
+| `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), the basis of its consent, the `DPoP` key a public client's refresh token is bound to (13.31), creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
 | `refresh_token` | token hash | grant, predecessor, idle expiry, use time (set when rotated, kept for reuse detection), revocation |
 | `access_token` | `jti` | grant or client, `aud`, scope, `exp`, revocation, so introspection and revocation answer for a JWT |
 | `launch` | launch hash | EHR client, the app's `client_id`, `aud`, context, expiry, use time |
@@ -4959,3 +4959,32 @@ names no `request_uri`, and a client's own
 Connect discovery document name `pushed_authorization_request_endpoint` and
 `require_pushed_authorization_requests` once people log in (`rfc9126 §5`).
 The lifetime is our own design within §2.2's range.
+
+### 13.31 Sender-constrained tokens
+
+FerroSMART binds a token to its sender when the token request proves a key
+or presents a certificate, as FAPI 2.0 Security Profile §5.3.2.1 requires
+of an authorization server. A `DPoP` header at `POST {issuer}/token` is
+checked as RFC 9449 §4.3 says, against `POST` and the token endpoint's URL
+and with no `ath`, since the request presents no access token (`rfc9449
+§5`); its `jti` is recorded once in `seen_jti` under its own issuer column,
+so every replica refuses a replay (`rfc9449 §11.1`). A proof that does not
+hold is `invalid_dpop_proof`. The token then carries `cnf.jkt`, the RFC
+7638 thumbprint of the proof's key (`rfc9449 §6.1`), and the response's
+`token_type` is `DPoP` (`rfc9449 §5`). A public client's refresh token is
+bound to that key in its grant, and a refresh without a proof of it is
+`invalid_grant`, checked before the token is used up; a confidential
+client's refresh token is bound to its authentication instead (`rfc9449
+§5`). A client registered with `dpop_bound_access_tokens` that sends no
+proof is `invalid_request` (`rfc9449 §5.2`).
+
+Under `[server.tls]` with a `client_auth` the listener reads the client's
+certificate. A client registered with
+`tls_client_certificate_bound_access_tokens` gets a token whose `cnf`
+carries `x5t#S256`, the SHA-256 of the leaf certificate's DER encoding
+(`rfc8705 §3.1`); its request over a connection that presented none is
+`invalid_request`, which RFC 8705 §3.4 leaves to the server. Introspection
+answers the token's `cnf` (`rfc9449 §6.2`, `rfc8705 §3.2`). The metadata
+names `dpop_signing_alg_values_supported`, the proof algorithms the check
+admits (`rfc9449 §5.1`), and `tls_client_certificate_bound_access_tokens`,
+`true` when the listener asks for a certificate (`rfc8705 §3.3`).
