@@ -34,3 +34,4 @@ mod symmetric;
 mod token;
 mod upstream_config;
 mod upstream_vendors;
+mod upstreams;

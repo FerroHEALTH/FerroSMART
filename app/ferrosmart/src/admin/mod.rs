@@ -14,6 +14,7 @@
 pub mod document;
 pub mod guard;
 pub mod register;
+pub mod upstreams;
 
 use std::sync::Arc;
 
@@ -53,6 +54,7 @@ pub fn router(state: &Arc<AppState>) -> Router<Arc<AppState>> {
         .route(DISABLE_ROUTE, post(disable))
         .route(ENABLE_ROUTE, post(enable))
         .route(KEYS_ROUTE, get(keys))
+        .route(upstreams::UPSTREAMS_ROUTE, get(upstreams::upstreams))
         .layer(DefaultBodyLimit::max(DOCUMENT_LIMIT))
         .route_layer(guard::layer(Arc::clone(state)))
 }

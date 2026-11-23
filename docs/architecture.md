@@ -3282,6 +3282,7 @@ differently.
 | `GET`, `PUT`, `DELETE /register/{client_id}` | the client's configuration endpoint, with its registration access token or an administrator's token (13.27) | `rfc7592 §2` |
 | `GET /admin/clients`; `POST /admin/clients/{client_id}/disable`, `.../enable` | the registry over the store, behind a `ferrohealth-smart` guard with the `system/admin` scope, every change audited (13.27) | our own design |
 | `GET /admin/keys` | the signing key ring's public keys with their states, behind the same guard | our own design |
+| `GET /admin/upstreams` | each upstream provider with the clients that name it, its OpenID Connect discovery document and key set read when the request is answered, or its SAML metadata as the replica last read it, each with its outcome and its signing certificates' expiry, behind the same guard | our own design (#830) |
 | `/healthz`, `/readyz` | `ferrohealth-health` | the family |
 
 `POST /par` (RFC 9126) joins later; the metadata names it only once it
