@@ -23,12 +23,13 @@ CREATE TABLE authorization_grant (
     created_at timestamptz NOT NULL DEFAULT now(),
     revoked_at timestamptz,
     roles text[] NOT NULL DEFAULT '{}',
-    approved_at timestamptz,
+    basis text CONSTRAINT authorization_grant_basis_check
+        CHECK (basis IN ('page', 'remembered', 'administrative', 'first-party')),
     acr text CONSTRAINT authorization_grant_acr_check
         CHECK (acr IN ('low', 'substantial', 'high'))
 );
-CREATE INDEX authorization_grant_approval ON authorization_grant (client_id, approved_at)
-    WHERE approved_at IS NOT NULL;
+CREATE INDEX authorization_grant_first_party ON authorization_grant (client_id)
+    WHERE basis = 'first-party';
 CREATE INDEX authorization_grant_client ON authorization_grant (client_id) WHERE revoked_at IS NULL;
 CREATE INDEX authorization_grant_session ON authorization_grant (upstream_session);
 CREATE INDEX authorization_grant_subject ON authorization_grant (subject, client_id);

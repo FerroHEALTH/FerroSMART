@@ -862,18 +862,19 @@ pub struct Remembered {
     /// The refresh access the app holds now, if any: how long it may reach
     /// the person's data without them.
     pub access: Option<crate::store::grant::Access>,
-    /// Whether the app holds its access on the organisation's approval,
-    /// which disconnecting leaves in place: only an administrator
-    /// withdraws it (`docs/architecture.md` §13.6 item 6).
+    /// Whether the app holds its access on its registration, with no page,
+    /// which disconnecting leaves in place (`docs/architecture.md` §13.6
+    /// item 6).
     pub organisation: bool,
-    /// Whether that approval is of the organisation's own (first-party)
-    /// app, which the page names as such.
+    /// Whether the app is the organisation's own (first party), which the
+    /// page names as such.
     pub first_party: bool,
 }
 
 /// Returns the management page of `pending`'s person, listing `remembered`
-/// with a Disconnect form each, an app the organisation approved marked as
-/// such, and the person's own FerroSMART subject.
+/// with a Disconnect form each and the person's own FerroSMART subject.
+///
+/// An app the organisation registered for its people is marked as such.
 ///
 /// It is the `management_endpoint`, a "URL where an end-user can view which
 /// applications currently have access to data and can make adjustments to

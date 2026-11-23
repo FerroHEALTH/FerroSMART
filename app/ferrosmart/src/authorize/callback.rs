@@ -19,14 +19,14 @@ use ferrohealth_smart::assurance::AssuranceLevel;
 use crate::assurance::Assurance;
 use crate::audit::Connected;
 use crate::audit::exchanges::{Person, login};
-use crate::clients::{Approval, Client};
+use crate::clients::Client;
 use crate::form::Params;
 use crate::pages::{self, Fault};
 use crate::server::AppState;
 use crate::store::{Asking, Login, Pending, Purpose};
 use crate::upstream::{Identity, LoginProvider};
 
-use super::consent::{Basis, FhirUser, approve, offer};
+use super::consent::{FhirUser, approve, offer, without_page};
 use super::{
     Back, CONSENT_ROUTE, COOKIE, Denial, MANAGE_ROUTE, cookie, deny_unsigned, forget, found, now,
     random, registered, see_other, set_cookie,
@@ -472,42 +472,10 @@ pub(crate) struct Asked<'a> {
     pub(crate) offered: &'a [&'a str],
 }
 
-/// Returns the organisation approval of the client that `asked` falls
-/// under.
-///
-/// The approval covers every scope offered and, unless the app is the
-/// organisation's own (first party), the person is a professional whose
-/// request names no `patient/` scope or comes from an EHR launch, whose
-/// patient the professional opened the app for (`docs/architecture.md`
-/// §13.6 item 6).
-fn approved<'a>(asked: &Asked<'a>) -> Option<&'a Approval> {
-    let approval = asked.client.approval()?;
-    if approval.first_party {
-        return approval.covers(asked.offered).then_some(approval);
-    }
-    // NOTE: SMART App Launch 2.2.0, Scopes for requesting identity data, a
-    // fhirUser of these types is the patient or speaks for one: they decide.
-    let own_data = asked.fhir_user.is_some_and(|reference| {
-        ["Patient/", "RelatedPerson/", "Person/"]
-            .iter()
-            .any(|kind| reference.starts_with(kind))
-    });
-    let patient_scope = asked
-        .pending
-        .scope
-        .split(' ')
-        .any(|scope| scope.starts_with("patient/"));
-    // NOTE: OpenID Connect Core 1.0 §3.1.2.4, the approval is administrative consent;
-    // in an EHR launch (`launch` offered) it covers the staff member's patient/ scopes.
-    let ehr_launch = asked.offered.contains(&"launch");
-    (!own_data && (!patient_scope || ehr_launch) && approval.covers(asked.offered))
-        .then_some(approval)
-}
-
 /// Goes on once the person logged in and the context is complete: straight
-/// back to the app with a code when an approval or a remembered consent
-/// covers `offered` and the client's identity is assured, to the consent
-/// page otherwise.
+/// back to the app with a code when [`without_page`] answers for the person,
+/// or on the consent page a remembered consent covers `offered`, and the
+/// client's identity is assured; to the consent page otherwise.
 pub(crate) async fn onward(
     state: &AppState,
     asked: &Asked<'_>,
@@ -515,7 +483,7 @@ pub(crate) async fn onward(
     from: IpAddr,
 ) -> Response {
     // NOTE: OpenID Connect Core 1.0 §3.1.2.1: prompt=consent asks the person for
-    // consent, so neither an approval nor a remembered consent answers for them.
+    // consent, so neither the registration nor a remembered consent answers.
     if asked.pending.asking.prompt.consent {
         return see_other(&state.settings().endpoint(CONSENT_ROUTE));
     }
@@ -525,8 +493,13 @@ pub(crate) async fn onward(
     if asked.client.registered_itself() || !asked.client.assured_by(&asked.pending.redirect_uri) {
         return see_other(&state.settings().endpoint(CONSENT_ROUTE));
     }
-    let basis = if let Some(approval) = approved(asked) {
-        Basis::Organisation(approval)
+    let skipped = without_page(
+        asked.client,
+        super::consent::Person::of(asked.fhir_user),
+        asked.offered,
+    );
+    let basis = if let Some(basis) = skipped {
+        basis
     } else {
         // NOTE: docs/architecture.md §13.6 item 6, a consent the person chose to
         // remember answers again, for this client at this resource server, while it covers every scope offered.
@@ -551,7 +524,7 @@ pub(crate) async fn onward(
         if !covered {
             return see_other(&state.settings().endpoint(CONSENT_ROUTE));
         }
-        Basis::Remembered
+        super::consent::Basis::Remembered
     };
     let pending = match found(state, state.store().finish(&asked.pending.id).await) {
         Ok(pending) => pending,

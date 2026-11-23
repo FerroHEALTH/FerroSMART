@@ -17,6 +17,7 @@ use url::Url;
 
 use super::openehr::{self, FoundEhr};
 use super::{Access, Ask, Found, Person, PickerError, as_person, fhir_ask, fhir_request};
+use crate::authorize::consent;
 use crate::config::Assigned;
 use crate::server::AppState;
 use crate::store::Pending;
@@ -138,10 +139,13 @@ pub(super) async fn remember(
 }
 
 /// Returns the reference the `participant` search names the person by:
-/// their `fhirUser` relative to `base`, when it names a `Practitioner`,
-/// `PractitionerRole` or `RelatedPerson` there.
+/// their `fhirUser` relative to `base`, when it names a professional, a
+/// `Practitioner` or `PractitionerRole`, there.
 fn participant<'p>(base: &str, pending: &'p Pending) -> Option<&'p str> {
     let fhir_user = pending.fhir_user.as_deref()?;
+    if consent::Person::of(Some(fhir_user)) != consent::Person::Professional {
+        return None;
+    }
     // NOTE: SMART App Launch 2.2.0, `fhirUser` MAY be absolute or relative to the
     // FHIR base of the request; FHIR R4 Encounter and CareTeam `participant` targets.
     let relative = match fhir_user.strip_prefix(base) {
@@ -149,9 +153,8 @@ fn participant<'p>(base: &str, pending: &'p Pending) -> Option<&'p str> {
         None if fhir_user.contains("://") => return None,
         None => fhir_user,
     };
-    let (kind, id) = relative.split_once('/')?;
-    (["Practitioner", "PractitionerRole", "RelatedPerson"].contains(&kind) && super::is_fhir_id(id))
-        .then_some(relative)
+    let (_, id) = relative.split_once('/')?;
+    super::is_fhir_id(id).then_some(relative)
 }
 
 /// Runs the assigned-patient search `search` for `reference` at `base` as

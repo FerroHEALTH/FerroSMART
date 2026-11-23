@@ -2615,12 +2615,11 @@ discovery and token shapes for the two SaaS providers.
 
   | Write | `type` | subtypes | `action` |
   |---|---|---|---|
-  | a code issued, with its basis: `page`, `remembered`, `organisation` or `first-party` (#727) | `110114` | `authorization-code` | `C` |
+  | a code issued, with its basis: `page`, `remembered`, `administrative` or `first-party` | `110114` | `authorization-code` | `C` |
   | a consent remembered | `110113` | `110137`, `consent-remembered` | `C` |
   | an app disconnected at the management page, with the remembered consent and the grants it ended | `110113` | `110137`, `consent-withdrawn` | `D` |
-  | a code issued with no page, on the client's organisation approval (13.6 item 6) | `110113` | `110137`, `consent-organisation-approved` | `C` |
-  | a code issued with no page, on the first-party approval of the organisation's own app (13.6 item 6) | `110113` | `110137`, `consent-first-party-approved` | `C` |
-  | an organisation approval withdrawn, with the grants issued on it | `110113` | `110137`, `organisation-approval-withdrawn` | `D` |
+  | a code issued to a professional with no page, on the administrator's registration (13.6 item 6) | `110113` | `110137`, `consent-administrative` | `C` |
+  | a code issued with no page for a first-party app (13.6 item 6) | `110113` | `110137`, `consent-first-party` | `C` |
   | an access token revoked (RFC 7009) | `110113` | `token-revoked` | `D` |
   | a grant revoked by its refresh token (RFC 7009 §2.1) | `110113` | `grant-revoked` | `D` |
   | a refresh token rotated | `110114` | `refresh-rotated` | `E` |
@@ -2745,7 +2744,7 @@ document (13.8).
 | An invalid `client_id` or `redirect_uri` is shown to the user and never redirected | MUST NOT redirect | `rfc6749 §4.1.2.1`; `rfc9700 §4.11` | 3 |
 | `state` returned exactly as received | REQUIRED | `smart app-launch`, Obtain authorization code, Response; `rfc6749 §4.1.2` | 3 |
 | The code expires shortly after issue (FerroSMART: 60 seconds), is single-use, and a second valid use is denied and revokes what it issued | SHOULD; MUST deny, SHOULD revoke | `smart app-launch`, Response; `rfc6749 §4.1.2`; `oauth21 §4.1.3`, `§7.5.3` | 3 |
-| The decision to grant or deny is the server's, by local policy and optionally the user's input (FerroSMART asks the user every time, except a professional within an organisation approval of the client, and any person within the approval of the organisation's own first-party app, 13.6 item 6); a denial is an `access_denied` error response | SHALL | `smart app-launch`, Response; `rfc6749 §4.1.2.1` | 3 |
+| The decision to grant or deny is the server's, by local policy and optionally the user's input (FerroSMART asks the user unless the administrator's registration answers for a professional, or a first-party app's for any person it represents, 13.6 item 6); a denial is an `access_denied` error response | SHALL | `smart app-launch`, Response; `rfc6749 §4.1.2.1` | 3 |
 | The granted scope may differ from the request and is reported | MAY, SHALL report | `smart app-launch`, Obtain access token, Response; `rfc6749 §3.3` | 3 |
 | v1 scopes (`.read`, `.write`, `.*`) are processed as `.rs`, `.cud`, `.cruds`, and returned as v1 when granted as v1 | SHOULD | `smart scopes-and-launch-context`, Scopes for requesting FHIR Resources | 3 |
 | Undefined or out-of-order interactions may be ignored, replaced or refused | MAY | same | 3 |
@@ -3117,8 +3116,9 @@ specification governs.
    (`CareTeam.participant.member`, with `status=active`) or `Encounter`
    (`Encounter.participant.individual`, with `status=in-progress`), the
    patients included by FHIR R4 search's `_include` of the `patient`
-   reference, for a `fhirUser` that names a `Practitioner`,
-   `PractitionerRole` or `RelatedPerson` at that base; its token carries
+   reference, for a professional, a `fhirUser` that names a `Practitioner`
+   or `PractitionerRole` at that base, as the consent page reads it (item
+   6); its token carries
    `user/CareTeam.rs user/Patient.rs` or `user/Encounter.rs
    user/Patient.rs`. A choice from either list is read again as any
    other. SMART App Launch 2.2 leaves the widget to the server, so both
@@ -3173,85 +3173,56 @@ specification governs.
    Practices, non-normative, asks for plain descriptions; the split is our
    own design). The page also shows what the client registers about the app
    (`rfc7591 §2`): `client_uri` linked as the app's home page, `logo_uri`
-   drawn, `policy_uri` and `tos_uri` linked. One exception, the owner's decision of 2026-11-19 (#643),
-   which replaces "no client skips the page" for this case: an
-   administrator of the controller may approve a client once for the whole
-   organisation, as the client's `organisation_approval` (the approved
-   scope set, who approved, when), in the registration path, stored in
-   PostgreSQL so every replica answers alike. The approval is per client,
-   never a global mode, and covers `user/` and `patient/` scopes with the
-   launch, OpenID, refresh and extension scopes that go with them, each
-   within the ceiling. A professional whose `fhirUser` is no `Patient`,
-   `RelatedPerson` or `Person`, whose request names no `patient/` scope or
-   comes from an EHR launch (`launch` offered), and whose offered scopes
-   the approval covers in full gets a code with no page: the approval is
-   the "previous administrative consent" of `oidc-core §3.1.2.4`, and in an
-   EHR launch the professional opened the app for the patient in context
-   (owner, 2026-11-20, #727); the
-   granted scope stays the intersection of the request, the ceiling, the
-   roles and the approval, and the resource server's access policy still
-   decides every request. Anything more shows the page for the whole
-   request, as a request beyond a remembered consent does. A second case,
-   the owner's decision of 2026-11-19 (#666): the administrator may mark
-   the approved app as the organisation's own, `first_party = true` on the
-   approval, set and cleared with it, so the approval's approver and time
-   are the mark's and a changed mark is a new approval. A first-party
-   approval may also cover `patient/` scopes, and it skips the page for a
-   patient, related person or person (`fhirUser` of type `Patient`,
-   `RelatedPerson` or `Person`) as for a professional, whenever it covers
-   every scope offered. The ground is the controller's: its own app
-   processes the patient's data under the controller's legal basis (GDPR
-   Art. 9(2)(h)), and the OAuth consent page is no GDPR consent and adds no
-   ground for it. A first-party approval that lists `offline_access` covers
-   it for patients as for staff, with no page (owner, 2026-11-20, #724):
-   `oidc-core §11` requires consent to an offline refresh token to be
-   obtained, and `§3.1.2.4` names "previous administrative consent" as one
-   way, with no limit on whose; SMART's Best Practices tie the consent
-   requirement to apps of another organisation. The patient's control is
-   the Disconnect action of the `management_endpoint` (#725). A third-party app is the patient's choice to let another
-   party read their data, so a client without the mark keeps the page for
-   every patient, and the patient approves it and withdraws it at the
-   `management_endpoint` (Regulation (EU) 2025/327 gives the natural person
-   the say over sharing with others). The granted scope is still never
-   wider than the request, the ceiling, the roles or patient context and
-   the approval. Each skipped page commits a `consent-organisation-approved`
-   record, or `consent-first-party-approved` for a first-party approval,
-   naming the approver and the time; the management page lists the app as
-   approved by the organisation, or as the organisation's own app. Clearing or changing the
-   approval through the admin API (13.27) withdraws it at once, and in the
-   configuration at the next start: every
-   grant issued on it is revoked with its tokens, with an
-   `organisation-approval-withdrawn` record. Backend Services has no user and
-   no consent step (`smart backend-services`, Scopes: "The client is
-   pre-authorized by the server"). A consent is remembered only when the
-   user ticks to remember it, for that client, that resource server (the
-   request's `aud`) and that scope set; a request that asks for more, or
-   for another resource server, shows the page again (our own design: what
-   an app may read depends on where, #727). A remembered consent is listed
-   and revocable at the `management_endpoint`, "URL where an end-user can
-   view which applications currently have access to data and can make
-   adjustments to these access rights" (`smart conformance`, Metadata), and
-   revoking it revokes the grants it covered. Remembering is our own
-   design. The management page lists every app holding live access, a
-   live refresh token or access token, organisation-approved and
-   first-party apps included, each with a Disconnect form (owner,
-   2026-11-20, #725): it forgets the person's remembered consent for the
-   app and revokes every grant, refresh token and access token of the app
-   about them, with a `consent-withdrawn` record naming the grants revoked,
-   and leaves the organisation approval standing, so the next sign-in
-   follows it again. `offline_access` lasts "as long as the authorization
-   server and end-user will allow" (`smart scopes`, `offline_access`), so
-   no app holds lasting access the person cannot end.
-   Neither an approval nor a remembered consent answers for a
-   public client unless the request's redirect URI is a claimed `https`
-   URI, `https` with a host that is not `localhost` or a loopback address
-   (`rfc8252 §8.6`, "SHOULD NOT process authorization requests
-   automatically without user consent or interaction, except when the
-   identity of the client can be assured", and `§7.2`; `rfc6749 §10.2`):
-   a custom-scheme or loopback redirect shows the page, the remember box
-   ticked when a consent was remembered, and `ferrosmart config check`
-   warns of a first-party public client with no claimed `https` redirect
-   (owner, 2026-11-20, #726).
+   drawn, `policy_uri` and `tos_uri` linked. Whether the person sees the
+   page follows from who they are, read from the type of their `fhirUser`
+   (`smart scopes`, `fhirUser`), and how the client was registered, in one
+   function (`authorize::consent::without_page`):
+
+   | Person (`fhirUser`) | Admin-registered | Admin-registered, `first_party` | Self-registered |
+   |---|---|---|---|
+   | `Practitioner`, `PractitionerRole` | no page | no page | page |
+   | `Patient`, `RelatedPerson`, `Person` | page | no page | page |
+   | none, or another type | page | page | page |
+
+   An administrator's registration is the organisation's consent for its
+   professionals: the server may obtain the decision "by asking the
+   resource owner or by establishing approval via other means" (`rfc6749
+   §4.1.1`), consent may be "previous administrative consent" (`oidc-core
+   §3.1.2.4`), and SMART's Best Practices (Considerations for Scope
+   Consent) ask the user's consent where the client and the resource
+   server are not from the same organization. A patient, or the related
+   person who speaks for them, decides which other party's app reads their
+   data (Regulation (EU) 2025/327 Art 3, 4(2), 7(1)), so they skip the page
+   only for an app marked `first_party`: the controller's own app, or one
+   acting for it, which only an administrator sets. An app that registered
+   itself asserts its own metadata (`rfc7591 §5`) and always shows the
+   page. No page is skipped for a scope beyond the registration's ceiling;
+   the granted scope stays the intersection of the request, the ceiling,
+   the roles and the patient context, and the resource server's policy
+   still decides every request. Each code records its basis, `page`,
+   `remembered`, `administrative` or `first-party`, on the code and its
+   grant, and a skipped page commits a `consent-administrative` or
+   `consent-first-party` record. Clearing a client's `first_party` revokes
+   every grant issued on it with its tokens, in the same transaction.
+   Backend Services has no user and no consent step (`smart
+   backend-services`, Scopes: "The client is pre-authorized by the
+   server"). `prompt=consent` shows the page whatever the table says
+   (`oidc-core §3.1.2.1`). A consent is remembered only when the user ticks
+   to remember it, for that client, that resource server (the request's
+   `aud`) and that scope set, and it answers only on the page path; a
+   request that asks for more, or for another resource server, shows the
+   page again (our own design). The management page (`management_endpoint`,
+   `smart conformance`, Metadata) lists every app holding live access with
+   a Disconnect form: it forgets the remembered consent and revokes every
+   grant and token of the app about the person, with a `consent-withdrawn`
+   record, and leaves the registration standing; `offline_access` lasts "as
+   long as the authorization server and end-user will allow" (`smart
+   scopes`), so no app holds lasting access the person cannot end. Neither
+   the registration nor a remembered consent answers for a public client
+   unless the request's redirect URI is a claimed `https` URI (`rfc8252
+   §8.6`, `§7.2`; `rfc6749 §10.2`): a custom-scheme or loopback redirect
+   shows the page, and `ferrosmart client apply` warns of an
+   administrator's public client with no claimed `https` redirect.
 7. **`online_access`.** "As long as the end-user remains online" has no
    mechanism in SMART. FerroSMART ties an online refresh token to the
    upstream login session: it ends at upstream logout and after the
@@ -3407,10 +3378,9 @@ specification governs.
     policy. Which clients reach which server is our own design.
 14. **A client that registered itself.** RFC 7591 §5 has the server "treat
     all client metadata as self-asserted", so a client the app registered
-    itself (`source` `dynamic` in the `client` table, written by the
-    registration endpoint that joins after step 9) is its own type,
-    `Registration::Dynamic`, which carries no organisation approval and no
-    first-party mark; the store refuses a row of one that holds either.
+    itself (`registered_by` `self` in the `client` table) is its own type,
+    `Registration::Dynamic`, which is never first party; the store refuses
+    a row of one that holds the mark.
     The person always sees the consent page for it, with a notice that the
     app registered itself and no remember box, and a remembered consent or
     an assured redirect never skips the page (§5: the server "can also
@@ -3483,7 +3453,7 @@ differently.
 | `POST /launch` | the EHR launch API | our own design (13.6) |
 | `GET /manage` | the apps holding the user's consent or live access, each with Disconnect (`management_endpoint`) | `smart conformance`, Metadata |
 | `GET /brands` | the deployment's User Access Brands Bundle, when `[ferrosmart.brand]` is set | `smart brands`, Conformance Overview |
-| `GET`, `POST /admin/clients`; `GET`, `PUT /admin/clients/{client_id}`; `POST .../disable`, `.../enable`; `DELETE .../organisation_approval` | the registry over the store, behind a `ferrohealth-smart` guard with the `system/admin` scope, every change audited (13.27) | our own design |
+| `GET`, `POST /admin/clients`; `GET`, `PUT /admin/clients/{client_id}`; `POST .../disable`, `.../enable` | the registry over the store, behind a `ferrohealth-smart` guard with the `system/admin` scope, every change audited (13.27) | our own design |
 | `GET /admin/keys` | the signing key ring's public keys with their states, behind the same guard | our own design |
 | `/healthz`, `/readyz` | `ferrohealth-health` | the family |
 
@@ -3502,11 +3472,11 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 
 | Table | Key | Holds |
 |---|---|---|
-| `client` | `client_id` | the RFC 7591 §2 metadata (`client_name`, `token_endpoint_auth_method`, `scope`, `grant_types`, `jwks` or `jwks_uri`, `redirect_uris`, `post_logout_redirect_uris`, `default_acr_values`, the app's URLs), the secret's Argon2id hash, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, the organisation approval, `registered_by` (`admin` (13.27) or `self` (13.6 item 14)), disabled time |
+| `client` | `client_id` | the RFC 7591 §2 metadata (`client_name`, `token_endpoint_auth_method`, `scope`, `grant_types`, `jwks` or `jwks_uri`, `redirect_uris`, `post_logout_redirect_uris`, `default_acr_values`, the app's URLs), the secret's Argon2id hash, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, `first_party`, `registered_by` (`admin` (13.27) or `self` (13.6 item 14)), disabled time |
 | `signing_key` | `kid` | state (`next`, `active`, `retiring`, `retired`) and the time it reached each one; the key itself stays in the files of `[ferrosmart.keys]` (13.11) |
 | `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
-| `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time |
-| `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
+| `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time, the basis of its consent (13.6 item 6) |
+| `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), the basis of its consent, creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
 | `refresh_token` | token hash | grant, predecessor, idle expiry, use time (set when rotated, kept for reuse detection), revocation |
 | `access_token` | `jti` | grant or client, `aud`, scope, `exp`, revocation, so introspection and revocation answer for a JWT |
 | `launch` | launch hash | EHR client, the app's `client_id`, `aud`, context, expiry, use time |
@@ -4724,7 +4694,7 @@ The tests are in `app/ferrosmart/tests/it/authorize/core_op.rs`.
 | Requirement | What FerroSMART does | Citation | Test |
 |---|---|---|---|
 | Signing ID Tokens with RS256 | every ID Token is signed RS256 with the current key of `[ferrosmart.keys]`, and the discovery document names `RS256` | `oidc core §15.1`, `§2`; `discovery §3` | `the_id_token_is_rs256_and_carries_the_upstream_login_s_auth_time`, `the_document_names_rs256_the_display_values_and_the_page_languages` |
-| `prompt`, with `none` and `login` | `none` answers `login_required` to the app with no page and no login, as FerroSMART holds no session in which the person is already authenticated; `none` beside another value is `invalid_request`; `login` and `select_account` go to the upstream login; `consent` shows the consent page where a remembered consent or an organisation approval would answer (13.6 item 6); another value is taken and ignored, which no specification governs: our own design | `oidc core §15.1`, `§3.1.2.1`, `§3.1.2.6` | `prompt_none_answers_login_required_without_a_page`, `prompt_login_and_select_account_reach_the_upstream_login`, `prompt_consent_shows_the_page_an_approval_would_skip` |
+| `prompt`, with `none` and `login` | `none` answers `login_required` to the app with no page and no login, as FerroSMART holds no session in which the person is already authenticated; `none` beside another value is `invalid_request`; `login` and `select_account` go to the upstream login; `consent` shows the consent page where a remembered consent or the registration would answer (13.6 item 6); another value is taken and ignored, which no specification governs: our own design | `oidc core §15.1`, `§3.1.2.1`, `§3.1.2.6` | `prompt_none_answers_login_required_without_a_page`, `prompt_login_and_select_account_reach_the_upstream_login`, `prompt_consent_shows_the_page_an_approval_would_skip` |
 | `display` | `page`, `popup`, `touch` and `wap` are taken, and the same page answers at any size; `display_values_supported` names the four | `oidc core §15.1`, `§3.1.2.1`; `discovery §3` | `display_locales_and_acr_values_are_taken`, `the_document_names_rs256_the_display_values_and_the_page_languages` |
 | `ui_locales` and `claims_locales` | `ui_locales` goes to the upstream login, and the pages take its first language the catalog holds before the browser's `Accept-Language`; `ui_locales_supported` names the catalog's languages. `claims_locales` is taken; no claim FerroSMART returns depends on a language, so the document names no `claims_locales_supported` | `oidc core §15.1`, `§3.1.2.1`, `§5.2`; `discovery §3` | `display_locales_and_acr_values_are_taken` |
 | `auth_time` | every ID Token carries `auth_time`, the upstream ID Token's own, or the time the upstream login returned when it names none; a refresh keeps it | `oidc core §15.1`, `§2` | `the_id_token_is_rs256_and_carries_the_upstream_login_s_auth_time` |
@@ -4952,20 +4922,18 @@ change audited.
   included; `GET /admin/clients/{client_id}` reads one; `POST
   /admin/clients` registers one (`201` with `Location`); `PUT
   /admin/clients/{client_id}` replaces one; `POST .../disable` and `POST
-  .../enable` disable and enable one; `DELETE .../organisation_approval`
-  withdraws its approval. The document is RFC 7591 §2 client metadata
+  .../enable` disable and enable one. The document is RFC 7591 §2 client
+  metadata
   (`client_name`, `token_endpoint_auth_method`, `scope`, `grant_types`,
   `jwks_uri` or `jwks`, `redirect_uris`, `default_acr_values` of OpenID
   Connect Dynamic Client Registration 1.0 §2, and the URLs of the app),
   with FerroSMART's own `resources`, `launch_uri`, `upstreams` and
-  `organisation_approval`. FerroSMART issues a `client_secret_basic` or
+  `first_party` (13.6 item 6). FerroSMART issues a `client_secret_basic` or
   `client_secret_post` client its secret, answers it once with
   `client_secret_expires_at` 0 and keeps its Argon2id hash (`rfc7591
   §3.2.1`); no document or answer carries the hash, an update keeps the
   stored secret, and `ferrosmart client secret` issues a new one. A client
-  authenticates only by its registered method. An approval without `approved_at` keeps the
-  stored time when its scopes, approver and mark are unchanged, and takes
-  the request's time otherwise.
+  authenticates only by its registered method.
 - **`ferrosmart client apply <file>...`.** Each file is one client
   document, applied as `PUT` replaces a client, or as `POST` registers one
   when no client has its `client_id`, with the same checks and records,
@@ -4985,13 +4953,12 @@ change audited.
   insufficient_scope` (RFC 6750 §3.1) with its challenge.
 - **The record.** Every change commits in one transaction with its
   `AuditEvent` (`client-created`, `client-updated`, `client-disabled`,
-  `client-enabled`, and `organisation-approval-withdrawn` before the
-  change that withdrew it), naming the admin client, or `ferrosmart client
+  `client-enabled`), naming the admin client, or `ferrosmart client
   apply`, as the requester and the client changed, never a key or a hash.
-- **Withdrawal at once.** A `PUT` that no longer gives the stored approval
-  in the same form, or a `DELETE` of it, withdraws it in the change's own
-  transaction: every grant issued on it is revoked with its refresh and
-  access tokens, and its unredeemed codes are dropped. Disabling a client
+- **Revocation at once.** A change that clears `first_party` revokes, in
+  its own transaction, every grant issued with no page on the mark with
+  its refresh and access tokens, and drops its unredeemed codes; the
+  record names the mark cleared and the grants revoked. Disabling a client
   revokes every grant and access token it holds with their refresh tokens,
   drops its codes, launches, pending requests and remembered consents, and
   every lookup of a client reads `disabled_at IS NULL`, so its next

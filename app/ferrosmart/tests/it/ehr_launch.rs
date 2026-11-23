@@ -150,9 +150,10 @@ impl Smart {
         }
     }
 
-    /// Mounts the provider's code exchange for one login carrying `nonce`.
+    /// Mounts the provider's code exchange for one login carrying `nonce`,
+    /// as a `RelatedPerson`, whom the consent page asks.
     async fn answer(&self, nonce: &str) {
-        self.answer_as(nonce, "Practitioner/synthetic-1").await;
+        self.answer_as(nonce, crate::authorize::PERSON).await;
     }
 
     /// Has the provider answer the next code with an ID Token for the
@@ -553,15 +554,10 @@ async fn both_documents_name_the_launch_registration_endpoint() {
 
 // NOTE: docs/architecture.md §13.6 item 6; SMART App Launch 2.2.0, Obtain
 // authorization code, Response: the server's local policy may stand in for the
-// end-user's input, here the organisation's approval of the app.
+// end-user's input, here the administrator's registration of the app.
 #[tokio::test]
-async fn an_approved_app_s_ehr_launch_by_a_professional_skips_the_consent_page() {
-    let smart = Smart::start_approved(
-        "[client.organisation_approval]\n\
-         scopes = [\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"user/Observation.rs\"]\n\
-         approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"",
-    )
-    .await;
+async fn an_administered_app_s_ehr_launch_by_a_professional_skips_the_consent_page() {
+    let smart = Smart::start_approved("").await;
     let launch = smart.launch().await;
     let scope = "openid fhirUser launch user/Observation.rs";
     let (status, headers, _) = smart.get(&authorize_path(&launch, scope), None).await;
@@ -575,7 +571,10 @@ async fn an_approved_app_s_ehr_launch_by_a_professional_skips_the_consent_page()
         .map(|(_, value)| value.to_owned())
         .expect("a cookie");
     smart
-        .answer(&param(&upstream, "nonce").expect("a nonce"))
+        .answer_as(
+            &param(&upstream, "nonce").expect("a nonce"),
+            "Practitioner/synthetic-1",
+        )
         .await;
     let callback = format!(
         "/callback?code=synthetic-upstream-code&state={}",
@@ -608,19 +607,13 @@ async fn an_approved_app_s_ehr_launch_by_a_professional_skips_the_consent_page()
     smart.stop().await;
 }
 
-// NOTE: docs/architecture.md §13.6 item 6: the approval of the organisation's own
-// (first-party) app covers a patient's EHR launch too; a third-party app's does not.
+// NOTE: docs/architecture.md §13.6 item 6: a first-party app spares a patient's EHR
+// launch the page; an app of another party does not.
 #[tokio::test]
 async fn a_first_party_app_s_ehr_launch_by_a_patient_skips_the_consent_page() {
     for (first_party, skipped) in [(true, true), (false, false)] {
-        let scopes = if first_party {
-            "[\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"patient/Observation.rs\"]"
-        } else {
-            "[\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"user/Observation.rs\"]"
-        };
         let smart = Smart::start_approved(&format!(
-            "[client.organisation_approval]\nscopes = {scopes}\n\
-             approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"\n\
+            "\
              first_party = {first_party}"
         ))
         .await;
@@ -688,16 +681,11 @@ async fn launched_as(smart: &Smart, scope: &str, fhir_user: &str) -> Url {
     location(&headers)
 }
 
-// NOTE: OpenID Connect Core 1.0 §3.1.2.4 (owner, 2026-11-20, #727): the organisation's
-// approval is administrative consent, and in an EHR launch it covers staff patient/ scopes.
+// NOTE: OpenID Connect Core 1.0 §3.1.2.4: the registration is administrative consent,
+// and it covers a professional's patient/ scopes in an EHR launch.
 #[tokio::test]
-async fn an_approved_app_s_ehr_launch_covers_a_professional_s_patient_scopes() {
-    let smart = Smart::start_approved(
-        "[client.organisation_approval]\n\
-         scopes = [\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"patient/Observation.rs\"]\n\
-         approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"",
-    )
-    .await;
+async fn an_administered_app_s_ehr_launch_covers_a_professional_s_patient_scopes() {
+    let smart = Smart::start_approved("").await;
     let scope = "openid fhirUser launch patient/Observation.rs";
     let back = launched_as(&smart, scope, "Practitioner/synthetic-1").await;
     assert!(
@@ -718,7 +706,7 @@ async fn an_approved_app_s_ehr_launch_covers_a_professional_s_patient_scopes() {
     assert_eq!(json!(scope), body["scope"]);
     // NOTE: docs/architecture.md §13.2, the code's record names its basis.
     assert_eq!(
-        vec![String::from("organisation")],
+        vec![String::from("administrative")],
         bases(&records(&smart.store).await)
     );
 
@@ -726,7 +714,7 @@ async fn an_approved_app_s_ehr_launch_covers_a_professional_s_patient_scopes() {
     assert_eq!(
         "/consent",
         back.path(),
-        "a staff approval never answers for a patient"
+        "the registration never answers for a patient"
     );
     smart.stop().await;
 }

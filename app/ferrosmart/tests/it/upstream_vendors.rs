@@ -46,7 +46,7 @@ const REDIRECT: &str = "https://app.example.org/callback";
 /// The examples' FHIR resource server.
 const RESOURCE: &str = "https://ehr.example.org/fhir";
 /// The `fhirUser` the provider holds for the person.
-const FHIR_USER: &str = "https://ehr.example.org/fhir/Practitioner/example-1";
+const FHIR_USER: &str = "https://ehr.example.org/fhir/RelatedPerson/example-1";
 /// The app's PKCE verifier and its S256 challenge (RFC 7636 Appendix B).
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 /// The challenge of [`VERIFIER`].

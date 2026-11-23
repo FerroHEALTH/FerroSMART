@@ -87,9 +87,12 @@ async fn directory(
 /// Logs in with `claims` asking `openid fhirUser user/Observation.rs` at
 /// `base`, and returns the consent page with the cookie and form token.
 async fn consent_with(smart: &Smart, base: &str, claims: Value) -> (String, String, String) {
+    // NOTE: OpenID Connect Core 1.0 §3.1.2.1, prompt=consent drives the page that a
+    // professional's administered app would spare, where the cases read the fhirUser.
     let path = authorize_path(&[
         ("aud", base),
         ("scope", "openid fhirUser user/Observation.rs"),
+        ("prompt", "consent"),
     ]);
     let (_, headers, _) = smart.get(&path, None).await;
     let upstream = location(&headers);

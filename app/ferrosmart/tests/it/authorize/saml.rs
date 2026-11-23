@@ -245,7 +245,7 @@ fn assertion(request_id: &str) -> Assertion {
         attributes: String::from(concat!(
             "<saml:Attribute Name=\"displayName\"><saml:AttributeValue>Synthetic Clinician</saml:AttributeValue></saml:Attribute>",
             "<saml:Attribute Name=\"role\"><saml:AttributeValue>clinician</saml:AttributeValue></saml:Attribute>",
-            "<saml:Attribute Name=\"fhirUser\"><saml:AttributeValue>Practitioner/synthetic-1</saml:AttributeValue></saml:Attribute>"
+            "<saml:Attribute Name=\"fhirUser\"><saml:AttributeValue>RelatedPerson/synthetic-1</saml:AttributeValue></saml:Attribute>"
         )),
         ..Assertion::default()
     }
@@ -378,7 +378,7 @@ async fn a_saml_login_by_post_reaches_the_consent_page_and_is_recorded() {
         .expect("reads")
         .expect("the request");
     assert_eq!(
-        Some("Practitioner/synthetic-1"),
+        Some("RelatedPerson/synthetic-1"),
         pending.fhir_user.as_deref(),
         "the fhirUser claim the attribute maps to"
     );

@@ -43,7 +43,7 @@ async fn log_in(smart: &Smart, overrides: &[(&str, &str)], acr: Option<&str>) ->
     // NOTE: a null acr takes the stub's own away, so the ID Token names none.
     let claims = json!({
         "sub": "synthetic-person", "roles": ["clinician"],
-        "fhir_user": "Practitioner/synthetic-1",
+        "fhir_user": PERSON,
         "nonce": param(&upstream, "nonce").expect("a nonce"),
         "acr": acr,
     });

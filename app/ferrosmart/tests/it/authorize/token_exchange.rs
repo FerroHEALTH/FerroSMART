@@ -103,13 +103,18 @@ async fn token_at_fhir(platform: &Platform, scope: &str, fhir_user: &str) -> Val
     );
     let (status, headers, body) = smart.get(&callback, Some(&cookie)).await;
     assert_eq!(StatusCode::SEE_OTHER, status, "{body}");
-    assert_eq!("/consent", location(&headers).path(), "{fhir_user}");
-    let (_, _, page) = smart.get("/consent", Some(&cookie)).await;
-    let token = form_token(&page);
-    let mut form = vec![("form_token", token.as_str()), ("decision", "approve")];
-    form.extend(scope.split(' ').map(|scope| ("scope", scope)));
-    let (_, headers, _) = smart.post("/consent", &form, Some(&cookie)).await;
-    let code = param(&location(&headers), "code").expect("a code");
+    // NOTE: docs/architecture.md §13.6 item 6, a patient sees the page and a
+    // professional's administered app spares it.
+    let mut back = location(&headers);
+    if back.path() == "/consent" {
+        let (_, _, page) = smart.get("/consent", Some(&cookie)).await;
+        let token = form_token(&page);
+        let mut form = vec![("form_token", token.as_str()), ("decision", "approve")];
+        form.extend(scope.split(' ').map(|scope| ("scope", scope)));
+        let (_, headers, _) = smart.post("/consent", &form, Some(&cookie)).await;
+        back = location(&headers);
+    }
+    let code = param(&back, "code").expect("a code");
     let redeem = [
         ("grant_type", "authorization_code"),
         ("code", code.as_str()),

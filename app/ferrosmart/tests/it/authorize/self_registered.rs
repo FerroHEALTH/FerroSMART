@@ -154,7 +154,7 @@ async fn an_app_that_registered_itself_always_gets_the_page_with_its_notice() {
 }
 
 #[tokio::test]
-async fn the_row_of_an_app_that_registered_itself_holds_no_approval() {
+async fn the_row_of_an_app_that_registered_itself_is_never_first_party() {
     let smart = Smart::start().await;
     registers_itself(&smart).await;
     let client = smart
@@ -167,14 +167,7 @@ async fn the_row_of_an_app_that_registered_itself_holds_no_approval() {
         ferrosmart::clients::Registration::Dynamic,
         client.registration
     );
-    assert_eq!(None, client.approval());
-    let approved = execute(
-        &smart,
-        "UPDATE client SET approved_scope = '{openid}', approved_by = 'x', approved_at = now() \
-         WHERE client_id = 'app'",
-    )
-    .await;
-    assert!(approved.is_err(), "the store refuses an approval of it");
+    assert!(!client.first_party());
     let marked = execute(
         &smart,
         "UPDATE client SET first_party = true WHERE client_id = 'app'",

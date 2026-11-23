@@ -9,10 +9,10 @@
 //! migrate once. No specification governs the storage: our own design.
 
 pub mod admin;
-pub mod approval;
 pub mod audit;
 pub mod authorization;
 pub mod consent;
+pub mod first_party;
 pub mod grant;
 pub mod launch;
 pub mod logout;
@@ -29,9 +29,7 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Postgres, Row as _};
 use url::Url;
 
-use crate::clients::{
-    About, Approval, AuthMethod, Client, ClientKeys, GrantType, Registration, SecretHash,
-};
+use crate::clients::{About, AuthMethod, Client, ClientKeys, GrantType, Registration, SecretHash};
 use crate::launch::context::Context;
 
 /// How long a request waits for a connection before the store answers that
@@ -398,18 +396,15 @@ pub(crate) async fn write_client(
         .iter()
         .map(|grant| grant.as_str())
         .collect();
-    let approval = client.approval();
     sqlx::query(
         "INSERT INTO client (client_id, client_name, token_endpoint_auth_method, jwks_uri, jwks, redirect_uris, scope, grant_types, secret_hash, \
-         launch_uri, approved_scope, approved_by, approved_at, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
+         launch_uri, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
          post_logout_redirect_uris, upstreams, registered_by, resources, default_acr_values) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, to_timestamp($13), $14, $15, $16, $17, $18, $19, \
-         $20, $21, $22, $23) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) \
          ON CONFLICT (client_id) DO UPDATE SET client_name = $2, token_endpoint_auth_method = $3, jwks_uri = $4, jwks = $5, \
-         redirect_uris = $6, scope = $7, grant_types = $8, secret_hash = $9, launch_uri = $10, \
-         approved_scope = $11, approved_by = $12, approved_at = to_timestamp($13), first_party = $14, \
-         client_uri = $15, logo_uri = $16, policy_uri = $17, tos_uri = $18, post_logout_redirect_uris = $19, upstreams = $20, \
-         registered_by = $21, resources = $22, default_acr_values = $23, updated_at = now()",
+         redirect_uris = $6, scope = $7, grant_types = $8, secret_hash = $9, launch_uri = $10, first_party = $11, \
+         client_uri = $12, logo_uri = $13, policy_uri = $14, tos_uri = $15, post_logout_redirect_uris = $16, upstreams = $17, \
+         registered_by = $18, resources = $19, default_acr_values = $20, updated_at = now()",
     )
     .bind(&client.client_id)
     .bind(&client.name)
@@ -421,10 +416,7 @@ pub(crate) async fn write_client(
     .bind(&grants)
     .bind(client.secret_hash.as_ref().map(SecretHash::phc))
     .bind(&client.launch_uri)
-    .bind(approval.map(|approval| &approval.scopes))
-    .bind(approval.map(|approval| &approval.approved_by))
-    .bind(approval.map(|approval| approval.approved_at))
-    .bind(approval.is_some_and(|approval| approval.first_party))
+    .bind(client.first_party())
     .bind(client.about.home.as_ref().map(Url::as_str))
     .bind(client.about.logo.as_ref().map(Url::as_str))
     .bind(client.about.policy.as_ref().map(Url::as_str))
@@ -441,8 +433,7 @@ pub(crate) async fn write_client(
 
 /// The columns [`read_client`] reads.
 pub(crate) const CLIENT_COLUMNS: &str = "client_id, client_name, token_endpoint_auth_method, jwks_uri, jwks, secret_hash, redirect_uris, \
-     post_logout_redirect_uris, upstreams, resources, scope, grant_types, launch_uri, approved_scope, approved_by, \
-     extract(epoch FROM approved_at)::bigint AS approved_at, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
+     post_logout_redirect_uris, upstreams, resources, scope, grant_types, launch_uri, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
      default_acr_values, registered_by";
 
 /// Reads a `client` row.
@@ -476,30 +467,15 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
             _ => Err(corrupt()),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let approval = match (
-        row.try_get::<Option<Vec<String>>, _>("approved_scope")?,
-        row.try_get::<Option<String>, _>("approved_by")?,
-        row.try_get::<Option<i64>, _>("approved_at")?,
-    ) {
-        (Some(scopes), Some(approved_by), Some(approved_at)) => Some(Approval {
-            scopes,
-            approved_by,
-            approved_at,
-            first_party: row.try_get("first_party")?,
-        }),
-        (None, None, None) => None,
-        _ => return Err(corrupt()),
-    };
     let registered_by =
         RegisteredBy::parse(&row.try_get::<String, _>("registered_by")?).ok_or_else(corrupt)?;
+    let first_party: bool = row.try_get("first_party")?;
     // NOTE: RFC 7591 §5, an app's own registration is self-asserted, so a row of
-    // one that holds an approval or the first-party mark is refused.
-    let registration = match (registered_by, approval) {
-        (RegisteredBy::Itself, None) if !row.try_get::<bool, _>("first_party")? => {
-            Registration::Dynamic
-        }
-        (RegisteredBy::Itself, _) => return Err(corrupt()),
-        (RegisteredBy::Admin, approval) => Registration::Administered(approval),
+    // one that holds the first-party mark is refused.
+    let registration = match registered_by {
+        RegisteredBy::Itself if first_party => return Err(corrupt()),
+        RegisteredBy::Itself => Registration::Dynamic,
+        RegisteredBy::Admin => Registration::Administered { first_party },
     };
     Ok(Client {
         name: row.try_get("client_name")?,
@@ -663,7 +639,7 @@ pub struct Prompt {
     /// again.
     pub login: bool,
     /// `consent`: the consent page is shown even when a remembered consent
-    /// or an approval would answer.
+    /// or the registration would answer.
     pub consent: bool,
     /// `select_account`: the upstream login offers its accounts.
     pub select_account: bool,
@@ -843,9 +819,9 @@ pub struct Code {
     pub upstream_session: Option<String>,
     /// The launch context of an EHR launch.
     pub launch_context: Option<Context>,
-    /// The time of the organisation approval the code was issued on, in
-    /// seconds since the epoch, when the person saw no consent page.
-    pub approved_at: Option<i64>,
+    /// What the consent rests on: `page`, `remembered`, `administrative` or
+    /// `first-party` (`docs/architecture.md` §13.6 item 6).
+    pub basis: Option<String>,
     /// The roles of the person, mapped from the upstream identity provider
     /// (`docs/architecture.md` §13.6 item 5), which the access token's
     /// `roles` claim carries (RFC 9068 §2.2.3.1).

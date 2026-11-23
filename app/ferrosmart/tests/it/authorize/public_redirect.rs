@@ -22,9 +22,7 @@ async fn start_first_party() -> Smart {
     Smart::start_redirecting(
         "[\"authorization_code\"]",
         "[\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n\
-         [client.organisation_approval]\n\
-         scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n\
-         approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"\n\
+         \
          first_party = true",
         "[\"user/Observation.rs\"]",
         &[REDIRECT, CUSTOM, LOOPBACK],

@@ -27,7 +27,7 @@ async fn begin(smart: &Smart, overrides: &[(&str, &str)]) -> (String, Url) {
 async fn log_in(smart: &Smart, cookie: &str, upstream: &Url, extra: &Value) -> Url {
     let mut claims = json!({
         "sub": "synthetic-person", "name": "Synthetic Clinician", "roles": ["clinician"],
-        "fhir_user": "Practitioner/synthetic-1",
+        "fhir_user": PERSON,
         "nonce": param(upstream, "nonce").expect("a nonce"),
     });
     if let (Some(base), Some(over)) = (claims.as_object_mut(), extra.as_object()) {
@@ -192,25 +192,18 @@ async fn prompt_login_and_select_account_reach_the_upstream_login() {
 // NOTE: OpenID Connect Core 1.0 §3.1.2.1: prompt=consent asks the person for consent,
 // so an organisation approval that would skip the page does not answer for them.
 #[tokio::test]
-async fn prompt_consent_shows_the_page_an_approval_would_skip() {
-    let smart = Smart::start_with(
-        "[\"authorization_code\"]",
-        "[\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n\
-         [client.organisation_approval]\n\
-         scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n\
-         approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"",
-        "[\"user/Observation.rs\"]",
-    )
-    .await;
+async fn prompt_consent_shows_the_page_the_registration_would_skip() {
+    let smart = Smart::start().await;
+    let professional = json!({ "fhir_user": "Practitioner/synthetic-1" });
     let scope = ("scope", "openid fhirUser user/Observation.rs");
     let (cookie, upstream) = begin(&smart, &[scope]).await;
-    let onward = log_in(&smart, &cookie, &upstream, &json!({})).await;
+    let onward = log_in(&smart, &cookie, &upstream, &professional).await;
     assert!(
         onward.as_str().starts_with(REDIRECT) && param(&onward, "code").is_some(),
-        "the approval answers: {onward}"
+        "the registration answers: {onward}"
     );
     let (cookie, upstream) = begin(&smart, &[scope, ("prompt", "consent")]).await;
-    let onward = log_in(&smart, &cookie, &upstream, &json!({})).await;
+    let onward = log_in(&smart, &cookie, &upstream, &professional).await;
     assert_eq!("/consent", onward.path(), "the person is asked");
     smart.stop().await;
 }

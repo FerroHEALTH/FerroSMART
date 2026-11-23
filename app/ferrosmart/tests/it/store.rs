@@ -89,7 +89,7 @@ async fn the_sweep_deletes_lapsed_refresh_tokens_and_keeps_a_fresh_grant() {
             auth_time: None,
             access: Some(Access::Offline),
             upstream_session: None,
-            approved_at: None,
+            basis: None,
             roles: &[],
             acr: None,
         })

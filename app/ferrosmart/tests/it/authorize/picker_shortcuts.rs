@@ -272,6 +272,15 @@ async fn the_picker_lists_the_patients_of_the_person_s_care_teams() {
         !page.contains("Patients assigned to you"),
         "on no care team: {page}"
     );
+    let searched = asked(&fhir, "/fhir/CareTeam").await.len();
+    let cookie = to_picker(&smart, &base, "a-relative", "RelatedPerson/synthetic-1").await;
+    let (_, _, page) = smart.get("/picker", Some(&cookie)).await;
+    assert!(!page.contains("Patients assigned to you"), "{page}");
+    assert_eq!(
+        searched,
+        asked(&fhir, "/fhir/CareTeam").await.len(),
+        "a fhirUser that names no Practitioner or PractitionerRole is searched for no care team"
+    );
     smart.stop().await;
 }
 

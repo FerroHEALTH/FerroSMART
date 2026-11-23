@@ -326,9 +326,14 @@ impl Stack {
 
     /// Brings the clinician app's consent page about and returns its cookie.
     pub(crate) async fn clinician_consent(&self) -> String {
-        let path = self.authorize_path(
-            "ward-overview",
-            "openid fhirUser user/Observation.rs user/Patient.rs offline_access",
+        // NOTE: OpenID Connect Core 1.0 §3.1.2.1, a clinician sees the page of an
+        // administered app when the request asks with prompt=consent.
+        let path = format!(
+            "{}&prompt=consent",
+            self.authorize_path(
+                "ward-overview",
+                "openid fhirUser user/Observation.rs user/Patient.rs offline_access",
+            )
         );
         let (cookie, next) = self.log_in(&path).await;
         assert_eq!("/consent", next, "to the consent page");

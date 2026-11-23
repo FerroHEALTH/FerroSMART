@@ -60,7 +60,8 @@ CREATE TABLE authorization_code (
     upstream_session text,
     launch_context jsonb,
     roles text[] NOT NULL DEFAULT '{}',
-    approved_at timestamptz,
+    basis text CONSTRAINT authorization_code_basis_check
+        CHECK (basis IN ('page', 'remembered', 'administrative', 'first-party')),
     person_claims jsonb,
     acr text CONSTRAINT authorization_code_acr_check
         CHECK (acr IN ('low', 'substantial', 'high'))

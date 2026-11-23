@@ -5,7 +5,7 @@
 //!
 //! The document is RFC 7591 §2 client metadata, so the admin API, `ferrosmart
 //! client apply` and an app's own registration read one shape. `resources`,
-//! `launch_uri`, `upstreams` and `organisation_approval` are FerroSMART's
+//! `launch_uri`, `upstreams` and `first_party` are FerroSMART's
 //! own. The server issues a symmetric client's `client_secret` and keeps
 //! only its hash (RFC 7591 §3.2.1); no document or answer carries the hash.
 
@@ -14,8 +14,7 @@ use serde_json::Value;
 use url::Url;
 
 use crate::clients::{
-    ApprovalMetadata, AuthMethod, Client, ClientKeys, ClientKind, ClientMetadata, GrantType,
-    Material,
+    AuthMethod, Client, ClientKeys, ClientKind, ClientMetadata, GrantType, Material,
 };
 use crate::store::admin::Registered;
 
@@ -95,74 +94,32 @@ pub struct Fields {
     pub policy_uri: String,
     /// The app's terms of service (RFC 7591 §2); empty for none.
     pub tos_uri: String,
-    /// The organisation's approval of the client for its staff.
-    pub organisation_approval: Option<ApprovalDocument>,
-}
-
-/// The organisation approval a [`ClientDocument`] gives.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ApprovalDocument {
-    /// The approved scopes.
-    pub scopes: Vec<String>,
-    /// The administrator who approved, as the controller names them.
-    pub approved_by: String,
-    /// When, an RFC 3339 instant; absent keeps the stored approval's time
-    /// when its scopes, approver and mark are the same, and takes the time
-    /// of the request otherwise.
-    pub approved_at: Option<String>,
-    /// Whether the app is the organisation's own.
+    /// Whether the app is the controller's own or acts for it.
     pub first_party: bool,
 }
 
 impl ClientDocument {
     /// Returns the registration this document makes of `client_id`, over
-    /// the client `stored` when the request changes one, at `now` in
-    /// seconds since the epoch.
+    /// the client `stored` when the request changes one.
     #[must_use]
     pub fn registration(
         self,
         client_id: &str,
         stored: Option<&Client>,
-        now: i64,
     ) -> (ClientMetadata, Material) {
-        self.0.registration(client_id, stored, now)
+        self.0.registration(client_id, stored)
     }
 }
 
 impl Fields {
     /// Returns the registration [`ClientDocument::registration`] makes.
-    fn registration(
-        self,
-        client_id: &str,
-        stored: Option<&Client>,
-        now: i64,
-    ) -> (ClientMetadata, Material) {
+    fn registration(self, client_id: &str, stored: Option<&Client>) -> (ClientMetadata, Material) {
         let kept_hash = stored
             .filter(|client| {
                 self.token_endpoint_auth_method.kind() == ClientKind::ConfidentialSymmetric
                     && client.kind() == ClientKind::ConfidentialSymmetric
             })
             .and_then(|client| client.secret_hash.clone());
-        let approval = self.organisation_approval.map(|approval| {
-            let same = stored
-                .and_then(Client::approval)
-                .filter(|kept| {
-                    kept.scopes == approval.scopes
-                        && kept.approved_by == approval.approved_by
-                        && kept.first_party == approval.first_party
-                })
-                .map(|kept| kept.approved_at);
-            let approved_at = approval
-                .approved_at
-                .unwrap_or_else(|| instant(same.unwrap_or(now)));
-            ApprovalMetadata {
-                scopes: approval.scopes,
-                approved_by: approval.approved_by,
-                approved_at,
-                first_party: approval.first_party,
-            }
-        });
         let section = ClientMetadata {
             client_id: client_id.to_owned(),
             name: self.client_name,
@@ -180,7 +137,7 @@ impl Fields {
             logo_uri: self.logo_uri,
             policy_uri: self.policy_uri,
             tos_uri: self.tos_uri,
-            organisation_approval: approval,
+            first_party: self.first_party,
         };
         let material = Material {
             jwks: self.jwks,
@@ -235,27 +192,13 @@ pub struct ClientView<'a> {
     /// Its terms of service.
     #[serde(skip_serializing_if = "Option::is_none")]
     tos_uri: Option<&'a str>,
-    /// Its organisation approval.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    organisation_approval: Option<ApprovalView<'a>>,
+    /// Whether the app is the controller's own or acts for it.
+    first_party: bool,
     /// `admin`, or `self` for an app that registered itself (RFC 7591 §5).
     registered_by: &'static str,
     /// When it was disabled, an RFC 3339 instant; absent while enabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     disabled_at: Option<String>,
-}
-
-/// An organisation approval as the API answers with it.
-#[derive(Debug, Serialize)]
-struct ApprovalView<'a> {
-    /// The approved scopes.
-    scopes: &'a [String],
-    /// Who approved.
-    approved_by: &'a str,
-    /// When, an RFC 3339 instant.
-    approved_at: String,
-    /// Whether the app is the organisation's own.
-    first_party: bool,
 }
 
 /// Returns `seconds` since the epoch as an RFC 3339 instant.
@@ -295,12 +238,7 @@ impl<'a> From<&'a Registered> for ClientView<'a> {
             logo_uri: client.about.logo.as_ref().map(Url::as_str),
             policy_uri: client.about.policy.as_ref().map(Url::as_str),
             tos_uri: client.about.terms.as_ref().map(Url::as_str),
-            organisation_approval: client.approval().map(|approval| ApprovalView {
-                scopes: &approval.scopes,
-                approved_by: &approval.approved_by,
-                approved_at: instant(approval.approved_at),
-                first_party: approval.first_party,
-            }),
+            first_party: client.first_party(),
             registered_by: registered.by.as_str(),
             disabled_at: registered.disabled_at.map(instant),
         }

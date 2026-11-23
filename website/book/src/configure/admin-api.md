@@ -4,7 +4,7 @@
 # The admin API
 
 The admin API changes the client registry while FerroSMART runs, so a new
-app, a changed redirect URI or a withdrawn approval needs no restart. It
+app, a changed redirect URI or a disabled client needs no restart. It
 writes the PostgreSQL store every replica reads, and every change takes
 effect on the next request at every replica. SMART App Launch 2.2.0 leaves
 registration to the server (Register App with EHR), so the API is
@@ -55,7 +55,6 @@ invalid_token`, a token without `system/admin` `403 insufficient_scope`.
 | `PUT /admin/clients/{client_id}` | Replaces a client with the document sent |
 | `POST /admin/clients/{client_id}/disable` | Disables a client and ends everything it holds |
 | `POST /admin/clients/{client_id}/enable` | Enables a disabled client |
-| `DELETE /admin/clients/{client_id}/organisation_approval` | Withdraws the client's organisation approval |
 | `GET /admin/keys` | Lists the token signing keys, each public key with its state |
 
 Every answer is JSON with `Cache-Control: no-store`.
@@ -78,16 +77,11 @@ secret, and no answer repeats it.
   "resources": ["https://ehr.example.org/fhir"],
   "scope": "openid fhirUser launch user/Observation.rs",
   "grant_types": ["authorization_code"],
-  "organisation_approval": {
-    "scopes": ["openid", "launch", "user/Observation.rs"],
-    "approved_by": "J. de Vries, information security"
-  }
+  "first_party": false
 }
 ```
 
-An approval without `approved_at` keeps the stored approval's time when its
-scopes, approver and `first_party` mark are unchanged, and takes the time of
-the request otherwise. An answer adds `registered_by`, `admin` or `self`
+An answer adds `registered_by`, `admin` or `self`
 for an app that registered itself (RFC 7591 §5), and `disabled_at` for a
 disabled client.
 
@@ -104,18 +98,17 @@ disabled client.
 | `404` | `not_found` | No client is registered under the id |
 | `409` | `client_exists` | A client is registered under the id already |
 | `409` | `launch_uri_taken` | Another client registers the launch URL |
-| `409` | `unchanged` | The client is in that state already: disabled, enabled, or without an approval |
+| `409` | `unchanged` | The client is in that state already: disabled or enabled |
 
 A refusal with a status below 500 carries an `error_description` that names
 the rule broken.
 
-## Withdrawing and disabling
+## Clearing `first_party` and disabling
 
-A `PUT` whose approval differs from the stored one, or leaves it out, and a
-`DELETE` of the approval, withdraw the approval in the same transaction as
-the change: every grant issued on it is revoked with its refresh and access
-tokens, and its unredeemed codes are dropped. The person's next refresh
-fails, and introspection answers every revoked token inactive at once.
+A `PUT` that clears `first_party` revokes, in the same transaction, every
+grant issued on it with no page, with its refresh and access tokens, and
+drops its unredeemed codes. The person's next refresh fails, and
+introspection answers every revoked token inactive at once.
 
 Disabling a client ends everything it holds: every grant and access token
 is revoked with its refresh tokens, its codes, launches and pending
@@ -133,9 +126,8 @@ Every change commits with an audit record that names the administration
 client, or `ferrosmart client apply`, as the requester and the client
 changed: `client-created`,
 `client-updated`, `client-disabled` with how many grants, access tokens
-and consents it ended, `client-enabled`, and
-`organisation-approval-withdrawn` with how many grants it revoked
-([audit records](../operate/audit.md)). Every admin request also writes the
+and consents it ended, and `client-enabled`; a `client-updated` that
+cleared `first_party` names the grants it revoked ([audit records](../operate/audit.md)). Every admin request also writes the
 `ferrohealth_smart::audit` log line with the client and the route.
 
 ## The keys

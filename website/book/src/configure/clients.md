@@ -39,7 +39,7 @@ FerroSMART first serves.
 
 The document is RFC 7591 §2 client metadata, the names an app that
 registers itself sends too. `resources`, `launch_uri`, `upstreams` and
-`organisation_approval` are FerroSMART's own.
+`first_party` are FerroSMART's own.
 
 | Member | What it is |
 |---|---|
@@ -230,8 +230,8 @@ With both refresh scopes granted, `offline_access` decides.
 
 ## Consent
 
-A flow with a person shows the consent page unless an organisation
-approval or a remembered choice answers for them; [The consent
+A flow with a person shows the consent page unless the registration or a
+remembered choice answers for them; [The consent
 rules](consent.md) lists every case with the text it rests on. The person
 approves the offered scopes, unticks
 any access to their data (`patient/`, `user/` and extension scopes), or
@@ -251,7 +251,7 @@ covers goes back to the app with a code at once; a request for more shows
 the page again. The person sees each remembered consent at
 `{issuer}/manage`, the SMART `management_endpoint`, with every app that
 holds live access to their data: a refresh token or an access token not
-yet expired, remembered or not, organisation-approved or not. The page says
+yet expired, remembered or not. The page says
 how long each app stays connected, and each app has a Disconnect button.
 Disconnect forgets the remembered consent and revokes every grant the app
 holds for the person, with every token under them, at once: its next
@@ -260,61 +260,32 @@ as the authorization server and end-user will allow", so the person can
 end any app's access. The audit record of a disconnect is
 `consent-withdrawn`.
 
-### An app the organisation approved
+### Who skips the page
 
-An administrator can approve an app once for the organisation's staff, so
-a professional who opens it sees no consent page (SMART App
-Launch 2.2.0, Obtain authorization code, Response: the server "will enforce
-access rules based on local policies and optionally direct end-user
-input"):
+An administrator's registration is the organisation's consent for its
+professionals, so a person whose `fhirUser` is a `Practitioner` or a
+`PractitionerRole` sees no consent page for an app an administrator
+registered (OpenID Connect Core 1.0 §3.1.2.4, "previous administrative
+consent"). A patient, related person or person sees the page for an app of
+another party: they decide whether another party reads their data
+(Regulation (EU) 2025/327 Art 3, 4(2) and 7(1)).
 
-```json
-"organisation_approval": {
-  "scopes": ["openid", "fhirUser", "launch", "user/Observation.rs"],
-  "approved_by": "J. de Vries, information security",
-  "approved_at": "2026-11-19T09:00:00Z"
-}
-```
-
-The approval lists `user/` and `patient/` scopes and the launch, OpenID,
-refresh and extension scopes that go with them, each within the client's
-`scope`. The page is skipped when the person's `fhirUser` is not a
-`Patient`, `RelatedPerson` or `Person`, the request names no `patient/`
-scope or comes from an EHR launch, and the approval covers every scope
-offered; the person still gets no more than their roles allow. The
-approval is the organisation's administrative consent (OpenID Connect Core
-1.0 §3.1.2.4), and in an EHR launch the professional opened the app for
-the patient the EHR has open, so its `patient/` scopes need no page. A
-standalone request for `patient/` scopes shows the page. Anything else shows the page as usual. Each skipped page
-writes an audit record naming the approver and the time, and the
-management page lists the app as approved by the organisation. A person
-who disconnects it there ends their own access; the approval stays, and
-their next sign-in follows it again. Withdraw it through the
-[admin API](admin-api.md), or apply the client's document without it or
-with another approval, and it is withdrawn at once, every token issued on
-it revoked.
-
-For the organisation's own app, such as its patient portal, add
-`first_party = true` to the approval. A first-party approval may also list
-`patient/` scopes, and a patient, related person or person who logs in to
-the app sees no consent page either, as long as the approval covers every
-scope offered. The organisation processes its patients' data in its own
-app on its own legal basis (GDPR Art. 9(2)(h)), so the consent page adds
-nothing there. An app of another party keeps the page for every patient:
-the patient decides whether to share their data with it, and disconnects
-it on the management page. The audit record of a skipped page says
-`consent-first-party-approved`, and the management page lists the app as
-the organisation's own, with a Disconnect button that ends the patient's
-access and leaves the approval to the administrator. Setting or
-clearing `first_party` is a new approval: the old one is withdrawn with
-every token issued on it.
+For the organisation's own app, such as its patient portal, or an app that
+acts for it, set `"first_party": true` in its document. Only an
+administrator sets it. A patient, related person or person then sees no
+page either. The audit record of a skipped page is `consent-administrative`
+or `consent-first-party`, and the management page lists the app as the
+organisation's, with a Disconnect button that ends the person's access and
+leaves the registration standing. Clearing `first_party` revokes at once
+every token issued on it with no page. [The consent rules](consent.md) list
+every case with the text it rests on.
 
 ### Native and browser apps without a secret
 
 A public client (`token_endpoint_auth_method` `none`) has no secret, so a request carrying
 its `client_id` could come from any app on the device. FerroSMART gives a
-public client a code with no consent page, on an approval or a remembered
-consent, only when the request's redirect URI is a claimed `https` URI: an
+public client a code with no consent page, on its registration or a
+remembered consent, only when the request's redirect URI is a claimed `https` URI: an
 `https` URL whose host is not `localhost` or a loopback address. The
 operating system hands such a redirect only to the app that proved it owns
 the domain (RFC 8252 §7.2). A custom-scheme redirect such as
@@ -328,11 +299,12 @@ clients authenticate at the token endpoint and are not affected.
 
 Register the organisation's own mobile app with a claimed `https` redirect,
 an iOS Universal Link or an Android App Link, so its patients see no page.
-`ferrosmart client apply` prints a warning for a first-party public client
-whose redirect URIs are all custom-scheme or loopback ones:
+`ferrosmart client apply` prints a warning for a public client an
+administrator registers whose redirect URIs are all custom-scheme or
+loopback ones:
 
 ```text
-ferrosmart: warning: client "portal-app" is a first-party public app with no claimed https redirect URI, so every sign-in shows the consent page (RFC 8252 §8.6): register an https redirect the app claims, such as a Universal Link or an App Link
+ferrosmart: warning: client "portal-app" is a public app with no claimed https redirect URI, so every sign-in shows the consent page (RFC 8252 §8.6): register an https redirect the app claims, such as a Universal Link or an App Link
 ```
 
 ![The management page, titled "Apps you allowed": one app that stays connected after sign-out, the scopes it holds in words, and the Disconnect button](../integrate/img/manage.png)

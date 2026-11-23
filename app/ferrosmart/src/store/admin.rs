@@ -223,20 +223,4 @@ impl Transaction {
         .await?;
         Ok(enabled.rows_affected() == 1)
     }
-
-    /// Clears the organisation approval of `client_id`, its first-party
-    /// mark with it.
-    ///
-    /// # Errors
-    /// Returns [`StoreError::Database`] when the statement fails.
-    pub async fn clear_approval(&mut self, client_id: &str) -> Result<(), StoreError> {
-        sqlx::query(
-            "UPDATE client SET approved_scope = NULL, approved_by = NULL, approved_at = NULL, \
-             first_party = false, updated_at = now() WHERE client_id = $1",
-        )
-        .bind(client_id)
-        .execute(&mut *self.tx)
-        .await?;
-        Ok(())
-    }
 }

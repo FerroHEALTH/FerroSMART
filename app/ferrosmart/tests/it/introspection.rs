@@ -322,7 +322,7 @@ impl Server {
                 auth_time: Some(LOGGED_IN),
                 access,
                 upstream_session: session,
-                approved_at: None,
+                basis: None,
                 roles: &[],
                 acr: Some(AssuranceLevel::Substantial),
             })
@@ -608,7 +608,7 @@ async fn a_person_s_token_answers_their_mapped_roles() {
             access: None,
             upstream_session: None,
             roles: &roles,
-            approved_at: None,
+            basis: None,
             acr: None,
         })
         .await

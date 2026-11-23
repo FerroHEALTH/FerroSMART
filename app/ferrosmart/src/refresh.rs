@@ -308,7 +308,7 @@ pub(crate) async fn open(
                 .upstream_session
                 .as_deref()
                 .filter(|_| access == Some(Access::Online)),
-            approved_at: code.approved_at,
+            basis: code.basis.as_deref(),
             roles: &code.roles,
             acr: code.acr,
         })
