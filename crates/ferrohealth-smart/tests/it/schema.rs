@@ -60,6 +60,14 @@ fn every_retired_key_and_form_is_an_unknown_key_at_load() {
         issuer("persons", "token_profile = \"rfc9068\""),
         issuer("persons", "acting_for_claim = \"act.sub\""),
         issuer("persons", "client_tokens = \"claim_absent\""),
+        issuer("machines", "scopeless_subjects = [\"svc\"]"),
+        profiled("persons", "", "first_party_clients = [\"portal\"]"),
+        profiled("persons", "", "delegates = [{ client = \"app\" }]"),
+        profiled(
+            "persons",
+            "preset = \"ferrosmart\"",
+            "audience_delegates = true",
+        ),
     ];
     for key in [
         "audience = [\"a\"]",
@@ -126,8 +134,6 @@ fn a_preset_is_selected_and_every_key_is_set_over_it() -> Outcome {
         r#"person_key = "sub"
 client_claims = ["appid", "azp"]
 guest = [{ claim = "acct", value = "1" }]
-first_party_clients = ["first-party-app"]
-delegates = [{ sub = "actor-1" }, { client = "third-party-app" }]
 scope_claim = { claim = "scp", form = "array" }"#,
     ))
     .resolve(&[])?;
@@ -232,16 +238,12 @@ fn only_a_compiled_adapter_loads() {
 }
 
 #[test]
-fn a_marker_or_a_delegate_in_two_forms_fails_to_parse() {
-    for extra in [
-        "app_only = [{ absent_claim = \"uid\", sub_is_client = true }]",
-        "delegates = [{ sub = \"a\", client = \"b\" }]",
-    ] {
-        assert!(
-            toml::from_str::<AuthSection>(&profiled("persons", "", extra)).is_err(),
-            "{extra}"
-        );
-    }
+fn a_marker_in_two_forms_fails_to_parse() {
+    let extra = "app_only = [{ absent_claim = \"uid\", sub_is_client = true }]";
+    assert!(
+        toml::from_str::<AuthSection>(&profiled("persons", "", extra)).is_err(),
+        "{extra}"
+    );
 }
 
 #[test]
@@ -365,39 +367,4 @@ client_secret = "synthetic-secret"
         resolved.introspection.first().map(|settings| settings.kind)
     );
     Ok(())
-}
-
-// NOTE: RFC 9068 §4 checks `aud`; only FerroSMART issues a client's tokens for
-// the bases its registration lists alone, so the key reads under its preset (#682).
-#[test]
-fn audience_delegates_loads_under_the_ferrosmart_preset_alone() {
-    let ferrosmart = section(&format!(
-        "{}[issuer.i2.profile]\naudience_delegates = true\n",
-        issuer("persons", "preset = \"ferrosmart\"")
-    ));
-    assert!(ferrosmart.resolve(&[]).is_ok());
-    let keycloak = section(&profiled(
-        "persons",
-        "preset = \"keycloak\"",
-        "audience_delegates = true",
-    ));
-    assert!(matches!(
-        keycloak.resolve(&[]),
-        Err(ConfigError::Issuer { .. })
-    ));
-    let machines = section(&format!(
-        "{}[issuer.i2.profile]\naudience_delegates = true\n",
-        issuer("machines", "preset = \"ferrosmart\"")
-    ));
-    assert!(machines.resolve(&[]).is_err(), "a persons issuer alone");
-    let standing = format!(
-        "{}[issuer.i2.profile]\naudience_delegates = true\n",
-        issuer("persons", "preset = \"ferrosmart\"")
-    );
-    let refused =
-        toml::from_str::<ferrohealth_smart::config::ProductStandingSection>(&standing).err();
-    assert!(
-        refused.is_some_and(|error| error.to_string().contains("unknown field")),
-        "a product whose standing answers its lists takes no audience_delegates"
-    );
 }

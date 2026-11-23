@@ -631,7 +631,6 @@ async fn a_signed_overage_token_is_classified_and_bound_with_its_graph_groups() 
         Preset::Entra,
         &ProfileKeys {
             adapter: Some(String::from(NAME)),
-            first_party_clients: Some(vec![String::from(CLIENT)]),
             ..ProfileKeys::default()
         },
     )?;

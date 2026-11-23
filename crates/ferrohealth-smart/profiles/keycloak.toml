@@ -35,9 +35,9 @@ app_only = [{ subjects = [] }]
 # always present and cannot be disabled". TokenManager.java at the tag fills
 # `act.sub` with the impersonator's user id and `act.preferred_username`
 # with the username, and names no `act.iss`, so the actor is read under the
-# token's own issuer. An impersonation is therefore a delegation, admitted
-# as `Delegated` only when `delegates` lists the impersonator and refused as
-# an unlisted actor otherwise; the profile names no impersonation marker.
+# token's own issuer. An impersonation is therefore a delegation, read as
+# `Delegated` with the impersonator as actor; the profile names no
+# impersonation marker.
 # A deployment that refuses every impersonation adds the built-in
 # IMPERSONATOR_ID and IMPERSONATOR_USERNAME session note mappers
 # (OIDCLoginProtocolFactory.java), which write `impersonator.id` and

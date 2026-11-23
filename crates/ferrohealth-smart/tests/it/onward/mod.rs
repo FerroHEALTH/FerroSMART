@@ -106,7 +106,6 @@ pub(crate) fn caller(claims: &Value, kind: CallerKind) -> Caller {
         text("client_id").or_else(|| text("azp")),
         &text("scope").unwrap_or_default(),
         None,
-        false,
         kind,
     )
     .with_issuer(text("iss").unwrap_or_default())

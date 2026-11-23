@@ -53,8 +53,20 @@ pub(super) async fn choose(
         Err(response) => return *response,
     };
     match context_of(state, &kept, from, pairing, (id, declared)).await {
-        Ok(Some(context)) => enter(state, &kept, &context, from).await,
-        Ok(None) => pages::picker(state, headers, &kept, None, None, Some(NO_EHR)),
+        Ok(Some(context)) => match super::shortcuts::remember(state, &kept, id).await {
+            Ok(()) => enter(state, &kept, &context, from).await,
+            Err(error) => pages::server_error(state, &error),
+        },
+        Ok(None) => match super::shortcuts::fhir(state, &kept, from, &pairing.fhir_base).await {
+            Ok(offered) => pages::picker(
+                state,
+                headers,
+                &kept,
+                None,
+                pages::Listed::Offered(&offered, Some(NO_EHR)),
+            ),
+            Err(error) => pages::server_error(state, &error),
+        },
         Err(response) => *response,
     }
 }

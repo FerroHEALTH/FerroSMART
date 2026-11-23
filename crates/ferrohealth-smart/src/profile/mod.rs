@@ -273,23 +273,6 @@ pub enum Marker {
     },
 }
 
-/// An actor or a client the issuer declares may act for a person.
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(try_from = "tables::DelegateTable", into = "tables::DelegateTable")]
-pub enum Delegate {
-    /// An RFC 8693 §4.1 actor, by `act.iss` and `act.sub`; with no issuer,
-    /// the token's own.
-    Actor {
-        /// The actor's issuer; the token's when none.
-        issuer: Option<String>,
-        /// The actor's `sub`.
-        sub: String,
-    },
-    /// A third-party client, by the value its client claim names.
-    Client(String),
-}
-
 /// The claims a `persons` issuer names a represented subject in.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -338,15 +321,6 @@ pub struct ProfileKeys {
     /// [`Profile::unstable_claims`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unstable_claims: Option<Vec<String>>,
-    /// [`Profile::first_party_clients`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub first_party_clients: Option<Vec<String>>,
-    /// [`Profile::delegates`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub delegates: Option<Vec<Delegate>>,
-    /// [`Profile::audience_delegates`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub audience_delegates: Option<bool>,
     /// [`Profile::max_actor_chain`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_actor_chain: Option<usize>,
@@ -362,9 +336,6 @@ pub struct ProfileKeys {
     /// [`Profile::patient_context`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub patient_context: Option<bool>,
-    /// [`Profile::issuer_client_is_person`].
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub issuer_client_is_person: Option<bool>,
     /// [`Profile::party_identifier_type`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub party_identifier_type: Option<String>,
@@ -438,16 +409,6 @@ pub struct Profile {
     /// The claims never accepted as an identifier, beside
     /// [`UNSTABLE_CLAIMS`].
     pub unstable_claims: Vec<String>,
-    /// The clients a person signs in through.
-    pub first_party_clients: Vec<String>,
-    /// The actors and the third-party clients that may act for a person.
-    pub delegates: Vec<Delegate>,
-    /// Whether every client a person's token names is a delegate beside
-    /// those `delegates` lists, since the token's `aud` already names this
-    /// resource server: `false` by default, and set on a `persons` issuer
-    /// under the `ferrosmart` preset alone, whose authorization server
-    /// issues a client's tokens only for the bases its registration lists.
-    pub audience_delegates: bool,
     /// The deepest `act` chain admitted, 1 by default: prior actors are
     /// "informational only" (RFC 8693 §4.1).
     pub max_actor_chain: usize,
@@ -468,12 +429,6 @@ pub struct Profile {
     /// App Launch 2.2.0, Scopes and Launch Context, `launch/patient`);
     /// `false` by default, `true` under the `ferrosmart` preset.
     pub patient_context: bool,
-    /// Whether a person's token whose client is the issuer itself is read as
-    /// the person acting with no app, with no client list consulted; `false`
-    /// by default, `true` under the `ferrosmart` preset, whose patient
-    /// picker is the authorization server's own (SMART App Launch 2.2.0,
-    /// Scopes and Launch Context, `launch/patient`).
-    pub issuer_client_is_person: bool,
     /// The identifier type of the party table of the issuer when the table
     /// names none; none by default.
     pub party_identifier_type: Option<String>,
@@ -524,15 +479,11 @@ impl Default for Profile {
             user_claims: Vec::new(),
             person_equality: vec![String::from("iss"), String::from("sub")],
             unstable_claims: Vec::new(),
-            first_party_clients: Vec::new(),
-            delegates: Vec::new(),
-            audience_delegates: false,
             max_actor_chain: 1,
             representation: None,
             act_represents_patient: false,
             fhir_user_patient: false,
             patient_context: false,
-            issuer_client_is_person: false,
             party_identifier_type: None,
             token_types: vec![String::from("at+jwt"), String::from("application/at+jwt")],
             required_claims: ["iss", "exp", "aud", "sub", "client_id", "iat", "jti"]
@@ -599,11 +550,6 @@ pub enum ProfileError {
         /// The claim.
         claim: String,
     },
-    /// `audience_delegates` is set under a preset other than `ferrosmart`,
-    /// whose authorization server is the one known to issue a client's
-    /// tokens only for the bases its registration lists.
-    #[error("the profile key audience_delegates is read under the ferrosmart preset alone")]
-    AudienceDelegates,
     /// A key is set on an issuer kind it has no meaning for.
     #[error("the profile key {key} is refused on a {kind} issuer")]
     Kind {
@@ -662,15 +608,11 @@ impl Profile {
             user_claims,
             person_equality,
             unstable_claims,
-            first_party_clients,
-            delegates,
-            audience_delegates,
             max_actor_chain,
             representation,
             act_represents_patient,
             fhir_user_patient,
             patient_context,
-            issuer_client_is_person,
             party_identifier_type,
             token_types,
             required_claims,
@@ -695,15 +637,11 @@ impl Profile {
         set(&mut self.user_claims, user_claims);
         set(&mut self.person_equality, person_equality);
         set(&mut self.unstable_claims, unstable_claims);
-        set(&mut self.first_party_clients, first_party_clients);
-        set(&mut self.delegates, delegates);
-        set(&mut self.audience_delegates, audience_delegates);
         set(&mut self.max_actor_chain, max_actor_chain);
         set_some(&mut self.representation, representation);
         set(&mut self.act_represents_patient, act_represents_patient);
         set(&mut self.fhir_user_patient, fhir_user_patient);
         set(&mut self.patient_context, patient_context);
-        set(&mut self.issuer_client_is_person, issuer_client_is_person);
         set_some(&mut self.party_identifier_type, party_identifier_type);
         set(&mut self.token_types, token_types);
         set(&mut self.required_claims, required_claims);
@@ -775,12 +713,6 @@ impl Profile {
         if self.representation.is_some() && kind != IssuerKind::Persons {
             return Err(ProfileError::Kind {
                 key: "representation",
-                kind: kind.as_str(),
-            });
-        }
-        if self.audience_delegates && kind != IssuerKind::Persons {
-            return Err(ProfileError::Kind {
-                key: "audience_delegates",
                 kind: kind.as_str(),
             });
         }
@@ -858,7 +790,6 @@ mod tests {
         let expected = ProfileKeys {
             fhir_user_patient: Some(true),
             patient_context: Some(true),
-            issuer_client_is_person: Some(true),
             party_identifier_type: Some(String::from("pairwise")),
             token_types: Some(vec![String::from("at+jwt")]),
             required_claims: Some(
@@ -901,9 +832,6 @@ mod tests {
             user_claims: Some(Vec::new()),
             person_equality: Some(vec![String::from("iss"), String::from("k")]),
             unstable_claims: Some(vec![String::from("x")]),
-            first_party_clients: Some(vec![String::from("f")]),
-            delegates: Some(vec![Delegate::Client(String::from("d"))]),
-            audience_delegates: Some(true),
             max_actor_chain: Some(3),
             representation: Some(Representation {
                 claim: String::from("r"),
@@ -912,7 +840,6 @@ mod tests {
             act_represents_patient: Some(true),
             fhir_user_patient: Some(true),
             patient_context: Some(true),
-            issuer_client_is_person: Some(true),
             party_identifier_type: Some(String::from("login")),
             token_types: Some(vec![String::from("at+jwt")]),
             required_claims: Some(vec![String::from("iss")]),
@@ -949,15 +876,11 @@ mod tests {
                 user_claims: Some(profile.user_claims),
                 person_equality: Some(profile.person_equality),
                 unstable_claims: Some(profile.unstable_claims),
-                first_party_clients: Some(profile.first_party_clients),
-                delegates: Some(profile.delegates),
-                audience_delegates: Some(profile.audience_delegates),
                 max_actor_chain: Some(profile.max_actor_chain),
                 representation: profile.representation,
                 act_represents_patient: Some(profile.act_represents_patient),
                 fhir_user_patient: Some(profile.fhir_user_patient),
                 patient_context: Some(profile.patient_context),
-                issuer_client_is_person: Some(profile.issuer_client_is_person),
                 party_identifier_type: profile.party_identifier_type,
                 token_types: Some(profile.token_types),
                 required_claims: Some(profile.required_claims),

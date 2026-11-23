@@ -24,8 +24,8 @@
 #   RFC 9068 §2.2.3: `scope` as defined in RFC 8693 §4.2, space-delimited.
 #
 # tenant_claim, guest, impersonation_marker, expect, user_claims,
-# unstable_claims, first_party_clients, delegates, representation and
-# adapter have no value: a deployment sets the ones its issuer needs.
+# unstable_claims, representation and adapter have no value: a deployment
+# sets the ones its issuer needs.
 #
 # The onward grants (client::onward), each at its default:
 # onward_grant = "token_exchange"

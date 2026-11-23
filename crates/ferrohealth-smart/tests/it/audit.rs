@@ -70,6 +70,7 @@ fn a_flattened_json_line_keeps_the_tracing_target_and_what_was_addressed()
 fn the_line_carries_the_caller_kind_and_the_client_and_never_a_claim()
 -> Result<(), Box<dyn StdError>> {
     use ferrohealth_smart::audit::Actor;
+    use ferrohealth_smart::kind::Actor as KindActor;
     use ferrohealth_smart::kind::CallerKind;
     use ferrohealth_smart::resource::Access;
     use ferrohealth_smart::resource::Caller;
@@ -87,8 +88,12 @@ fn the_line_carries_the_caller_kind_and_the_client_and_never_a_claim()
         Some(String::from("partner-app")),
         "user/Observation.rs",
         None,
-        false,
-        CallerKind::Delegated { actor: None },
+        CallerKind::Delegated {
+            actor: KindActor {
+                issuer: String::from("https://as.example.org"),
+                sub: String::from("actor-1"),
+            },
+        },
     )
     .with_claims(claims);
     let access = Access::Caller(Arc::new(caller));

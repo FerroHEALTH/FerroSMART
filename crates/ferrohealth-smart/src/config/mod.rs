@@ -47,7 +47,6 @@ mod issuer;
 pub mod onward;
 mod read;
 mod shapes;
-mod standing;
 
 /// A section that breaks a rule, named by its key.
 #[derive(Debug, thiserror::Error)]
@@ -334,13 +333,6 @@ pub enum ConfigError {
         #[source]
         source: PartyError,
     },
-    /// A key the product's standing answers in its place is set on a
-    /// [`ProductStandingSection`], so the list would be read in two places.
-    #[error("{key} is set, and the product's standing answers it")]
-    ListedBesideStanding {
-        /// The key.
-        key: &'static str,
-    },
     /// A key names an issuer by a name no `[auth.issuer.<name>]` table
     /// carries.
     #[error("{key} names the issuer {name:?}, and the issuers are {known:?}")]
@@ -434,29 +426,6 @@ pub struct AuthSection {
     pub idp: crate::idp::section::IdpSection,
 }
 
-/// The `[auth]` section of a product whose standing answers its lists.
-///
-/// It is [`AuthSection`] without `scopeless_subjects` and without each
-/// `[auth.issuer.<name>]` table's `first_party_clients` and `delegates`.
-/// The three keys are unknown to it, refused as any unknown key is, and
-/// absent from its schema, so a product that answers them through a
-/// [`Standing`](crate::kind::standing::Standing) drops them from its
-/// configuration. [`ProductStandingSection::resolve`] hands every issuer
-/// the product's standing (no specification governs this: our own design).
-///
-/// ```
-/// use ferrohealth_smart::config::ProductStandingSection;
-///
-/// let issuer = "[issuer.sso]\nissuer = \"https://as.example.org\"\nkind = \"persons\"\n";
-/// assert!(toml::from_str::<ProductStandingSection>(issuer).is_ok());
-/// let listed = format!("{issuer}first_party_clients = [\"portal\"]\n");
-/// let refused = toml::from_str::<ProductStandingSection>(&listed).err();
-/// assert!(refused.is_some_and(|error| error.to_string().contains("unknown field")));
-/// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
-pub struct ProductStandingSection(pub AuthSection);
-
 /// How a bearer token is checked.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -539,13 +508,6 @@ pub struct IssuerEntry {
     pub mode: AuthMode,
     /// The introspection check, under `mode = "introspection"`.
     pub introspection: Option<IntrospectionSection>,
-    /// The subjects of the issuer granted system-wide access without a
-    /// scope; only a [`CallerKind::System`] caller of a `persons` or
-    /// `machines` issuer is ever admitted by one.
-    ///
-    /// [`CallerKind::System`]: crate::kind::CallerKind::System
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub scopeless_subjects: Vec<String>,
     /// The `[auth.issuer.<name>.federation]` table, which a `federation`
     /// issuer requires and no other kind takes.
     #[serde(skip_serializing_if = "Option::is_none")]

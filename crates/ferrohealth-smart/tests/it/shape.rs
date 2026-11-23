@@ -60,11 +60,9 @@ async fn admit(
     server.authenticate(&mint_with(key, &header, claims)).await
 }
 
-/// Returns `preset`'s profile with `first_party` as its first-party client.
-fn profile(preset: Preset, first_party: &str) -> Result<Profile, Box<dyn StdError>> {
-    let mut profile = Profile::resolve(preset, &ProfileKeys::default())?;
-    profile.first_party_clients = vec![first_party.to_owned()];
-    Ok(profile)
+/// Returns `preset`'s profile.
+fn profile(preset: Preset) -> Result<Profile, Box<dyn StdError>> {
+    Ok(Profile::resolve(preset, &ProfileKeys::default())?)
 }
 
 /// The RFC 9068 Figure 2 claims set, its `exp` and `iat` moved to the
@@ -87,13 +85,7 @@ fn figure_2() -> Value {
 #[tokio::test]
 async fn the_rfc_9068_figure_2_token_passes_the_core() -> Outcome {
     let key = rsa_key("RjEwOwOA", Algorithm::RS256);
-    let caller = admit(
-        &key,
-        "at+JWT",
-        &figure_2(),
-        profile(Preset::Rfc9068, "s6BhdRkqt3")?,
-    )
-    .await?;
+    let caller = admit(&key, "at+JWT", &figure_2(), profile(Preset::Rfc9068)?).await?;
     assert_eq!("5ba552d67", caller.subject(), "the resource owner");
     assert_eq!(Some("s6BhdRkqt3"), caller.client_id());
     assert_eq!(&CallerKind::Person, caller.kind());
@@ -106,13 +98,7 @@ async fn the_rfc_9068_figure_2_token_passes_the_core() -> Outcome {
 #[tokio::test]
 async fn the_figure_2_token_typed_jwt_is_refused() -> Outcome {
     let key = rsa_key("RjEwOwOA", Algorithm::RS256);
-    let outcome = admit(
-        &key,
-        "JWT",
-        &figure_2(),
-        profile(Preset::Rfc9068, "s6BhdRkqt3")?,
-    )
-    .await;
+    let outcome = admit(&key, "JWT", &figure_2(), profile(Preset::Rfc9068)?).await;
     assert!(
         matches!(
             outcome,
@@ -132,13 +118,7 @@ async fn the_figure_2_token_without_a_required_claim_is_refused() -> Outcome {
     for claim in ["client_id", "iat", "jti"] {
         let mut claims = figure_2();
         claims.as_object_mut().ok_or("an object")?.remove(claim);
-        let outcome = admit(
-            &key,
-            "at+jwt",
-            &claims,
-            profile(Preset::Rfc9068, "s6BhdRkqt3")?,
-        )
-        .await;
+        let outcome = admit(&key, "at+jwt", &claims, profile(Preset::Rfc9068)?).await;
         assert!(
             matches!(
                 outcome,
@@ -172,23 +152,11 @@ fn entra_user() -> Value {
 #[tokio::test]
 async fn an_entra_v2_token_without_client_id_passes_the_entra_profile() -> Outcome {
     let key = rsa_key("entra-kid", Algorithm::RS256);
-    let caller = admit(
-        &key,
-        "JWT",
-        &entra_user(),
-        profile(Preset::Entra, "first-party-app")?,
-    )
-    .await?;
+    let caller = admit(&key, "JWT", &entra_user(), profile(Preset::Entra)?).await?;
     assert_eq!(&CallerKind::Person, caller.kind());
     assert_eq!(Some("first-party-app"), caller.client_id());
     assert!(caller.has_scope("user/Observation.rs"));
-    let refused = admit(
-        &key,
-        "JWT",
-        &entra_user(),
-        profile(Preset::Rfc9068, "first-party-app")?,
-    )
-    .await;
+    let refused = admit(&key, "JWT", &entra_user(), profile(Preset::Rfc9068)?).await;
     assert!(
         matches!(
             refused,
@@ -213,13 +181,7 @@ async fn an_entra_app_only_token_carries_its_permissions_in_roles() -> Outcome {
     }
     object.insert(String::from("idtyp"), json!("app"));
     object.insert(String::from("roles"), json!(["system/Observation.rs"]));
-    let caller = admit(
-        &key,
-        "JWT",
-        &claims,
-        profile(Preset::Entra, "first-party-app")?,
-    )
-    .await?;
+    let caller = admit(&key, "JWT", &claims, profile(Preset::Entra)?).await?;
     assert_eq!(&CallerKind::System, caller.kind());
     assert!(caller.has_scope("system/Observation.rs"));
     Ok(())
@@ -230,7 +192,7 @@ async fn an_entra_app_only_token_carries_its_permissions_in_roles() -> Outcome {
 #[tokio::test]
 async fn an_okta_token_with_scp_as_an_array_passes() -> Outcome {
     let key = rsa_key("okta-kid", Algorithm::RS256);
-    let mut okta = profile(Preset::Okta, "first-party-app")?;
+    let mut okta = profile(Preset::Okta)?;
     okta.token_types = vec![String::from("JWT")];
     let claims = json!({
         "ver": 1, "jti": "AT.synthetic", "iss": "https://example.okta.com/oauth2/default",
@@ -258,7 +220,7 @@ async fn an_okta_token_with_scp_as_an_array_passes() -> Outcome {
 #[tokio::test]
 async fn a_keycloak_token_of_the_lightweight_claims_passes() -> Outcome {
     let key = rsa_key("keycloak-kid", Algorithm::RS256);
-    let mut keycloak = profile(Preset::Keycloak, "first-party-app")?;
+    let mut keycloak = profile(Preset::Keycloak)?;
     keycloak.app_only = vec![Marker::Subjects(vec![String::from("service-account-sub")])];
     let claims = json!({
         "exp": now() + 300, "iat": now(), "jti": "onrtac:synthetic",

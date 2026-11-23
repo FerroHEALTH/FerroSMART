@@ -82,7 +82,6 @@ impl OwnTokens {
             Some(record.client_id),
             &record.scope,
             None,
-            false,
             CallerKind::System,
         )
         .with_issuer(issuer.clone()))
