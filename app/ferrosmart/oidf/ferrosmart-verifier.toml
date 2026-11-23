@@ -31,3 +31,6 @@ registration_certificate_file = "/run/secrets/wallet_registration_certificate"
 issuer_anchor_files = ["/run/secrets/pid_provider_anchor"]
 wallet_endpoint = "https://localhost.emobix.co.uk:8443/test/a/ferrosmart-verifier/authorize"
 digital_credentials_api = false
+# For the conformance run alone: the suite's sample PID carries no personal_administrative_number.
+identifier_claim = "family_name"
+claims = ["family_name", "given_name", "birthdate", "issuing_country"]
