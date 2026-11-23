@@ -70,7 +70,7 @@ pub(super) async fn upstreams(State(state): State<Arc<AppState>>) -> Result<Resp
             json!({
                 "name": provider.name(),
                 "label": provider.upstream().label,
-                "protocol": if provider.oidc().is_some() { "oidc" } else { "saml" },
+                "protocol": protocol(provider),
                 "issuer": provider.upstream().issuer(),
                 "clients": clients,
                 "documents": documents,
@@ -80,6 +80,17 @@ pub(super) async fn upstreams(State(state): State<Arc<AppState>>) -> Result<Resp
     Ok(no_store(
         Json(json!({ "upstreams": entries })).into_response(),
     ))
+}
+
+/// Returns the name of the protocol `provider` speaks, as its table names it.
+fn protocol(provider: &LoginProvider) -> &'static str {
+    if provider.oidc().is_some() {
+        "oidc"
+    } else if provider.wallet().is_some() {
+        "openid4vp"
+    } else {
+        "saml"
+    }
 }
 
 /// Returns the state of an OpenID Connect provider's discovery document
