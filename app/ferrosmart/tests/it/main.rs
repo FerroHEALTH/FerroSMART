@@ -11,6 +11,7 @@
 
 mod admin;
 mod audit;
+mod audit_search;
 mod authorize;
 mod brands;
 mod clients;

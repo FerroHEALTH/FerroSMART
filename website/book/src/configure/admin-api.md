@@ -165,3 +165,12 @@ public JWK of each key with its state, `active` (signs), `next` (published
 ahead of the rotation that makes it sign) and `retiring` (published until
 the tokens it signed have expired). The private keys stay in the files
 `[ferrosmart.keys]` names ([keys and rotation](../operate/keys.md)).
+
+## A client's new secret
+
+`POST /admin/clients/{client_id}/secret` issues a confidential symmetric
+client a new secret, the same job as `ferrosmart client secret`. The
+answer is the client with `client_secret`, once, and
+`client_secret_expires_at` 0 (RFC 7591 §3.2.1); the old secret no longer
+authenticates, and the record of the change never holds the secret. A
+public or `private_key_jwt` client answers `400` with `invalid_request`.

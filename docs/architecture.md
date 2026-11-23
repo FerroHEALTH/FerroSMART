@@ -2422,7 +2422,9 @@ discovery and token shapes for the two SaaS providers.
   forwarder delivers from to an Audit Record Repository over the ITI-20
   ATX: FHIR Feed; a record the repository refuses is kept and stamped for
   an operator. `GET {issuer}/audit` reads the records by `subject`,
-  `since` and `until` as a FHIR `searchset` Bundle, with a bearer token
+  `client`, `event`, `outcome`, `since` and `until` as a FHIR `searchset`
+  Bundle a page at a time, its `next` link carrying a keyset cursor
+  (FHIR R4 Bundle.link), with a bearer token
   FerroSMART issued for its own issuer with `system/AuditEvent.rs`
   (Regulation (EU) 2025/327 Art 9 has the logs accessible; the parameters
   are our own design).
@@ -3280,7 +3282,7 @@ differently.
 | `GET /brands` | the deployment's User Access Brands Bundle, when `[ferrosmart.brand]` is set | `smart brands`, Conformance Overview |
 | `POST /register` | client registration (`registration_endpoint`): an administrator's token as the initial access token, or an app's own registration when `[ferrosmart.registration] open` (13.27) | `rfc7591 §3` |
 | `GET`, `PUT`, `DELETE /register/{client_id}` | the client's configuration endpoint, with its registration access token or an administrator's token (13.27) | `rfc7592 §2` |
-| `GET /admin/clients`; `POST /admin/clients/{client_id}/disable`, `.../enable` | the registry over the store, behind a `ferrohealth-smart` guard with the `system/admin` scope, every change audited (13.27) | our own design |
+| `GET /admin/clients`; `POST /admin/clients/{client_id}/disable`, `.../enable`, `.../secret` | the registry over the store, behind a `ferrohealth-smart` guard with the `system/admin` scope, every change audited (13.27); `secret` issues a confidential symmetric client a new secret, answered once | `rfc7591 §3.2.1`; our own design |
 | `GET /admin/keys` | the signing key ring's public keys with their states, behind the same guard | our own design |
 | `/healthz`, `/readyz` | `ferrohealth-health` | the family |
 

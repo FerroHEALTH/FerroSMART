@@ -93,7 +93,9 @@ secret when it registers the client and answers it once, as
 `client_secret` with `client_secret_expires_at` 0 (RFC 7591 §3.2.1); it
 keeps only the secret's Argon2id hash. `client apply` prints the secret it
 issued, and `ferrosmart client secret <client_id>` issues a new one, which
-it prints once:
+it prints once. The admin API's `POST /admin/clients/{client_id}/secret`
+does the same and answers the client with the secret, once
+([the admin API](admin-api.md#a-clients-new-secret)):
 
 ```sh
 ferrosmart client secret portal

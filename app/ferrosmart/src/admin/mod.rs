@@ -43,6 +43,8 @@ pub const CLIENTS_ROUTE: &str = "/admin/clients";
 pub const DISABLE_ROUTE: &str = "/admin/clients/{client_id}/disable";
 /// Enabling one disabled client.
 pub const ENABLE_ROUTE: &str = "/admin/clients/{client_id}/enable";
+/// A confidential symmetric client's new secret.
+pub const SECRET_ROUTE: &str = "/admin/clients/{client_id}/secret";
 /// The signing key ring.
 pub const KEYS_ROUTE: &str = "/admin/keys";
 
@@ -52,6 +54,7 @@ pub fn router(state: &Arc<AppState>) -> Router<Arc<AppState>> {
         .route(CLIENTS_ROUTE, get(list))
         .route(DISABLE_ROUTE, post(disable))
         .route(ENABLE_ROUTE, post(enable))
+        .route(SECRET_ROUTE, post(secret))
         .route(KEYS_ROUTE, get(keys))
         .layer(DefaultBodyLimit::max(DOCUMENT_LIMIT))
         .route_layer(guard::layer(Arc::clone(state)))
@@ -456,19 +459,31 @@ pub async fn issue_secret(
         by: Some(APPLY_REQUESTER),
         from: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
     };
-    let (mut tx, stored) = change.lock(client_id).await?;
-    if stored.client.kind() != crate::clients::ClientKind::ConfidentialSymmetric {
-        return Err(AdminError::NoSecret(client_id.to_owned()));
+    change.new_secret(client_id).await.map(|(_, secret)| secret)
+}
+
+impl Change<'_> {
+    /// Issues the confidential symmetric client `client_id` a new secret,
+    /// its hash replacing the stored one, with the change's record, and
+    /// returns the client and the secret.
+    async fn new_secret(
+        &self,
+        client_id: &str,
+    ) -> Result<(Registered, secrecy::SecretString), AdminError> {
+        let (mut tx, stored) = self.lock(client_id).await?;
+        if stored.client.kind() != crate::clients::ClientKind::ConfidentialSymmetric {
+            return Err(AdminError::NoSecret(client_id.to_owned()));
+        }
+        let issued = crate::clients::issue_secret().map_err(AdminError::Secret)?;
+        tx.set_secret(client_id, &issued.hash).await?;
+        let record = Record {
+            event: audit::Event::ClientUpdated,
+            client_id,
+            details: vec![("client_secret", String::from("issued"))],
+        };
+        let registered = self.finish(tx, record).await?;
+        Ok((registered, issued.secret))
     }
-    let issued = crate::clients::issue_secret().map_err(AdminError::Secret)?;
-    tx.set_secret(client_id, &issued.hash).await?;
-    let record = Record {
-        event: audit::Event::ClientUpdated,
-        client_id,
-        details: vec![("client_secret", String::from("issued"))],
-    };
-    change.finish(tx, record).await?;
-    Ok(issued.secret)
 }
 
 /// What a change's record says of `client`: never a secret or a key.
@@ -569,6 +584,20 @@ async fn enable(on: OnClient, access: Access) -> Result<Response, AdminError> {
     };
     let registered = change.finish(tx, record).await?;
     Ok(answer(StatusCode::OK, &registered))
+}
+
+/// `POST /admin/clients/{client_id}/secret`: a new secret for a
+/// confidential symmetric client, answered once with the client (RFC 7591
+/// §3.2.1); the old secret no longer authenticates.
+async fn secret(on: OnClient, access: Access) -> Result<Response, AdminError> {
+    let change = Change::new(&on.state, &access, on.from);
+    let (registered, secret) = change.new_secret(&on.client_id).await?;
+    let applied = Applied {
+        registered,
+        created: false,
+        secret: Some(secret),
+    };
+    Ok(issued(StatusCode::OK, &applied, Value::Null))
 }
 
 /// `GET /admin/keys`: the signing key ring this replica signs with, each
