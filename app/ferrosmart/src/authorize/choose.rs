@@ -185,7 +185,8 @@ pub(super) fn sign_in_at(
         .oidc()
         .ok_or(Stop::Deny(super::Denial::request("no login is configured")))?;
     let upstream = party.authorization_request().map_err(fail)?;
-    let location = super::oidc::upstream(upstream.url.clone(), asking);
+    let location =
+        super::oidc::upstream(upstream.url.clone(), asking, &provider.upstream().assurance);
     Ok((
         Departure::Redirect {
             to: location,

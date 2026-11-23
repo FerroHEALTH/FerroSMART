@@ -98,6 +98,10 @@ pub struct ClientSection {
     /// the client, by name; every provider when empty. With more than one,
     /// the person chooses on a page.
     pub upstreams: Vec<String>,
+    /// The eIDAS level a person's login for the client reaches, above the
+    /// deployment's floor and the provider's minimum; none leaves those.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assurance_minimum: Option<ferrohealth_smart::assurance::AssuranceLevel>,
     /// The `[[ferrosmart.resource]]` bases the client's tokens may name in
     /// `aud`; none when empty, which leaves the client FerroSMART's own
     /// endpoints alone (`docs/architecture.md` §13.6 item 12).
@@ -221,6 +225,8 @@ pub struct Client {
     pub post_logout_redirect_uris: Vec<String>,
     /// The providers a person may log in at for it, every one when empty.
     pub upstreams: Vec<String>,
+    /// The eIDAS level a person's login for it reaches, when it sets one.
+    pub assurance_minimum: Option<ferrohealth_smart::assurance::AssuranceLevel>,
     /// The resource servers its tokens may name in `aud`.
     pub resources: Vec<String>,
     /// Its scope ceiling.
@@ -663,6 +669,7 @@ pub fn resolve_with(section: &ClientSection, material: Material) -> Result<Clien
         redirect_uris: section.redirect_uris.clone(),
         post_logout_redirect_uris: section.post_logout_redirect_uris.clone(),
         upstreams: section.upstreams.clone(),
+        assurance_minimum: section.assurance_minimum,
         resources: section.resources.clone(),
         scopes: section.scopes.clone(),
         grant_types,

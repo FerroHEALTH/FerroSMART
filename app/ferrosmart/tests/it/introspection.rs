@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
+use ferrohealth_smart::assurance::AssuranceLevel;
 use ferrohealth_smart::client::assertion::AssertionKey;
 use ferrosmart::authorize::sha256;
 use ferrosmart::config::settings::Settings;
@@ -25,6 +26,9 @@ use tower::ServiceExt as _;
 use crate::support::{
     Database, Keys, RESOURCE, audit, commit, config, ec_key, from_client, rsa_key,
 };
+
+/// When the person of every recorded grant logged in.
+const LOGGED_IN: i64 = 1_790_000_000;
 
 /// The issuer every case configures.
 pub(crate) const ISSUER: &str = "https://smart.example.org";
@@ -325,11 +329,12 @@ impl Server {
                 audience: RESOURCE,
                 scope: "openid fhirUser launch/patient patient/Observation.rs offline_access",
                 context,
-                auth_time: Some(jiff::Timestamp::now().as_second()),
+                auth_time: Some(LOGGED_IN),
                 access,
                 upstream_session: session,
                 approved_at: None,
                 roles: &[],
+                acr: Some(AssuranceLevel::Substantial),
             })
             .await
             .expect("recorded");
@@ -469,6 +474,12 @@ async fn a_token_issued_under_a_grant_carries_its_launch_context() {
     assert_eq!(json!("alice"), answer["sub"]);
     assert_eq!(json!(ISSUER), answer["iss"]);
     assert_eq!(json!("Practitioner/7"), answer["fhirUser"]);
+    // NOTE: RFC 9470 §6.2, the login's acr and auth_time.
+    assert_eq!(
+        json!("http://eidas.europa.eu/LoA/substantial"),
+        answer["acr"]
+    );
+    assert_eq!(json!(LOGGED_IN), answer["auth_time"]);
     server.stop().await;
 }
 
@@ -608,6 +619,7 @@ async fn a_person_s_token_answers_their_mapped_roles() {
             upstream_session: None,
             roles: &roles,
             approved_at: None,
+            acr: None,
         })
         .await
         .expect("recorded");

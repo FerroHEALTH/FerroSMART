@@ -67,6 +67,15 @@ pub enum Error {
         /// The rule broken.
         rule: &'static str,
     },
+    /// An upstream provider's assurance cannot be met.
+    #[error("`ferrosmart.upstream` `{name}`")]
+    Assurance {
+        /// The provider's name.
+        name: String,
+        /// Why.
+        #[source]
+        source: crate::assurance::AssuranceError,
+    },
     /// An upstream preset's compiled file does not read.
     #[error(transparent)]
     Preset(#[from] crate::upstream::preset::PresetError),

@@ -460,6 +460,7 @@ impl SamlUpstream {
             preferred_username,
             session: None,
             auth_time: Some(login.authn_instant.as_second()),
+            acr: Some(login.authn_context.clone()),
             claims,
         })
     }

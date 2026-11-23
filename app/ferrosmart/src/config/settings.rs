@@ -198,7 +198,7 @@ impl Config {
             pairings: pairings(&section.resource)?,
             purposes: purposes(&section.resource)?,
             fhir_user_lookups: fhir_user_lookups(&section.resource)?,
-            upstreams: upstreams(&section.upstream, &keys)?,
+            upstreams: upstreams(&section.upstream, &keys, section.assurance_minimum)?,
             saml: service_provider(section)?,
             roles: roles(&section.role)?,
             branding: branding(&section.branding)?,
@@ -602,11 +602,16 @@ fn clients_of(
 
 /// Returns the providers `sections` name, each by a name of its own and an
 /// issuer of its own (OpenID Connect Discovery 1.0 §4.3 holds each issuer
-/// to its metadata), checking each assertion ring against `keys`.
-fn upstreams(sections: &[UpstreamSection], keys: &KeyRing) -> Result<Vec<Upstream>, Error> {
+/// to its metadata), checking each assertion ring against `keys` and each
+/// provider's assurance against the deployment's `floor`.
+fn upstreams(
+    sections: &[UpstreamSection],
+    keys: &KeyRing,
+    floor: crate::assurance::Floor,
+) -> Result<Vec<Upstream>, Error> {
     let mut resolved: Vec<Upstream> = Vec::with_capacity(sections.len());
     for section in sections {
-        let upstream = upstream(section, keys)?;
+        let upstream = upstream(section, keys, floor)?;
         if resolved.iter().any(|other| other.name == upstream.name) {
             return Err(Error::Upstream {
                 rule: "each entry has a name of its own",
@@ -626,7 +631,11 @@ fn upstreams(sections: &[UpstreamSection], keys: &KeyRing) -> Result<Vec<Upstrea
 }
 
 /// Returns the provider `section` names.
-fn upstream(section: &UpstreamSection, keys: &KeyRing) -> Result<Upstream, Error> {
+fn upstream(
+    section: &UpstreamSection,
+    keys: &KeyRing,
+    floor: crate::assurance::Floor,
+) -> Result<Upstream, Error> {
     let named = !section.name.is_empty()
         && section
             .name
@@ -664,6 +673,13 @@ fn upstream(section: &UpstreamSection, keys: &KeyRing) -> Result<Upstream, Error
             });
         }
     };
+    let assurance =
+        crate::assurance::Assurance::resolve(&section.assurance, floor).map_err(|source| {
+            Error::Assurance {
+                name: section.name.clone(),
+                source,
+            }
+        })?;
     let named = |claim: &String| !claim.is_empty();
     Ok(Upstream {
         name: section.name.clone(),
@@ -674,6 +690,7 @@ fn upstream(section: &UpstreamSection, keys: &KeyRing) -> Result<Upstream, Error
         },
         fhir_user_claim: Some(fhir_user_claim).filter(named),
         role_claims: role_claims.into_iter().filter(named).collect(),
+        assurance,
         protocol,
     })
 }

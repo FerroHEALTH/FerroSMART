@@ -216,6 +216,25 @@ pub fn metadata_document(metadata: &ServerMetadata) -> Value {
     document
 }
 
+/// Adds `acr_values_supported` to `document`, when a provider maps a value.
+///
+/// It lists the eIDAS URIs of the levels the providers' values map to,
+/// lowest first, which tells a client the server honours `acr_values` and
+/// `max_age` (RFC 9470 §7; OpenID Connect Discovery 1.0 §3).
+pub fn add_acr_values(document: &mut Value, settings: &Settings) {
+    let mut levels: Vec<_> = settings
+        .upstreams
+        .iter()
+        .flat_map(|upstream| upstream.assurance.levels())
+        .collect();
+    levels.sort_unstable();
+    levels.dedup();
+    if let (false, Some(members)) = (levels.is_empty(), document.as_object_mut()) {
+        let uris: Vec<&str> = levels.into_iter().map(crate::assurance::uri).collect();
+        members.insert(String::from("acr_values_supported"), json!(uris));
+    }
+}
+
 /// Adds `end_session_endpoint` (`{issuer}/logout`) to `document` when
 /// `metadata` describes the login, which alone gives a person a session to
 /// end (OpenID Connect RP-Initiated Logout 1.0 §2.1; the member is
@@ -364,6 +383,7 @@ pub fn openid_configuration(metadata: &ServerMetadata) -> Value {
                 "exp",
                 "iat",
                 "auth_time",
+                "acr",
                 "nonce",
                 "fhirUser",
                 "name",

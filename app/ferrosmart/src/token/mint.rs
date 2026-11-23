@@ -4,6 +4,7 @@
 //! The RFC 9068 access token and the OpenID Connect ID Token, signed,
 //! recorded and answered.
 
+use ferrohealth_smart::assurance::AssuranceLevel;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -48,6 +49,22 @@ struct AccessClaims<'a> {
     /// alone.
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     roles: &'a [String],
+    /// When the person logged in (RFC 9068 §2.2.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auth_time: Option<i64>,
+    /// The eIDAS level of the login (RFC 9068 §2.2.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    acr: Option<&'static str>,
+}
+
+/// The person's login a token is issued on, which every token issued on it
+/// repeats (RFC 9470 §6.1).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Authentication {
+    /// When the person logged in, in seconds since the epoch.
+    pub(crate) auth_time: Option<i64>,
+    /// The eIDAS level the login reached.
+    pub(crate) acr: Option<AssuranceLevel>,
 }
 
 /// What an access token grants, and what else the token response carries.
@@ -78,6 +95,8 @@ pub(crate) struct Grant<'a> {
     /// The person's mapped roles; none for a client credentials token,
     /// which no person holds.
     pub(crate) roles: &'a [String],
+    /// The person's login; none for a client credentials token.
+    pub(crate) login: Option<Authentication>,
 }
 
 /// What an ID Token carries of the login (OpenID Connect Core 1.0 §2,
@@ -112,6 +131,11 @@ pub(crate) fn mint(state: &AppState, client: &Client, grant: Grant<'_>) -> Resul
     let issued_at = jiff::Timestamp::now().as_second();
     let expires_at = issued_at.saturating_add_unsigned(lifetime);
     let jti = random_id().map_err(|error| server_error("no token id could be drawn", &error))?;
+    let auth_time = grant.login.and_then(|login| login.auth_time);
+    let acr = grant
+        .login
+        .and_then(|login| login.acr)
+        .map(crate::assurance::uri);
     let claims = AccessClaims {
         iss: &settings.issuer,
         sub: grant.subject,
@@ -126,6 +150,8 @@ pub(crate) fn mint(state: &AppState, client: &Client, grant: Grant<'_>) -> Resul
         encounter: grant.context.get("encounter").and_then(Value::as_str),
         ehr_id: grant.context.get("ehrId").and_then(Value::as_str),
         roles: grant.roles,
+        auth_time,
+        acr,
     };
     // NOTE: RFC 9068 §2.1, typ at+jwt.
     let access_token = settings
@@ -142,6 +168,7 @@ pub(crate) fn mint(state: &AppState, client: &Client, grant: Grant<'_>) -> Resul
                 exp: expires_at,
                 iat: issued_at,
                 auth_time: identity.auth_time,
+                acr,
                 nonce: identity.nonce,
                 fhir_user: grant.fhir_user,
                 person: identity.person,
@@ -195,6 +222,9 @@ struct IdClaims<'a> {
     iat: i64,
     /// When the person logged in.
     auth_time: i64,
+    /// The eIDAS level of the login (OpenID Connect Core 1.0 §2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    acr: Option<&'static str>,
     /// The client's `nonce`, when it sent one.
     #[serde(skip_serializing_if = "Option::is_none")]
     nonce: Option<&'a str>,

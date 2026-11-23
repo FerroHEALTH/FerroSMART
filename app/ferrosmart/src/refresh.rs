@@ -31,7 +31,7 @@ use crate::store::Code;
 use crate::store::Transaction;
 use crate::store::grant::{Access, GrantRecord, IdleUntil, NewGrant, Rotation, Successor};
 use crate::token::grants::identify;
-use crate::token::mint::{Grant, mint};
+use crate::token::mint::{Authentication, Grant, mint};
 use crate::token::{Issued, Refusal, server_error};
 
 /// The `invalid_grant` refusal: "The provided authorization grant ... or
@@ -84,6 +84,10 @@ pub(crate) async fn refresh(
             under: Some(&grant.id),
             context: &context,
             roles: &grant.roles,
+            login: Some(Authentication {
+                auth_time: grant.auth_time,
+                acr: grant.acr,
+            }),
         },
     )?;
     // NOTE: SMART App Launch 2.2.0, Refresh access token, Response: the launch
@@ -309,6 +313,7 @@ pub(crate) async fn open(
                 .filter(|_| access == Some(Access::Online)),
             approved_at: code.approved_at,
             roles: &code.roles,
+            acr: code.acr,
         })
         .await
         .map_err(|error| server_error("the grant could not be recorded", &error))?;

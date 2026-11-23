@@ -14,6 +14,9 @@ use ferrohealth_smart::oidc::{Callback, PendingSignIn};
 use http::HeaderMap;
 use url::Url;
 
+use ferrohealth_smart::assurance::AssuranceLevel;
+
+use crate::assurance::Assurance;
 use crate::audit::Connected;
 use crate::audit::exchanges::{Person, login};
 use crate::clients::{Approval, Client};
@@ -137,12 +140,48 @@ pub(super) async fn complete(
             });
         }
     };
+    let acr = upstream.assurance.level_of(identity.acr.as_deref());
+    if let Some(short) = short_of(&pending.asking, &upstream.assurance, acr) {
+        forget(state, pending).await;
+        if let Err(response) = record_login(state, upstream, Err(short.description)).await {
+            return *response;
+        }
+        if pending.purpose == Purpose::Manage {
+            return pages::fault(state, Fault::Assurance);
+        }
+        return back.deny(short);
+    }
     let signed_in = SignedIn {
         upstream,
         identity,
         auth_time,
+        acr,
     };
     proceed(state, pending, &back, &signed_in, from).await
+}
+
+/// Returns the refusal of a login at the eIDAS level `reached`, none when it
+/// reaches both the provider's minimum, the deployment's floor included,
+/// and the level the request asks.
+fn short_of(
+    asking: &Asking,
+    assurance: &Assurance,
+    reached: Option<AssuranceLevel>,
+) -> Option<Denial> {
+    let below = |needed: AssuranceLevel| reached.is_none_or(|level| level < needed);
+    // NOTE: RFC 6749 §4.1.2.1, the server's own minimum unmet is a denial of access.
+    if assurance.minimum().is_some_and(below) {
+        return Some(Denial {
+            error: "access_denied",
+            description: "the login does not reach the level of assurance required",
+        });
+    }
+    // NOTE: RFC 9470 §5, an acr value the request asks for and the login does not
+    // meet fails the request with unmet_authentication_requirements.
+    asking.acr.is_some_and(below).then_some(Denial {
+        error: "unmet_authentication_requirements",
+        description: "the login does not reach the level of assurance asked for",
+    })
 }
 
 /// A person's login at a provider, as the steps after it read it.
@@ -154,6 +193,9 @@ struct SignedIn<'a> {
     identity: &'a Identity,
     /// When the person authenticated, in seconds since the epoch.
     auth_time: i64,
+    /// The eIDAS level the login reached, when the provider's value maps
+    /// to one.
+    acr: Option<AssuranceLevel>,
 }
 
 /// When the person last authenticated, as the request's `max_age` judges
@@ -246,6 +288,7 @@ async fn proceed(
         upstream,
         identity,
         auth_time,
+        acr,
     } = *signed_in;
     let held = ferrohealth_smart::roles::from_claims(&identity.claims, &upstream.role_claims);
     let subject = crate::upstream::pairwise(&identity.issuer, &identity.subject);
@@ -266,6 +309,7 @@ async fn proceed(
         upstream_session,
         roles: mapped(&held, &state.settings().roles),
         person_claims: crate::store::PersonClaims::from_identity(identity),
+        acr,
     };
     let person = Person {
         issuer: &state.settings().issuer,

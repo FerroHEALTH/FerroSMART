@@ -36,6 +36,7 @@ changed is no longer written from its table.
 | `secret_hash_file` | A file holding the Argon2id hash of a confidential symmetric client's secret, never the secret |
 | `redirect_uris` | The client's complete redirect URIs, compared by exact string |
 | `resources` | The `[[ferrosmart.resource]]` bases its tokens may name in `aud`; a request for any other base is refused `invalid_target`, and a client that lists none reaches no resource server |
+| `assurance_minimum` | The eIDAS level of assurance its people's logins reach, above the deployment's `assurance_minimum`; FerroSMART asks the identity provider for it and refuses a lower login with `unmet_authentication_requirements` |
 | `launch_uri` | Optional: the app's launch URL, absolute `https`, by which an EHR's [launch registration](../integrate/ehr-launch.md) may name the app (`app_launch_uri`), as a SMART Task does; compared after RFC 3986 normalization, one client per URL |
 | `client_uri` | Optional: the app's home page, absolute `https`, linked from the consent page (RFC 7591 §2) |
 | `logo_uri` | Optional: the app's logo, absolute `https`, drawn on the consent page; the page's CSP admits that origin for images alone |

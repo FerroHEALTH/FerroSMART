@@ -1094,6 +1094,9 @@ issuer assesses each token when it admits it (`Caller::assurance`), and
 `step_up` builds the `Refusal::StepUp` naming the values that meet the
 minimum. Which routes a product holds to them stays the product's. The level
 mapping is the deployment's: no specification governs it, our own design.
+A token FerroSMART issues names the level as its eIDAS URI
+(`http://eidas.europa.eu/LoA/substantial` and the like, 13.28), so a
+product behind it maps those three values.
 
 ### 3.13 The natural person's own access
 
@@ -3550,6 +3553,7 @@ issuer = "https://smart.example.org"          # the issuer identifier, https, no
 access_token_lifetime = "5min"                # at most one hour (smart app-launch, Response); the book's flows page tells apps to refresh
 refresh_idle = "30d"
 online_idle = "8h"
+assurance_minimum = "substantial"            # the eIDAS level every login reaches: none, low, substantial or high (13.28)
 
 [ferrosmart.database]
 url_file = "/run/secrets/ferrosmart-db-url"
@@ -3589,6 +3593,10 @@ client_id = "ferrosmart"
 # fhir_user_claim = "fhir_user"               # the ID Token claim holding fhirUser; the preset's, else none
 # role_claims = ["roles"]                     # the dotted claims holding the roles; the preset's, else RFC 9068's three
 # trusted_audiences = []                      # the preset's, else none
+
+[ferrosmart.upstream.assurance]               # the eIDAS level of each of the provider's values (13.28)
+levels = { "urn:idp:loa:substantial" = "substantial", "urn:idp:loa:high" = "high" }   # an OIDC acr, a SAML AuthnContextClassRef
+# minimum = "high"                            # the provider's own minimum, above the floor
 
 # [ferrosmart.upstream.oidc.client_secret_basic]   # instead of private_key_jwt, for a provider without it (13.22)
 # secret_file = "/run/secrets/upstream-secret"
@@ -3655,6 +3663,7 @@ post_logout_redirect_uris = ["https://portal.example.org/logged-out"]   # option
 launch_uri = "https://portal.example.org/launch"   # optional: the app's launch URL, which POST /launch may name (13.17)
 client_uri = "https://portal.example.org/"    # optional, with logo_uri, policy_uri and tos_uri: shown on the consent page (RFC 7591 §2)
 grant_types = ["authorization_code", "refresh_token"]   # never client_credentials
+# assurance_minimum = "high"                  # the eIDAS level its people's logins reach, above the floor (13.28)
 # upstreams = ["idp"]                         # the providers its people log in at; every provider when absent, a chooser with several
 
 [ferrosmart.client.organisation_approval]     # optional: the organisation's own app, no consent page for its staff (13.6 item 6)
@@ -4767,7 +4776,7 @@ The tests are in `app/ferrosmart/tests/it/authorize/core_op.rs`.
 | `ui_locales` and `claims_locales` | `ui_locales` goes to the upstream login, and the pages take its first language the catalog holds before the browser's `Accept-Language`; `ui_locales_supported` names the catalog's languages. `claims_locales` is taken; no claim FerroSMART returns depends on a language, so the document names no `claims_locales_supported` | `oidc core §15.1`, `§3.1.2.1`, `§5.2`; `discovery §3` | `display_locales_and_acr_values_are_taken` |
 | `auth_time` | every ID Token carries `auth_time`, the upstream ID Token's own, or the time the upstream login returned when it names none; a refresh keeps it | `oidc core §15.1`, `§2` | `the_id_token_is_rs256_and_carries_the_upstream_login_s_auth_time` |
 | `max_age` | goes to the upstream login; an upstream `auth_time` older than `max_age`, or none, begins the upstream login again with `prompt=login`, once, and a login still older answers `login_required`; `max_age=0` is `prompt=login`; a value that is no number of seconds is `invalid_request` | `oidc core §15.1`, `§3.1.2.1`, `§3.1.2.6` | `an_upstream_login_older_than_max_age_is_begun_again_with_prompt_login` |
-| `acr_values` | taken, and the request goes on as without it; FerroSMART does not pass it upstream, so its ID Tokens carry no `acr` and the document names no `acr_values_supported`, which no specification requires: our own design | `oidc core §15.1`, `§3.1.2.1` | `display_locales_and_acr_values_are_taken` |
+| `acr_values` | an eIDAS URI it names is the level the login must reach, a miss answered `unmet_authentication_requirements`; the provider is asked for its values at that level; any other value is taken and ignored; the ID Token and the access token carry `acr`, and the documents name `acr_values_supported` (13.28) | `oidc core §15.1`, `§3.1.2.1`; `rfc9470 §5`, `§7` | `acr_values_naming_an_eidas_level_holds_the_login_to_it`, `display_locales_and_acr_values_are_taken` |
 
 ### 13.26 Upstream providers: SAML 2.0
 
@@ -5042,3 +5051,55 @@ changes clients live in the same way.
   the API never carries private material. The `signing_key` table of 13.9,
   which would let replicas agree on a rotation without a restart, is not
   built.
+
+### 13.28 The level of assurance of a login
+
+EHDS Article 16(1) lets a natural person identify with any electronic
+identification means recognised under the eIDAS Regulation, and
+Implementing Regulation (EU) 2026/2099 holds a natural person (Article
+4(2)) and a health professional (Article 6(3)) to the assurance level
+substantial at least (`docs/specs/eu-law/`). The three levels, low,
+substantial and high, are those of Regulation (EU) No 910/2014 Article
+8(2), specified in the Annex of Implementing Regulation (EU) 2015/1502. A
+resource server reads the level from the token (3.12), so FerroSMART
+carries it from the upstream login into every token (owner decision on
+FerroHEALTH/FerroEHR#6419, #784).
+
+- **The levels of a provider.** Each `[[ferrosmart.upstream]]` entry maps
+  its own values to levels in `[ferrosmart.upstream.assurance] levels`: an
+  OpenID Connect provider's `acr` (`oidc core §2`), a SAML provider's
+  `AuthnContextClassRef` (`saml-core §2.7.2.2`). A value the map does not
+  name carries no level. Which value stands for which level is the
+  deployment's, since only it knows how its provider proofs and
+  authenticates a person: no specification governs the map, our own design.
+- **The minimum.** `[ferrosmart] assurance_minimum` is the deployment's
+  floor, `substantial` by default after 2026/2099, `high` for a deployment
+  that asks it, `none` for one outside the eIDAS area. A provider's
+  `minimum` and a client's `assurance_minimum` raise it. A provider whose
+  map reaches neither the floor nor its own minimum is refused at load.
+- **The request.** An app's `acr_values` naming an eIDAS URI asks for the
+  lowest level it names, since any listed value answers it (`oidc core
+  §3.1.2.1`); the client's minimum raises it. The upstream OpenID Connect
+  request carries as `acr_values` the provider's values at or above the
+  higher of that level and the provider's minimum, lowest first. A SAML
+  request keeps its configured `authn_contexts` (13.26).
+- **The check.** After the login, its level is held to the provider's
+  minimum (with the floor) and to the request's level. A login below the
+  provider's minimum, or naming no mapped value, sends the app
+  `access_denied` (`rfc6749 §4.1.2.1`); one below the request's level
+  `unmet_authentication_requirements` (`rfc9470 §5`). Each refusal is a
+  failed DICOM `110122` Login record naming its check, and the management
+  page shows its own refusal page.
+- **The tokens.** The level travels with the pending request, the code and
+  the grant. The ID Token and the access token carry `acr` as the level's
+  eIDAS URI, `http://eidas.europa.eu/LoA/low`, `/substantial` or `/high`,
+  and `auth_time` (`rfc9068 §2.2.1`, `oidc core §2`); a refresh repeats
+  both (`rfc9470 §6.1`), and introspection answers them (`§6.2`). No
+  specification FerroSMART vendors fixes the `acr` value of an eIDAS
+  level; the URIs are those the eIDAS nodes exchange, our own choice.
+- **The documents.** The authorization server metadata and the OpenID
+  Provider configuration name `acr_values_supported`, the URIs of the
+  levels the providers map, lowest first (`rfc9470 §7`, `discovery §3`).
+
+The tests are `app/ferrosmart/tests/it/authorize/assurance.rs` and the SAML
+case `a_class_is_held_to_its_eidas_level_and_the_client_s_minimum`.

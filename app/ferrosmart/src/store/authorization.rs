@@ -4,6 +4,7 @@
 //! The authorization requests between the endpoint and the code, and the
 //! codes they issue (`docs/architecture.md` §13.9).
 
+use ferrohealth_smart::assurance::AssuranceLevel;
 use sqlx::Row as _;
 use sqlx::types::Json;
 
@@ -18,7 +19,7 @@ const PENDING: &str = "SELECT id, client_id, redirect_uri, scope, state, nonce, 
     audience, upstream_state, upstream_nonce, upstream_verifier, form_token, subject, fhir_user, \
     display_name, offered_scope, auth_time, extract(epoch FROM expires_at)::bigint AS expires, purpose, \
     upstream_session, launch_context, roles, prompt, max_age, ui_locales, reauthenticated, \
-    upstream_provider, person_claims, purpose_of_use FROM pending_authorization";
+    upstream_provider, person_claims, purpose_of_use, asked_acr, acr FROM pending_authorization";
 
 impl Store {
     /// Records the authorization request `pending`.
@@ -29,9 +30,9 @@ impl Store {
         sqlx::query(
             "INSERT INTO pending_authorization (id, client_id, redirect_uri, scope, state, nonce, \
              code_challenge, audience, upstream_state, upstream_nonce, upstream_verifier, form_token, \
-             expires_at, purpose, launch_context, prompt, max_age, ui_locales, upstream_provider) \
+             expires_at, purpose, launch_context, prompt, max_age, ui_locales, upstream_provider, asked_acr) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, to_timestamp($13), $14, $15, \
-             $16, $17, $18, $19)",
+             $16, $17, $18, $19, $20)",
         )
         .bind(&pending.id)
         .bind(&pending.client_id)
@@ -52,6 +53,7 @@ impl Store {
         .bind(pending.asking.max_age)
         .bind(&pending.asking.ui_locales)
         .bind(&pending.upstream_provider)
+        .bind(pending.asking.acr.map(AssuranceLevel::as_str))
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -206,8 +208,8 @@ impl Store {
     pub async fn logged_in(&self, id: &str, login: &Login) -> Result<(), StoreError> {
         sqlx::query(
             "UPDATE pending_authorization SET subject = $2, fhir_user = $3, display_name = $4, \
-             offered_scope = $5, auth_time = $6, upstream_session = $7, roles = $8, person_claims = $9 \
-             WHERE id = $1",
+             offered_scope = $5, auth_time = $6, upstream_session = $7, roles = $8, person_claims = $9, \
+             acr = $10 WHERE id = $1",
         )
         .bind(id)
         .bind(&login.subject)
@@ -218,6 +220,7 @@ impl Store {
         .bind(&login.upstream_session)
         .bind(&login.roles)
         .bind(Json(&login.person_claims))
+        .bind(login.acr.map(AssuranceLevel::as_str))
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -235,7 +238,7 @@ impl Store {
              upstream_state, upstream_nonce, upstream_verifier, form_token, subject, fhir_user, \
              display_name, offered_scope, auth_time, extract(epoch FROM expires_at)::bigint AS expires, purpose, \
              upstream_session, launch_context, roles, prompt, max_age, ui_locales, reauthenticated, \
-             upstream_provider, person_claims, purpose_of_use",
+             upstream_provider, person_claims, purpose_of_use, asked_acr, acr",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -253,7 +256,7 @@ impl Store {
             "SELECT client_id, redirect_uri, code_challenge, audience, subject, fhir_user, scope, \
              nonce, auth_time, extract(epoch FROM expires_at)::bigint AS expires, upstream_session, \
              redeemed_at IS NOT NULL AS redeemed, launch_context, roles, \
-             extract(epoch FROM approved_at)::bigint AS approved_at, person_claims FROM authorization_code \
+             extract(epoch FROM approved_at)::bigint AS approved_at, person_claims, acr FROM authorization_code \
              WHERE code_hash = $1 AND expires_at > now()",
         )
         .bind(hash)
@@ -277,6 +280,7 @@ impl Store {
                     approved_at: row.try_get("approved_at")?,
                     roles: row.try_get("roles")?,
                     person_claims: person_claims(&row)?,
+                    acr: level(&row, "acr")?,
                 },
                 row.try_get("redeemed")?,
             ))
@@ -311,9 +315,9 @@ impl Transaction {
         sqlx::query(
             "INSERT INTO authorization_code (code_hash, client_id, redirect_uri, code_challenge, \
              audience, subject, fhir_user, scope, nonce, auth_time, expires_at, upstream_session, \
-             launch_context, roles, approved_at, person_claims) \
+             launch_context, roles, approved_at, person_claims, acr) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, to_timestamp($11), $12, $13, \
-             $14, to_timestamp($15), $16)",
+             $14, to_timestamp($15), $16, $17)",
         )
         .bind(hash)
         .bind(&code.client_id)
@@ -331,6 +335,7 @@ impl Transaction {
         .bind(&code.roles)
         .bind(code.approved_at)
         .bind(Json(&code.person_claims))
+        .bind(code.acr.map(AssuranceLevel::as_str))
         .execute(&mut *self.tx)
         .await?;
         Ok(())
@@ -387,12 +392,21 @@ fn read_pending(row: &sqlx::postgres::PgRow) -> Result<Pending, StoreError> {
         roles: row.try_get("roles")?,
         person_claims: person_claims(row)?,
         purpose_of_use: row.try_get("purpose_of_use")?,
+        acr: level(row, "acr")?,
         asking: Asking {
             prompt: Prompt::of(&row.try_get::<String, _>("prompt")?),
             max_age: row.try_get("max_age")?,
             ui_locales: row.try_get("ui_locales")?,
             reauthenticated: row.try_get("reauthenticated")?,
+            acr: level(row, "asked_acr")?,
         },
+    })
+}
+
+/// Reads the eIDAS level in `column` of `row`.
+fn level(row: &sqlx::postgres::PgRow, column: &str) -> Result<Option<AssuranceLevel>, StoreError> {
+    crate::store::read_level(row, column, &|| StoreError::Corrupt {
+        client_id: String::new(),
     })
 }
 

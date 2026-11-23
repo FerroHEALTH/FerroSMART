@@ -11,6 +11,7 @@
 
 pub mod admin;
 pub mod approvals;
+pub mod assurance;
 pub mod audit;
 pub mod audit_feed;
 pub mod audit_log;

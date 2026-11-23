@@ -61,6 +61,9 @@ pub enum Fault {
     /// The person's own record, which their `fhirUser` names, cannot be
     /// read as them, or has no EHR they may see.
     NoOwnRecord,
+    /// The person's login does not reach the eIDAS level of assurance the
+    /// provider or the deployment holds it to.
+    Assurance,
     /// The server failed.
     Server,
 }
@@ -98,6 +101,12 @@ impl Fault {
                 StatusCode::FORBIDDEN,
                 "fault-own-record",
                 "fault-own-record-body",
+            ),
+            Self::Assurance => (
+                Status::Forbidden,
+                StatusCode::FORBIDDEN,
+                "fault-assurance",
+                "fault-assurance-body",
             ),
             Self::Server => (
                 Status::Fault,

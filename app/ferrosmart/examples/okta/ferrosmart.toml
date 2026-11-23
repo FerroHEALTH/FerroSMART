@@ -9,6 +9,10 @@
 
 [ferrosmart]
 issuer = "https://smart.example.org"
+# A workforce login with no eIDAS level of assurance; an EU deployment keeps the
+# substantial floor and maps its provider's values under
+# [ferrosmart.upstream.assurance] (docs/architecture.md §13.28).
+assurance_minimum = "none"
 
 [[ferrosmart.resource]]
 base = "https://ehr.example.org/fhir"

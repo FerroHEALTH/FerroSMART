@@ -132,6 +132,10 @@ cat > "$OUT/ferrosmart.toml" << TOML
 
 [ferrosmart]
 issuer = "$FERROSMART_ISSUER"
+# A workforce login with no eIDAS level of assurance; an EU deployment keeps the
+# substantial floor and maps its provider's values under
+# [ferrosmart.upstream.assurance] (docs/architecture.md §13.28).
+assurance_minimum = "none"
 
 [[ferrosmart.resource]]
 base = "http://localhost:8090/fhir"

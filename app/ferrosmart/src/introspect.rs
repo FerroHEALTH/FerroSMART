@@ -332,4 +332,11 @@ fn context(answer: &mut Map<String, Value>, grant: &GrantRecord) {
             .entry(String::from("roles"))
             .or_insert_with(|| json!(grant.roles));
     }
+    // NOTE: RFC 9470 §6.2, the introspection answer names the login's acr and auth_time.
+    if let Some(auth_time) = grant.auth_time {
+        answer.insert(String::from("auth_time"), json!(auth_time));
+    }
+    if let Some(acr) = grant.acr {
+        answer.insert(String::from("acr"), json!(crate::assurance::uri(acr)));
+    }
 }

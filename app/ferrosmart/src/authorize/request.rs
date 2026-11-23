@@ -146,7 +146,8 @@ async fn begin(
         error: "invalid_scope",
         description: "the request names no scope",
     }))?;
-    let asking = super::oidc::read(params).map_err(Stop::Deny)?;
+    let mut asking = super::oidc::read(params).map_err(Stop::Deny)?;
+    asking.acr = asking.acr.max(client.assurance_minimum);
     let launch_context = match params.get("launch") {
         Some(launch) => {
             match crate::launch::redeem(state, &client.client_id, launch, audience, scope, from)
@@ -204,6 +205,7 @@ async fn begin(
         asking,
         person_claims: crate::store::PersonClaims::default(),
         purpose_of_use: None,
+        acr: None,
     };
     state
         .store()

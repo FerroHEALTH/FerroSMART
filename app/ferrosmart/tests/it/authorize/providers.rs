@@ -26,10 +26,10 @@ impl Two {
             "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
              [[ferrosmart.upstream]]\nname = \"staff\"\nlabel = \"Hospital staff\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
-             fhir_user_claim = \"fhir_user\"\n{assertion}\
+             fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [[ferrosmart.upstream]]\nname = \"patients\"\nlabel = \"Patients\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
-             fhir_user_claim = \"fhir_user\"\n{assertion}\
+             fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = [\"user/Observation.rs\"]\n\
              [[ferrosmart.client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\", \"refresh_token\"]\n\
@@ -234,7 +234,7 @@ fn a_provider_table_is_checked_at_load() {
     let assertion = crate::support::upstream_assertion(keys.dir.path());
     let entry = |name: &str, issuer: &str| {
         format!(
-            "[[ferrosmart.upstream]]\nname = {name:?}\n\
+            "[[ferrosmart.upstream]]\nname = {name:?}\n{ASSURANCE}\
              [ferrosmart.upstream.oidc]\nissuer = {issuer:?}\nclient_id = \"ferrosmart\"\n{assertion}"
         )
     };
