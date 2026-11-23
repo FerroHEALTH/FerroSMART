@@ -22,7 +22,6 @@ mod harness;
 mod lanes;
 mod patients;
 mod refusals;
-mod vendors;
 #[cfg(feature = "test-support")]
 mod windows;
 

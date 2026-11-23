@@ -13,7 +13,6 @@ use ferrohealth_smart::config::IssuerEntry;
 use ferrohealth_smart::config::credentials::CredentialsSection;
 use ferrohealth_smart::config::credentials::OauthSection;
 use ferrohealth_smart::config::endpoint::EndpointSection;
-use ferrohealth_smart::idp::section::IdpSection;
 
 /// A client credentials table with the client secret `secret`.
 fn oauth(secret: &str, scope: &str) -> OauthSection {
@@ -40,9 +39,6 @@ fn every_section_implements_eq() {
     is_eq::<CredentialsSection>();
     is_eq::<OauthSection>();
     is_eq::<EndpointSection>();
-    is_eq::<IdpSection>();
-    #[cfg(feature = "idp-entra")]
-    is_eq::<ferrohealth_smart::idp::entra::GraphSection>();
 }
 
 #[test]
@@ -125,7 +121,7 @@ fn auth_sections_compare_their_tables() {
         toml::from_str(&format!(
             "[issuer.i1]\n\
              issuer = \"https://as.example.org\"\n\
-             kind = \"machines\"\n\
+             \
              audience = [\"{audience}\"]\n\
              [basic]\n\
              [[basic.users]]\n\

@@ -68,8 +68,7 @@ async fn introspector(
         String::from("ferro-rs"),
         SecretString::from("synthetic-secret"),
     )));
-    let mut settings =
-        IntrospectionSettings::new(issuer.uri(), AUDIENCE, auth, IssuerKind::Persons);
+    let mut settings = IntrospectionSettings::new(issuer.uri(), AUDIENCE, auth, IssuerKind::Smart);
     settings.sender_constraint = constraint;
     Ok(Introspector::discover(settings).await?)
 }

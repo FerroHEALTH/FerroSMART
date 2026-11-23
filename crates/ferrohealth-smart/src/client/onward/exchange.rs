@@ -213,8 +213,8 @@ impl Onward {
     /// [`OnwardError::Settings`] when `issuer` breaks a rule,
     /// [`OnwardError::Token`] when `credentials` lack the credential of
     /// their method or the HTTP engine cannot be built,
-    /// [`OnwardError::IssuerKind`] for a `machines` issuer, [`OnwardError::MaxOnwardLifetime`] when its profile
-    /// sets no `max_onward_lifetime`, and [`OnwardError::Federation`] when a
+    /// [`OnwardError::MaxOnwardLifetime`] when its profile sets no
+    /// `max_onward_lifetime`, and [`OnwardError::Federation`] when a
     /// `federation` issuer's table sets no `exchanges_from` or
     /// `person_mapping`.
     pub fn new(issuer: Settings, credentials: ClientCredentials) -> Result<Self, OnwardError> {
@@ -263,7 +263,7 @@ impl Onward {
             .map_err(|source| OnwardError::Settings(Box::new(source)))?;
         credentials.validate()?;
         match issuer.kind {
-            IssuerKind::Persons | IssuerKind::Patients => {}
+            IssuerKind::Smart => {}
             IssuerKind::Federation => {
                 let section = issuer
                     .federation
@@ -280,7 +280,6 @@ impl Onward {
                     });
                 }
             }
-            kind @ IssuerKind::Machines => return Err(OnwardError::IssuerKind { kind }),
         }
         let lifetime = issuer
             .profile
@@ -383,9 +382,8 @@ impl Onward {
     ///
     /// Before anything is sent: [`OnwardError::UserPrincipalRequired`] for
     /// a JWT bearer grant on behalf of a system or an organisation,
-    /// [`OnwardError::PatientRequired`] and [`OnwardError::NoPatientContext`]
-    /// at a `patients` issuer for a caller that is no patient or names no
-    /// patient context,
+    /// [`OnwardError::NoPatientContext`] for a patient's token that names
+    /// no patient context,
     /// [`OnwardError::Preview`] for a variant the profile labels preview,
     /// [`OnwardError::NoAudience`], [`OnwardError::OfflineAccess`],
     /// [`OnwardError::ActorToken`], [`OnwardError::Indicator`],
@@ -513,12 +511,9 @@ impl Onward {
         {
             return Err(OnwardError::UserPrincipalRequired);
         }
-        if issuer.kind == IssuerKind::Patients {
-            // NOTE: no specification governs this: our own design; a patients issuer
-            // carries the patient's own access, so it exchanges no one else's token.
-            if *subject.kind() != CallerKind::Patient {
-                return Err(OnwardError::PatientRequired);
-            }
+        if *subject.kind() == CallerKind::Patient {
+            // NOTE: no specification governs this: our own design; a patient's own
+            // token is exchanged for the patient in its launch context alone.
             let named = |claim| {
                 crate::roles::lookup(subject.claims(), claim).is_some_and(|value| !value.is_null())
             };

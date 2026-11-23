@@ -6,6 +6,7 @@
 
 use crate::assurance::Assessment;
 use crate::federation::person::Attributes;
+use crate::kind::Actor;
 use crate::kind::CallerKind;
 use crate::party::Outcome;
 use crate::resource::Access;
@@ -36,7 +37,7 @@ impl Caller {
             subject,
             client_id,
             kind,
-            person_key: (None, None),
+            actor: None,
             assurance: Assessment::default(),
             scope: scope
                 .split(' ')
@@ -61,8 +62,8 @@ impl Caller {
     /// configuration grants it, so the same check serves a Basic caller and
     /// a bearer caller (no specification governs this: our own design).
     ///
-    /// A Basic credential is a person's, so the caller is always a
-    /// [`CallerKind::Person`], never a [`CallerKind::System`]: a machine
+    /// A Basic credential is a user's, so the caller is always a
+    /// [`CallerKind::User`], never a [`CallerKind::System`]: a machine
     /// authenticates with the client credentials grant (RFC 6749 §4.4) and
     /// is classified from its token. A `system/` scope in `scope` is a
     /// backend service's grant (SMART App Launch 2.2.0, Scopes and Launch
@@ -74,13 +75,7 @@ impl Caller {
             .split(' ')
             .filter(|token| !crate::basic::is_system_scope(token))
             .collect();
-        let mut caller = Self::new(
-            username,
-            None,
-            &personal.join(" "),
-            None,
-            CallerKind::Person,
-        );
+        let mut caller = Self::new(username, None, &personal.join(" "), None, CallerKind::User);
         caller.via = Via::Basic;
         caller
     }
@@ -103,34 +98,33 @@ impl Caller {
 
     /// Returns what the caller's token states under its issuer's
     /// `[auth.issuer.<name>.attributes]` table (IHE IUA §3.71.4.2.2.1.1): the
-    /// professional of a `persons` caller other than `System`, and the
-    /// purposes of use of every caller, a `System` or a `patients` caller
-    /// included.
+    /// professional of a user other than a `Patient` or a `RelatedPerson`,
+    /// and the purposes of use of every caller.
     #[must_use]
     pub fn attributes(&self) -> Option<&Attributes> {
         self.attributes.as_ref()
     }
 
-    /// Returns this caller carrying the value of its issuer profile's
-    /// person key and tenant claim.
+    /// Returns this caller carrying `actor`, the current RFC 8693 §4.1
+    /// actor its token names.
     #[must_use]
-    pub fn with_person_key(mut self, key: Option<String>, tenant: Option<String>) -> Self {
-        self.person_key = (key, tenant);
+    pub fn with_actor(mut self, actor: Actor) -> Self {
+        self.actor = Some(actor);
         self
     }
 
-    /// Returns the value of the issuer profile's person key, the stable
-    /// person identifier (`sub` by default, OpenID Connect Core 1.0 §5.7).
+    /// Returns the current RFC 8693 §4.1 actor the token names, read as the
+    /// issuer asserts it.
     #[must_use]
-    pub fn person_key(&self) -> Option<&str> {
-        self.person_key.0.as_deref()
+    pub const fn actor(&self) -> Option<&Actor> {
+        self.actor.as_ref()
     }
 
-    /// Returns the value of the issuer profile's tenant claim, when it names
-    /// one and the token carries it.
+    /// Returns the `fhirUser` claim, the user's FHIR resource (SMART App
+    /// Launch 2.2.0, Scopes for requesting identity data).
     #[must_use]
-    pub fn tenant(&self) -> Option<&str> {
-        self.person_key.1.as_deref()
+    pub fn fhir_user(&self) -> Option<&str> {
+        self.claim_text("fhirUser")
     }
 
     /// Returns who stands behind the credential.
@@ -387,24 +381,34 @@ impl Caller {
             .collect()
     }
 
-    /// Returns whether the request is the natural person's own access: the
-    /// caller is a [`CallerKind::Patient`].
+    /// Returns whether the request is the natural person's own access: a
+    /// [`CallerKind::Patient`] whose `fhirUser` is the `Patient` its
+    /// `patient` launch context names, with no actor.
     ///
     /// Regulation (EU) 2025/327 Art. 5 has information the person inserts
     /// "clearly distinguishable as having been inserted by the natural
-    /// person", and Art. 9(1) gives the person information on every access
-    /// "through the health professional access service", so only two
-    /// tokens are the person's: one of a `patients` issuer that names the
-    /// record subject alone (SMART on openEHR `master08-scopes`, the
-    /// `patient` context), and one of a `persons` issuer whose profile sets
-    /// `fhir_user_patient`, through an admitted client, whose `fhirUser` is
-    /// the `Patient` its `patient` claim names and whose scopes are
-    /// `patient/` alone. Any other `persons` token whose only clinical
-    /// scopes are `patient/` is a professional confined to its launch
-    /// context. A Basic caller never is.
+    /// person", so only the patient's own token is the person's; a
+    /// representative is a `RelatedPerson` (Art 4(2)) and an actor acts for
+    /// them (RFC 8693 §4.1). A Basic caller never is.
     #[must_use]
     pub fn is_the_person(&self) -> bool {
         self.kind == CallerKind::Patient
+            && self.actor.is_none()
+            && self.patient().is_some_and(|patient| {
+                self.fhir_user()
+                    .and_then(crate::kind::fhir_user_parts)
+                    .is_some_and(|(_, id)| id == patient)
+            })
+    }
+
+    /// Returns the patient a [`CallerKind::RelatedPerson`] represents: the
+    /// `patient` launch context of their token (Regulation (EU) 2025/327
+    /// Art 4(2)).
+    #[must_use]
+    pub fn represented(&self) -> Option<&str> {
+        (self.kind == CallerKind::RelatedPerson)
+            .then(|| self.patient())
+            .flatten()
     }
 
     /// Returns the patient the request is bound to when
@@ -753,6 +757,7 @@ mod tests {
             claims.insert(String::from("patient_id"), serde_json::json!(value));
         }
         claims.insert(String::from("ehrId"), serde_json::json!("ehr-9"));
+        claims.insert(String::from("fhirUser"), serde_json::json!("Patient/123"));
         Caller::new(
             String::from("sub-1"),
             None,
@@ -770,20 +775,47 @@ mod tests {
         for kind in [
             CallerKind::Person,
             CallerKind::System,
-            CallerKind::Delegated {
-                actor: Actor {
-                    issuer: String::from("https://as.example.org"),
-                    sub: String::from("actor-1"),
-                },
-            },
-            CallerKind::Guest(Box::new(CallerKind::Person)),
+            CallerKind::Practitioner,
+            CallerKind::RelatedPerson,
+            CallerKind::User,
         ] {
             let caller = bearer(kind.clone(), Some("p-7"));
             assert!(!caller.is_the_person(), "{kind:?}");
             assert!(caller.person().is_none(), "{kind:?}");
         }
+        let acted = bearer(CallerKind::Patient, None).with_actor(Actor {
+            issuer: String::from("https://as.example.org"),
+            sub: String::from("actor-1"),
+        });
+        assert!(!acted.is_the_person(), "an actor acts for the patient");
+        let other = Caller::new(
+            String::from("sub-1"),
+            None,
+            "patient/*.rs",
+            Some(String::from("456")),
+            CallerKind::Patient,
+        )
+        .with_claims(
+            serde_json::json!({ "fhirUser": "Patient/123" })
+                .as_object()
+                .cloned()
+                .expect("an object"),
+        );
+        assert!(
+            !other.is_the_person(),
+            "a patient context other than the fhirUser"
+        );
         let basic = Caller::basic(String::from("etl"), "patient/Observation.rs");
         assert!(!basic.is_the_person(), "a Basic user is never the person");
+    }
+
+    // NOTE: Regulation (EU) 2025/327 Art 4(2): a representative acts for the
+    // patient in their launch context.
+    #[test]
+    fn a_related_person_represents_the_patient_in_context() {
+        let related = bearer(CallerKind::RelatedPerson, None);
+        assert_eq!(Some("123"), related.represented());
+        assert_eq!(None, bearer(CallerKind::Practitioner, None).represented());
     }
 
     #[test]
@@ -811,9 +843,9 @@ mod tests {
     }
 
     #[test]
-    fn a_basic_caller_is_a_person_and_never_a_system() {
+    fn a_basic_caller_is_a_user_and_never_a_system() {
         let caller = Caller::basic(String::from("etl"), "system/*.rs");
-        assert_eq!(&CallerKind::Person, caller.kind());
+        assert_eq!(&CallerKind::User, caller.kind());
         assert_ne!(&CallerKind::System, caller.kind());
     }
 

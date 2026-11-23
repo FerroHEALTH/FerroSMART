@@ -123,7 +123,7 @@ own README, which is its crates.io page.
 
 | Crate | Version | What it provides | Features |
 |---|---|---|---|
-| [`ferrohealth-smart`](crates/ferrohealth-smart/README.md) | [![crates.io](https://img.shields.io/crates/v/ferrohealth-smart?logo=rust&label=crates.io)](https://crates.io/crates/ferrohealth-smart) | The SMART App Launch 2.x and OAuth 2.0 resource server: token checks, the SMART on openEHR and SMART on FHIR scopes, roles and caller kinds, machine sign-in and the audit line | `fetch` (default), `axum`, `oidc`, `openehr`, `openehr-scopes`, `idp-entra`, `ehdsi-assertion`, `xml`, `server-tls`, `schema`, `test-support` |
+| [`ferrohealth-smart`](crates/ferrohealth-smart/README.md) | [![crates.io](https://img.shields.io/crates/v/ferrohealth-smart?logo=rust&label=crates.io)](https://crates.io/crates/ferrohealth-smart) | The SMART App Launch 2.x and OAuth 2.0 resource server: token checks, the SMART on openEHR and SMART on FHIR scopes, roles and caller kinds, machine sign-in and the audit line | `fetch` (default), `axum`, `oidc`, `openehr`, `openehr-scopes`, `ehdsi-assertion`, `xml`, `server-tls`, `schema`, `test-support` |
 | [`ferrohealth-authz`](crates/ferrohealth-authz/README.md) | [![crates.io](https://img.shields.io/crates/v/ferrohealth-authz?logo=rust&label=crates.io)](https://crates.io/crates/ferrohealth-authz) | The policy decision: attribute-based access over the authenticated caller, with an embedded Cedar engine or a remote decision point | `cedar`, `remote` |
 | [`ferrohealth-session`](crates/ferrohealth-session/README.md) | [![crates.io](https://img.shields.io/crates/v/ferrohealth-session?logo=rust&label=crates.io)](https://crates.io/crates/ferrohealth-session) | The operator consoles' OpenID Connect sign-in with PKCE and their session: a memory or sealed-cookie store, idle and absolute lifetimes, token refresh and the session-watch route | `axum`, `schema`, `test-clock` |
 
@@ -215,7 +215,7 @@ fn classify(_method: &Method, uri: &Uri, _extensions: &Extensions) -> Option<Tar
 let settings = Settings::new(
     "https://as.example.org/realms/ferro",
     "https://bridge.example.org/fhir",
-    IssuerKind::Persons,
+    IssuerKind::Smart,
 );
 let verifier: Arc<dyn Verifier> = Arc::new(ResourceServer::discover(settings).await?);
 let gate = Gate::open().with_bearer(verifier).with_realm("ferrobridge");

@@ -167,8 +167,8 @@ fn the_figure_13_request_resigned_now_is_accepted() -> Result<(), Box<dyn StdErr
 #[tokio::test]
 async fn the_figure_9_claims_set_resigned_is_bound_to_its_key() -> Result<(), Box<dyn StdError>> {
     // NOTE: RFC 9449 Figure 9, re-signed by a test issuer with `exp` and `nbf`
-    // moved to now and `aud`, `client_id`, `iat` and `jti` added for RFC 9068
-    // §2.2; its `jkt` is the test DPoP key's, the figure's key being unpublished.
+    // moved to now and `aud`, `client_id`, `iat`, `jti` and `scope` added for RFC
+    // 9068 §2.2; its `jkt` is the test DPoP key's, the figure's being unpublished.
     let bound = Bound::start().await;
     let key = dpop_key();
     let mut claims = json!({
@@ -182,6 +182,7 @@ async fn the_figure_9_claims_set_resigned_is_bound_to_its_key() -> Result<(), Bo
     claims["client_id"] = json!(crate::support::CLIENT);
     claims["iat"] = json!(now());
     claims["jti"] = json!(jti());
+    claims["scope"] = json!("openid");
     let token = crate::support::mint(&bound.key, &claims);
     let server = bound.server(SenderConstraint::None).await;
     let htu = format!("{EXTERNAL}/protectedresource");
@@ -230,6 +231,7 @@ async fn the_figure_2_claims_set_is_accepted_with_the_appendix_a_certificate()
         "client_id": crate::support::CLIENT,
         "iat": now(),
         "jti": jti(),
+        "scope": "openid",
     });
     let token = crate::support::mint(&bound.key, &claims);
     let server = bound.server(SenderConstraint::Required).await;

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! [`PartyBinding`]: the bound issuers, the Basic users' keys, the adapters
-//! and the source, and the one lookup per request.
+//! [`PartyBinding`]: the bound issuers, the Basic users' keys and the
+//! source, and the one lookup per request.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -20,7 +20,6 @@ use crate::party::Identifier;
 use crate::party::Marker;
 use crate::party::Outcome;
 use crate::party::PartyState;
-use crate::party::adapter::IdpAdapter;
 use crate::party::config::PartyError;
 use crate::party::config::PartySection;
 use crate::party::config::canonical;
@@ -29,17 +28,14 @@ use crate::party::source::Lookup;
 use crate::party::source::PartySource;
 use crate::party::source::Query;
 use crate::party::source::SourceError;
-use crate::profile::Profile;
 use crate::resource::Caller;
 use crate::resource::Via;
 
-/// One bound issuer: its table and the adapter its profile names.
+/// One bound issuer: its table.
 #[derive(Debug, Clone)]
 struct Issuer {
     /// The `[auth.issuer.<name>.party]` table.
     table: PartySection,
-    /// The adapter the issuer's profile names.
-    adapter: Option<String>,
 }
 
 /// The key a Basic user is looked up by.
@@ -63,8 +59,6 @@ pub struct PartyBinding {
     issuers: BTreeMap<String, Issuer>,
     /// The Basic users' keys, by user-id.
     basic: BTreeMap<String, BasicKey>,
-    /// The adapters, by the name a profile gives them.
-    adapters: BTreeMap<String, Arc<dyn IdpAdapter>>,
 }
 
 impl std::fmt::Debug for PartyBinding {
@@ -72,7 +66,6 @@ impl std::fmt::Debug for PartyBinding {
         f.debug_struct("PartyBinding")
             .field("issuers", &self.issuers.keys().collect::<Vec<_>>())
             .field("basic", &self.basic.len())
-            .field("adapters", &self.adapters.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
@@ -85,34 +78,23 @@ impl PartyBinding {
             source,
             issuers: BTreeMap::new(),
             basic: BTreeMap::new(),
-            adapters: BTreeMap::new(),
         }
     }
 
-    /// Returns this binding calling `adapter` for an issuer whose profile
-    /// names `name`; register adapters before the issuers that name them.
-    #[must_use]
-    pub fn with_adapter(mut self, name: impl Into<String>, adapter: Arc<dyn IdpAdapter>) -> Self {
-        self.adapters.insert(name.into(), adapter);
-        self
-    }
-
     /// Returns this binding binding the logins of the issuer `table` names,
-    /// an issuer of `kind` whose tokens follow `profile`.
+    /// an issuer of `kind`.
     ///
     /// # Errors
     ///
-    /// The [`PartyError`] naming the rule `table` breaks: an issuer that is
-    /// not `persons`, a `claim` key, an empty key, `group_claim` without
-    /// `group_identifier_issuer`, an unstable `person_key`, an adapter not
-    /// registered, or an issuer or `identifier_issuer` another table names.
+    /// The [`PartyError`] naming the rule `table` breaks: a `federation`
+    /// issuer, an empty key, `group_claim` without `group_identifier_issuer`,
+    /// or an issuer or `identifier_issuer` another table names.
     pub fn with_issuer(
         mut self,
         table: PartySection,
         kind: IssuerKind,
-        profile: &Profile,
     ) -> Result<Self, PartyError> {
-        check_table(&table, Some(kind), Some(profile))?;
+        check_table(&table, Some(kind))?;
         if self.issuers.contains_key(table.issuer.expose()) {
             return Err(PartyError::DuplicateIssuer {
                 issuer: crate::config::shown(&table.issuer),
@@ -129,53 +111,28 @@ impl PartyBinding {
                 identifier_issuer: table.identifier_issuer,
             });
         }
-        if let Some(adapter) = &profile.adapter
-            && !self.adapters.contains_key(adapter)
-        {
-            return Err(PartyError::Adapter {
-                issuer: crate::config::shown(&table.issuer),
-                adapter: adapter.clone(),
-            });
-        }
-        self.issuers.insert(
-            table.issuer.expose().to_owned(),
-            Issuer {
-                adapter: profile.adapter.clone(),
-                table,
-            },
-        );
+        self.issuers
+            .insert(table.issuer.expose().to_owned(), Issuer { table });
         Ok(self)
     }
 
-    /// Returns this binding with every adapter the `[auth.idp]` tables of
-    /// `resolved` build, binding every `[auth.issuer.<name>.party]` table of `resolved`
-    /// against its issuer's kind and profile.
+    /// Returns this binding binding every `[auth.issuer.<name>.party]` table
+    /// of `resolved` against its issuer's kind.
     ///
     /// # Errors
     ///
     /// The [`PartyError`] of [`PartyBinding::with_issuer`].
-    pub fn with_resolved(mut self, resolved: &Resolved) -> Result<Self, PartyError> {
-        for (name, adapter) in resolved.adapters.iter() {
-            self = self.with_adapter(name, Arc::clone(adapter));
-        }
-        let mut profiles: BTreeMap<&str, (IssuerKind, &Profile)> = BTreeMap::new();
-        for settings in &resolved.issuers {
-            profiles.insert(&settings.issuer, (settings.kind, &settings.profile));
-        }
-        #[cfg(feature = "fetch")]
-        for settings in &resolved.introspection {
-            profiles.insert(&settings.issuer, (settings.kind, &settings.profile));
-        }
+    pub fn with_resolved(self, resolved: &Resolved) -> Result<Self, PartyError> {
         resolved.party.iter().try_fold(self, |binding, table| {
-            let (kind, profile) =
-                profiles
-                    .get(table.issuer.expose())
-                    .copied()
-                    .ok_or_else(|| PartyError::NotPersons {
-                        issuer: crate::config::shown(&table.issuer),
-                        kind: None,
-                    })?;
-            binding.with_issuer(table.clone(), kind, profile)
+            let kind = resolved
+                .kinds
+                .get(table.issuer.expose())
+                .copied()
+                .ok_or_else(|| PartyError::NotSmart {
+                    issuer: crate::config::shown(&table.issuer),
+                    kind: None,
+                })?;
+            binding.with_issuer(table.clone(), kind)
         })
     }
 
@@ -230,8 +187,7 @@ impl PartyBinding {
 
     /// Returns what `caller`'s login resolves to, or `None` for a caller
     /// that is never looked up: a `Patient`, a `System`, an
-    /// `ExternalPerson`, an `ExternalOrganisation`, or a guest its issuer's
-    /// table does not admit.
+    /// `ExternalPerson` or an `ExternalOrganisation`.
     ///
     /// The source is called at most once, and not at all for a credential
     /// without a key, a token whose groups cannot be read, or an issuer
@@ -242,17 +198,10 @@ impl PartyBinding {
     /// [`SourceError`] when the source could not answer, which is never
     /// read as no match.
     pub async fn resolve(&self, caller: &Caller) -> Result<Option<Outcome>, SourceError> {
-        let (needed, guest) = match caller.kind() {
-            CallerKind::Guest(inner) => match needed(inner) {
-                Some(needed) => (needed, true),
-                None => return Ok(None),
-            },
-            kind => match needed(kind) {
-                Some(needed) => (needed, false),
-                None => return Ok(None),
-            },
+        let Some(needed) = needed(caller.kind()) else {
+            return Ok(None);
         };
-        let (table, adapter, key) = if caller.via() == Via::Basic {
+        let (table, key) = if caller.via() == Via::Basic {
             let Some(key) = self.basic.get(caller.subject()) else {
                 return Ok(Some(Outcome::KeyClaimMissing));
             };
@@ -263,20 +212,18 @@ impl PartyBinding {
             else {
                 return Ok(Some(Outcome::KeyClaimMissing));
             };
-            (&issuer.table, None, key.value.as_str())
+            (&issuer.table, key.value.as_str())
         } else {
             let Some(issuer) = caller.issuer().and_then(|issuer| self.issuers.get(issuer)) else {
                 return Ok(Some(Outcome::Unbound));
             };
-            if guest && !issuer.table.guests {
-                return Ok(None);
-            }
-            let Some(key) = caller.person_key().filter(|key| !key.trim().is_empty()) else {
+            let key = caller.subject();
+            if key.trim().is_empty() {
                 return Ok(Some(Outcome::KeyClaimMissing));
-            };
-            (&issuer.table, issuer.adapter.as_deref(), key)
+            }
+            (&issuer.table, key)
         };
-        let asserted = match self.groups(caller, table, adapter).await {
+        let asserted = match groups(caller, table) {
             Ok(groups) => groups,
             Err(cause) => return Ok(Some(Outcome::GroupsUnavailable(cause))),
         };
@@ -289,50 +236,37 @@ impl PartyBinding {
                 .then_some(table.group_identifier_issuer.as_str()),
         };
         let lookup = self.source.lookup(&query).await?;
-        Ok(Some(decide(lookup, table, value, needed, guest, &asserted)))
+        Ok(Some(decide(lookup, table, value, needed, &asserted)))
     }
+}
 
-    /// Returns the groups `caller`'s token asserts under `table`, through
-    /// `adapter` on an overage, or why they cannot be read.
-    async fn groups(
-        &self,
-        caller: &Caller,
-        table: &PartySection,
-        adapter: Option<&str>,
-    ) -> Result<BTreeSet<String>, GroupsCause> {
-        if table.group_claim.is_empty() {
-            return Ok(BTreeSet::new());
-        }
-        let claims = caller.claims();
-        // NOTE: the overage markers the issuer profiles document, our own design:
-        // `_claim_names` names the group claim, or `hasgroups` is `true`, in its place.
-        let overage = claims
-            .get("_claim_names")
-            .and_then(Value::as_object)
-            .is_some_and(|names| names.contains_key(&table.group_claim))
-            || claims.get("hasgroups") == Some(&Value::Bool(true));
-        if overage {
-            let adapter = adapter
-                .and_then(|name| self.adapters.get(name))
-                .ok_or(GroupsCause::Overage)?;
-            return adapter
-                .resolve_groups(caller)
-                .await
-                .map(|groups| groups.into_iter().collect())
-                .map_err(GroupsCause::Adapter);
-        }
-        match claims.get(&table.group_claim) {
-            None => Ok(BTreeSet::new()),
-            Some(Value::Array(items)) => items
-                .iter()
-                .map(|item| {
-                    item.as_str()
-                        .map(str::to_owned)
-                        .ok_or(GroupsCause::Malformed)
-                })
-                .collect(),
-            Some(_) => Err(GroupsCause::Malformed),
-        }
+/// Returns the groups `caller`'s token asserts under `table`, or why they
+/// cannot be read.
+fn groups(caller: &Caller, table: &PartySection) -> Result<BTreeSet<String>, GroupsCause> {
+    if table.group_claim.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let claims = caller.claims();
+    // NOTE: OpenID Connect Core 1.0 §5.6.2: `_claim_names` names a claim the
+    // token carries elsewhere, so the group claim cannot be read from it.
+    if claims
+        .get("_claim_names")
+        .and_then(Value::as_object)
+        .is_some_and(|names| names.contains_key(&table.group_claim))
+    {
+        return Err(GroupsCause::Overage);
+    }
+    match claims.get(&table.group_claim) {
+        None => Ok(BTreeSet::new()),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .map(str::to_owned)
+                    .ok_or(GroupsCause::Malformed)
+            })
+            .collect(),
+        Some(_) => Err(GroupsCause::Malformed),
     }
 }
 
@@ -340,8 +274,11 @@ impl PartyBinding {
 /// is never looked up.
 const fn needed(kind: &CallerKind) -> Option<Marker> {
     match kind {
-        CallerKind::Person | CallerKind::Delegated { .. } => Some(Marker::Professional),
-        CallerKind::Representative { .. } => Some(Marker::Representative),
+        CallerKind::Practitioner
+        | CallerKind::PractitionerRole
+        | CallerKind::Person
+        | CallerKind::User => Some(Marker::Professional),
+        CallerKind::RelatedPerson => Some(Marker::Representative),
         _ => None,
     }
 }
@@ -353,7 +290,6 @@ fn decide(
     table: &PartySection,
     value: String,
     needed: Marker,
-    guest: bool,
     asserted: &BTreeSet<String>,
 ) -> Outcome {
     let mut parties = match lookup {
@@ -401,6 +337,5 @@ fn decide(
         groups,
         represents,
         provisional: state == PartyState::Incomplete,
-        guest,
     }))
 }

@@ -2145,11 +2145,11 @@ async fn a_patient_gets_their_own_record_in_context_with_no_picker_and_no_role()
         // NOTE: docs/architecture.md §3.13, a resource server reads the patient's
         // own token under the `ferrosmart` preset as the person (#681).
         let (_, _, jwks) = smart.get("/jwks", None).await;
-        let caller = crate::support::read_under_preset(
+        let caller = crate::support::read_at_resource_server(
             &serde_json::from_str(&jwks).expect("a JWK Set"),
             ISSUER,
             &base,
-            ferrohealth_smart::kind::IssuerKind::Persons,
+            ferrohealth_smart::kind::IssuerKind::Smart,
             &ferrohealth_smart::profile::ProfileKeys::default(),
             body["access_token"].as_str().expect("a token"),
         )
