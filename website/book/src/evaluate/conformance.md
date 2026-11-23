@@ -120,13 +120,12 @@ and the architecture records it as its own design:
   what the person approves ([clients, roles and consent](../configure/clients.md)).
 - **Consent where it protects the person.** A user flow shows the consent
   page unless the person remembered that choice for that client and
-  resource server, or an administrator approved the client and the
-  request stays within that approval: for the organisation's
-  professionals (with `patient/` scopes only in an EHR launch), and for
-  the organisation's own app (`first_party`) its patients too, lasting
-  access included (OpenID Connect Core 1.0 §3.1.2.4, "previous
-  administrative consent"). An app of another party always shows a
-  patient the page (SMART App Launch 2.2.0, Best Practices). A public
+  resource server, or the administrator's registration answers: for the
+  organisation's professionals, and for an app marked `first_party` its
+  patients too, lasting access included (OpenID Connect Core 1.0
+  §3.1.2.4, "previous administrative consent"). An app of another party
+  always shows a patient the page (SMART App Launch 2.2.0, Best
+  Practices; Regulation (EU) 2025/327 Art 3). A public
   client without a claimed `https` redirect, and an app's
   `prompt=consent`, always show the page (RFC 8252 §8.6; OpenID Connect
   Core 1.0 §3.1.2.1). Every app holding live access can be disconnected on

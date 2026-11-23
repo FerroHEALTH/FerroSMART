@@ -105,7 +105,7 @@ async fn apply_clients(
                 secrecy::ExposeSecret::expose_secret(secret)
             );
         }
-        if let Some(warning) = crate::clients::unassured_first_party(client) {
+        if let Some(warning) = crate::clients::unassured_public(client) {
             println!("ferrosmart: warning: {warning}");
         }
     }

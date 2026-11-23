@@ -292,12 +292,7 @@ fn redirecting(auth_method: AuthMethod, redirect: &str, first_party: bool) -> Cl
         redirect_uris: vec![redirect.to_owned()],
         grant_types: vec![GrantType::AuthorizationCode],
         scopes: vec![String::from("openid")],
-        organisation_approval: first_party.then(|| ferrosmart::clients::ApprovalMetadata {
-            scopes: vec![String::from("openid")],
-            approved_by: String::from("Synthetic Administrator"),
-            approved_at: String::from("2026-11-19T09:00:00Z"),
-            first_party: true,
-        }),
+        first_party,
         ..ClientMetadata::default()
     }
 }
@@ -329,13 +324,13 @@ fn a_confidential_client_is_assured_whatever_its_redirect() {
     );
 }
 
-// NOTE: RFC 8252 §8.6, client apply warns of a first-party public app no sign-in
-// can assure, since every one would show the consent page.
+// NOTE: RFC 8252 §8.6, client apply warns of a public app no sign-in can assure,
+// since every one would show the consent page the registration would spare.
 #[test]
-fn a_first_party_public_app_without_a_claimed_https_redirect_is_warned_of() {
+fn a_public_app_without_a_claimed_https_redirect_is_warned_of() {
     let warned = |kind, redirect, first_party| {
         let client = admit(&redirecting(kind, redirect, first_party)).expect("admitted");
-        ferrosmart::clients::unassured_first_party(&client)
+        ferrosmart::clients::unassured_public(&client)
     };
     let warning = warned(AuthMethod::None, "com.example.app:/callback", true);
     assert!(
@@ -353,8 +348,8 @@ fn a_first_party_public_app_without_a_claimed_https_redirect_is_warned_of() {
         "a claimed https redirect"
     );
     assert!(
-        warned(AuthMethod::None, "com.example.app:/callback", false).is_none(),
-        "no first-party approval"
+        warned(AuthMethod::None, "com.example.app:/callback", false).is_some(),
+        "an app of another party"
     );
     assert!(
         warned(AuthMethod::PrivateKeyJwt, "com.example.app:/callback", true).is_none(),

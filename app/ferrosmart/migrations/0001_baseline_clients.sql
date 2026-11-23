@@ -21,9 +21,6 @@ CREATE TABLE client (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     secret_hash text,
-    approved_scope text[],
-    approved_by text,
-    approved_at timestamptz,
     launch_uri text CONSTRAINT client_launch_uri_key UNIQUE,
     first_party boolean NOT NULL DEFAULT false,
     client_uri text,
@@ -43,12 +40,6 @@ CREATE TABLE client (
     CONSTRAINT client_secret_check
         CHECK ((token_endpoint_auth_method IN ('client_secret_basic', 'client_secret_post'))
             = (secret_hash IS NOT NULL)),
-    -- The organisation approval is whole or absent, and the first-party mark needs it.
-    CONSTRAINT client_approval_check
-        CHECK ((approved_scope IS NULL) = (approved_by IS NULL)
-            AND (approved_by IS NULL) = (approved_at IS NULL)),
-    CONSTRAINT client_first_party_check CHECK (NOT first_party OR approved_at IS NOT NULL),
     -- RFC 7591 section 5: an app's own registration is self-asserted.
-    CONSTRAINT client_self_unapproved
-        CHECK (registered_by <> 'self' OR (approved_scope IS NULL AND NOT first_party))
+    CONSTRAINT client_self_not_first_party CHECK (registered_by <> 'self' OR NOT first_party)
 );

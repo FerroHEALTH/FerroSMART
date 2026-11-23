@@ -256,7 +256,7 @@ impl Store {
             "SELECT client_id, redirect_uri, code_challenge, audience, subject, fhir_user, scope, \
              nonce, auth_time, extract(epoch FROM expires_at)::bigint AS expires, upstream_session, \
              redeemed_at IS NOT NULL AS redeemed, launch_context, roles, \
-             extract(epoch FROM approved_at)::bigint AS approved_at, person_claims, acr FROM authorization_code \
+             basis, person_claims, acr FROM authorization_code \
              WHERE code_hash = $1 AND expires_at > now()",
         )
         .bind(hash)
@@ -277,7 +277,7 @@ impl Store {
                     expires_at: row.try_get("expires")?,
                     upstream_session: row.try_get("upstream_session")?,
                     launch_context: launch_context(&row)?,
-                    approved_at: row.try_get("approved_at")?,
+                    basis: row.try_get("basis")?,
                     roles: row.try_get("roles")?,
                     person_claims: person_claims(&row)?,
                     acr: level(&row, "acr")?,
@@ -315,9 +315,9 @@ impl Transaction {
         sqlx::query(
             "INSERT INTO authorization_code (code_hash, client_id, redirect_uri, code_challenge, \
              audience, subject, fhir_user, scope, nonce, auth_time, expires_at, upstream_session, \
-             launch_context, roles, approved_at, person_claims, acr) \
+             launch_context, roles, basis, person_claims, acr) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, to_timestamp($11), $12, $13, \
-             $14, to_timestamp($15), $16, $17)",
+             $14, $15, $16, $17)",
         )
         .bind(hash)
         .bind(&code.client_id)
@@ -333,7 +333,7 @@ impl Transaction {
         .bind(&code.upstream_session)
         .bind(code.launch_context.as_ref().map(Json))
         .bind(&code.roles)
-        .bind(code.approved_at)
+        .bind(&code.basis)
         .bind(Json(&code.person_claims))
         .bind(code.acr.map(AssuranceLevel::as_str))
         .execute(&mut *self.tx)

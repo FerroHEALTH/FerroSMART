@@ -121,7 +121,7 @@ pub async fn manage_post(
 }
 
 /// Disconnects `client_id` from `subject` with its record in one
-/// transaction, leaving any organisation approval of the client in place.
+/// transaction, leaving the client's registration in place.
 async fn disconnect(
     state: &AppState,
     subject: &str,
@@ -173,28 +173,25 @@ async fn manage_page(state: &AppState, headers: &HeaderMap, pending: &Pending) -
         Ok(connected) => connected,
         Err(error) => return pages::server_error(state, &error),
     };
-    let mut apps: std::collections::BTreeMap<String, (String, Option<Access>, bool)> = consents
-        .into_iter()
-        .map(|(client_id, scope)| (client_id, (scope, None, false)))
-        .collect();
+    let mut apps: std::collections::BTreeMap<String, (String, Option<Access>, bool, bool)> =
+        consents
+            .into_iter()
+            .map(|(client_id, scope)| (client_id, (scope, None, false, false)))
+            .collect();
     for app in connected {
         apps.entry(app.client_id)
-            .and_modify(|(_, access, organisation)| {
+            .and_modify(|(_, access, organisation, first_party)| {
                 *access = app.access;
                 *organisation = app.organisation;
+                *first_party = app.first_party;
             })
-            .or_insert((app.scope, app.access, app.organisation));
+            .or_insert((app.scope, app.access, app.organisation, app.first_party));
     }
     let mut named = Vec::with_capacity(apps.len());
-    for (client_id, (scope, access, organisation)) in apps {
-        let (name, first_party) = match state.store().client(&client_id).await {
-            Ok(Some(client)) => {
-                let first_party = client
-                    .approval()
-                    .is_some_and(|approval| approval.first_party);
-                (client.name, first_party)
-            }
-            Ok(None) => (client_id.clone(), false),
+    for (client_id, (scope, access, organisation, first_party)) in apps {
+        let name = match state.store().client(&client_id).await {
+            Ok(Some(client)) => client.name,
+            Ok(None) => client_id.clone(),
             Err(error) => return pages::server_error(state, &error),
         };
         named.push(pages::Remembered {
@@ -203,7 +200,7 @@ async fn manage_page(state: &AppState, headers: &HeaderMap, pending: &Pending) -
             scope,
             access,
             organisation,
-            first_party: organisation && first_party,
+            first_party,
         });
     }
     pages::manage(state, headers, pending, &named)

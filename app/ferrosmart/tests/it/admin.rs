@@ -18,17 +18,16 @@ use crate::support::{RESOURCE, audit, events, records};
 const ADMIN_SCOPE: &str = "system/admin";
 
 /// The approval time every approving document names.
-const APPROVED_AT: &str = "2026-11-19T09:00:00Z";
-
 /// Returns an access token of the `admin` client for FerroSMART's own
 /// issuer, carrying the admin scope.
 async fn admin_token(server: &Server) -> String {
     server.token("admin", ADMIN_SCOPE, ISSUER).await
 }
 
-/// Returns a public app the organisation approved for its staff.
-fn staff_app(approved: bool) -> Value {
-    let mut document = json!({
+/// Returns a public app an administrator registered, first party when
+/// `first_party`.
+fn staff_app(first_party: bool) -> Value {
+    json!({
         "client_id": "staff-app",
         "client_name": "Staff app",
         "token_endpoint_auth_method": "none",
@@ -36,18 +35,8 @@ fn staff_app(approved: bool) -> Value {
         "resources": [RESOURCE],
         "scope": "openid fhirUser launch user/Observation.rs offline_access",
         "grant_types": ["authorization_code", "refresh_token"],
-    });
-    if approved && let Some(members) = document.as_object_mut() {
-        members.insert(
-            String::from("organisation_approval"),
-            json!({
-                "scopes": ["openid", "launch", "user/Observation.rs"],
-                "approved_by": "Synthetic Administrator",
-                "approved_at": APPROVED_AT,
-            }),
-        );
-    }
-    document
+        "first_party": first_party,
+    })
 }
 
 /// Returns the `error` of `answer`, asserting its status.
@@ -62,13 +51,9 @@ fn refused(answer: &Answer, status: StatusCode) -> String {
 }
 
 /// Records an `offline_access` grant of `client` for `alice`, issued on
-/// the approval of `approved_at` when one is named, with a refresh token
-/// and an access token; returns the grant id and both tokens.
-async fn granted(
-    server: &Server,
-    client: &str,
-    approved_at: Option<i64>,
-) -> (String, String, String) {
+/// `basis`, with a refresh token and an access token; returns the grant id
+/// and both tokens.
+async fn granted(server: &Server, client: &str, basis: &str) -> (String, String, String) {
     let id = unique();
     server
         .store
@@ -76,14 +61,14 @@ async fn granted(
             id: &id,
             client_id: client,
             subject: "alice",
-            fhir_user: Some("Practitioner/7"),
+            fhir_user: Some("Patient/7"),
             audience: RESOURCE,
             scope: "openid launch user/Observation.rs offline_access",
             context: &json!({}),
             auth_time: Some(jiff::Timestamp::now().as_second()),
             access: Some(Access::Offline),
             upstream_session: None,
-            approved_at,
+            basis: Some(basis),
             roles: &[],
             acr: None,
         })
@@ -475,7 +460,6 @@ async fn every_change_is_recorded_naming_the_admin_client_and_the_client_changed
     let codes = events(&kept);
     for code in [
         "client-created",
-        "organisation-approval-withdrawn",
         "client-updated",
         "client-disabled",
         "client-enabled",
@@ -514,7 +498,7 @@ async fn disabling_a_client_revokes_its_grants_and_tokens_at_once_at_every_repli
     let server = Server::start().await;
     let replica = server.replica().await;
     let token = admin_token(&server).await;
-    let (_, refresh, access) = granted(&server, "app", None).await;
+    let (_, refresh, access) = granted(&server, "app", "page").await;
     let backend = replica.token("export", "system/Patient.rs", RESOURCE).await;
     let (status, _, _) = server
         .call(
@@ -590,28 +574,28 @@ async fn disabling_a_client_revokes_its_grants_and_tokens_at_once_at_every_repli
     server.stop().await;
 }
 
+// NOTE: docs/architecture.md §13.6 item 6, clearing first_party revokes the grants
+// issued with no page on it, in the change's transaction.
 #[tokio::test]
-async fn withdrawing_an_approval_revokes_what_was_issued_on_it_at_every_replica() {
+async fn clearing_first_party_revokes_what_was_issued_on_it_at_every_replica() {
     let server = Server::start().await;
     let replica = server.replica().await;
     let token = admin_token(&server).await;
-    let approved_at = APPROVED_AT
-        .parse::<jiff::Timestamp>()
-        .expect("an instant")
-        .as_second();
     for (method, path, body) in [
         (Method::POST, "/admin/clients", staff_app(true)),
         (Method::PUT, "/admin/clients/staff-app", staff_app(true)),
     ] {
         let (status, _, answer) = server.call(method, path, Some(&body), Some(&token)).await;
         assert!(status.is_success(), "{answer}");
+        assert_eq!(json!(true), answer["first_party"], "{answer}");
     }
-    let (_, refresh, access) = granted(&server, "staff-app", Some(approved_at)).await;
-    let (_, _, consented) = granted(&server, "staff-app", None).await;
+    let (_, refresh, access) = granted(&server, "staff-app", "first-party").await;
+    let (_, _, consented) = granted(&server, "staff-app", "page").await;
+    let (_, _, staff) = granted(&server, "staff-app", "administrative").await;
     assert_eq!(
         json!(true),
         replica.introspect(&access).await["active"],
-        "an update giving the same approval keeps it"
+        "an update that keeps the mark keeps its grants"
     );
     let (status, _, _) = server
         .call(
@@ -627,41 +611,23 @@ async fn withdrawing_an_approval_revokes_what_was_issued_on_it_at_every_replica(
         .post("/token", &refresh_form("staff-app", &refresh), None)
         .await;
     assert_eq!(json!("invalid_grant"), body["error"], "{status} {body}");
-    assert_eq!(
-        json!(true),
-        replica.introspect(&consented).await["active"],
-        "a grant the person consented to is not the approval's"
+    for (kept, what) in [
+        (&consented, "a grant the person consented to"),
+        (&staff, "a professional's grant"),
+    ] {
+        assert_eq!(
+            json!(true),
+            replica.introspect(kept).await["active"],
+            "{what} is not the mark's"
+        );
+    }
+    let updated = records(&server.store).await;
+    assert!(
+        updated
+            .iter()
+            .any(|record| record.to_string().contains("\"cleared\"")),
+        "the change records the cleared mark"
     );
-    let (status, _, _) = server
-        .call(
-            Method::PUT,
-            "/admin/clients/staff-app",
-            Some(&staff_app(true)),
-            Some(&token),
-        )
-        .await;
-    assert_eq!(StatusCode::OK, status);
-    let (_, _, again) = granted(&server, "staff-app", Some(approved_at)).await;
-    let (status, _, body) = replica
-        .call(
-            Method::DELETE,
-            "/admin/clients/staff-app/organisation_approval",
-            None,
-            Some(&token),
-        )
-        .await;
-    assert_eq!(StatusCode::OK, status, "{body}");
-    assert!(body.get("organisation_approval").is_none(), "{body}");
-    assert_eq!(inactive(), server.introspect(&again).await);
-    let answer = replica
-        .call(
-            Method::DELETE,
-            "/admin/clients/staff-app/organisation_approval",
-            None,
-            Some(&token),
-        )
-        .await;
-    assert_eq!("unchanged", refused(&answer, StatusCode::CONFLICT));
     replica.stop().await;
     server.stop().await;
 }

@@ -6,8 +6,8 @@
 //!
 //! [`apply`] writes a client document the way the API does, for `ferrosmart
 //! client apply`. Every change commits with its audit record, and a change
-//! that withdraws an organisation approval or disables a client revokes the
-//! grants and tokens it covered in the same transaction, so the next
+//! that clears a first-party mark or disables a client revokes the grants
+//! and tokens it covered in the same transaction, so the next
 //! request at any replica sees it. No specification governs the admin API:
 //! our own design, since RFC 6749 §2 leaves registration to the server.
 
@@ -22,7 +22,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequestParts, Path, State};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{get, post};
 use ferrohealth_server::run::chain;
 use ferrohealth_smart::resource::Access;
 use http::{HeaderValue, StatusCode, header};
@@ -44,8 +44,6 @@ pub const CLIENT_ROUTE: &str = "/admin/clients/{client_id}";
 pub const DISABLE_ROUTE: &str = "/admin/clients/{client_id}/disable";
 /// Enabling one disabled client.
 pub const ENABLE_ROUTE: &str = "/admin/clients/{client_id}/enable";
-/// One client's organisation approval, which `DELETE` withdraws.
-pub const APPROVAL_ROUTE: &str = "/admin/clients/{client_id}/organisation_approval";
 /// The signing key ring.
 pub const KEYS_ROUTE: &str = "/admin/keys";
 
@@ -56,7 +54,6 @@ pub fn router(state: &Arc<AppState>) -> Router<Arc<AppState>> {
         .route(CLIENT_ROUTE, get(read).put(update))
         .route(DISABLE_ROUTE, post(disable))
         .route(ENABLE_ROUTE, post(enable))
-        .route(APPROVAL_ROUTE, delete(withdraw))
         .route(KEYS_ROUTE, get(keys))
         .layer(DefaultBodyLimit::max(DOCUMENT_LIMIT))
         .route_layer(guard::layer(Arc::clone(state)))
@@ -254,8 +251,8 @@ struct Change<'a> {
     from: std::net::IpAddr,
 }
 
-/// What a change's record says: the event, the client changed, the
-/// details, and the approval it withdrew with the grants revoked on it.
+/// What a change's record says: the event, the client changed and the
+/// details.
 struct Record<'a> {
     /// What happened.
     event: audit::Event,
@@ -263,8 +260,6 @@ struct Record<'a> {
     client_id: &'a str,
     /// What the record holds of the change.
     details: Vec<(&'static str, String)>,
-    /// The approval withdrawn, with the grants revoked on it.
-    withdrawn: Option<(&'a crate::clients::Approval, u64)>,
 }
 
 impl<'a> Change<'a> {
@@ -287,13 +282,9 @@ impl<'a> Change<'a> {
         Ok((tx, stored))
     }
 
-    /// Commits `tx` with `record`, the record of the approval it withdrew
-    /// first, and returns the client as the store then holds it.
-    async fn finish(
-        &self,
-        mut tx: Transaction,
-        record: Record<'_>,
-    ) -> Result<Registered, AdminError> {
+    /// Commits `tx` with `record` and returns the client as the store then
+    /// holds it.
+    async fn finish(&self, tx: Transaction, record: Record<'_>) -> Result<Registered, AdminError> {
         let client_id = record.client_id;
         let endpoint = self
             .state
@@ -311,23 +302,6 @@ impl<'a> Change<'a> {
                 details,
             }
         };
-        if let Some((approval, revoked)) = record.withdrawn {
-            let withdrawn = happening(
-                audit::Event::ApprovalWithdrawn,
-                withdrawn_details(approval, revoked),
-            );
-            let row = self
-                .state
-                .audit()
-                .row(
-                    &audit::happened(&withdrawn),
-                    withdrawn.event.code(),
-                    None,
-                    self.by,
-                )
-                .map_err(AdminError::Record)?;
-            tx.record(&row).await?;
-        }
         self.state
             .audit()
             .commit_happening(tx, &happening(record.event, record.details))
@@ -353,8 +327,7 @@ impl<'a> Change<'a> {
         document: ClientDocument,
     ) -> Result<Applied, AdminError> {
         let client_id = document.client_id().to_owned();
-        let (section, mut material) =
-            document.registration(&client_id, None, jiff::Timestamp::now().as_second());
+        let (section, mut material) = document.registration(&client_id, None);
         let secret = issue(&section, &mut material)?;
         let client = crate::clients::resolve(&section, material)?;
         check_names(self.state, &client)?;
@@ -365,7 +338,6 @@ impl<'a> Change<'a> {
             event: audit::Event::ClientCreated,
             client_id: &client_id,
             details: described(&client),
-            withdrawn: None,
         };
         Ok(Applied {
             registered: self.finish(tx, record).await?,
@@ -375,9 +347,8 @@ impl<'a> Change<'a> {
     }
 
     /// Replaces the client `stored`, its row locked in `tx`, with the one
-    /// `document` describes. An organisation approval the document no
-    /// longer gives in the same form is withdrawn, every grant issued on it
-    /// revoked with its tokens.
+    /// `document` describes. Clearing its first-party mark revokes every
+    /// grant issued with no page on it, with its tokens.
     async fn replace(
         &self,
         mut tx: Transaction,
@@ -385,32 +356,21 @@ impl<'a> Change<'a> {
         document: ClientDocument,
     ) -> Result<Applied, AdminError> {
         let client_id = stored.client.client_id.as_str();
-        let (section, mut material) = document.registration(
-            client_id,
-            Some(&stored.client),
-            jiff::Timestamp::now().as_second(),
-        );
+        let (section, mut material) = document.registration(client_id, Some(&stored.client));
         let secret = issue(&section, &mut material)?;
         let client = crate::clients::resolve(&section, material)?;
         check_names(self.state, &client)?;
-        let lapsed = stored
-            .client
-            .approval()
-            .filter(|approval| client.approval() != Some(*approval));
-        let withdrawn = match lapsed {
-            Some(approval) => Some((
-                approval,
-                tx.withdraw_approval(client_id, approval.approved_at)
-                    .await?,
-            )),
-            None => None,
-        };
+        let mut details = described(&client);
+        if stored.client.first_party() && !client.first_party() {
+            let revoked = tx.revoke_first_party(client_id).await?;
+            details.push(("first_party", String::from("cleared")));
+            details.push(("revoked", revoked.to_string()));
+        }
         tx.update_client(&client).await?;
         let record = Record {
             event: audit::Event::ClientUpdated,
             client_id,
-            details: described(&client),
-            withdrawn,
+            details,
         };
         Ok(Applied {
             registered: self.finish(tx, record).await?,
@@ -492,25 +452,9 @@ pub async fn issue_secret(
         event: audit::Event::ClientUpdated,
         client_id,
         details: vec![("client_secret", String::from("issued"))],
-        withdrawn: None,
     };
     change.finish(tx, record).await?;
     Ok(issued.secret)
-}
-
-/// What the record of a withdrawn `approval` holds: its scopes, approver,
-/// time and mark, and the `revoked` grants issued on it.
-fn withdrawn_details(
-    approval: &crate::clients::Approval,
-    revoked: u64,
-) -> Vec<(&'static str, String)> {
-    vec![
-        ("scope", approval.scopes.join(" ")),
-        ("approved_by", approval.approved_by.clone()),
-        ("approved_at", approval.approved_at.to_string()),
-        ("first_party", approval.first_party.to_string()),
-        ("revoked", revoked.to_string()),
-    ]
 }
 
 /// What a change's record says of `client`: never a secret or a key.
@@ -654,7 +598,6 @@ async fn disable(on: OnClient) -> Result<Response, AdminError> {
         event: audit::Event::ClientDisabled,
         client_id,
         details,
-        withdrawn: None,
     };
     let registered = change.finish(tx, record).await?;
     Ok(answer(StatusCode::OK, &registered))
@@ -671,33 +614,6 @@ async fn enable(on: OnClient) -> Result<Response, AdminError> {
         event: audit::Event::ClientEnabled,
         client_id,
         details: Vec::new(),
-        withdrawn: None,
-    };
-    let registered = change.finish(tx, record).await?;
-    Ok(answer(StatusCode::OK, &registered))
-}
-
-/// `DELETE /admin/clients/{client_id}/organisation_approval`: withdraws the
-/// approval, every grant issued on it revoked with its tokens.
-async fn withdraw(on: OnClient) -> Result<Response, AdminError> {
-    let (change, client_id) = (on.change(), on.client_id.as_str());
-    let (mut tx, stored) = change.lock(client_id).await?;
-    let approval = stored
-        .client
-        .approval()
-        .cloned()
-        .ok_or(AdminError::Unchanged(
-            "the client holds no organisation approval",
-        ))?;
-    let revoked = tx
-        .withdraw_approval(client_id, approval.approved_at)
-        .await?;
-    tx.clear_approval(client_id).await?;
-    let record = Record {
-        event: audit::Event::ClientUpdated,
-        client_id,
-        details: vec![("organisation_approval", String::from("withdrawn"))],
-        withdrawn: Some((&approval, revoked)),
     };
     let registered = change.finish(tx, record).await?;
     Ok(answer(StatusCode::OK, &registered))

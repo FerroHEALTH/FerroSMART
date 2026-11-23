@@ -36,6 +36,8 @@ const ISSUER: &str = "https://smart.example.org";
 /// The app's redirect URI.
 const REDIRECT: &str = "https://app.example.org/callback";
 const POST_LOGOUT: &str = "https://app.example.org/logged-out";
+/// The `fhirUser` of the person a case logs in as unless it names another.
+pub(crate) const PERSON: &str = "RelatedPerson/synthetic-1";
 /// FerroSMART's client id at the provider.
 pub(crate) const UPSTREAM_CLIENT: &str = "ferrosmart";
 /// The deployment's SMART style document.
@@ -92,9 +94,10 @@ impl Provider {
     }
 
     /// Mounts the code exchange answering an ID Token with `nonce` for a
-    /// person holding `roles`.
+    /// person holding `roles`, a `RelatedPerson` and so one the consent page
+    /// asks (`docs/architecture.md` §13.6 item 6).
     async fn answer(&self, nonce: &str, roles: &[&str]) {
-        self.answer_as(nonce, roles, "synthetic-person", "Practitioner/synthetic-1")
+        self.answer_as(nonce, roles, "synthetic-person", PERSON)
             .await;
     }
 
@@ -588,7 +591,7 @@ async fn a_standalone_launch_logs_in_upstream_asks_consent_and_issues_tokens() {
     assert_eq!(json!(ISSUER), claims["iss"]);
     assert_eq!(json!("app"), claims["aud"]);
     assert_eq!(json!("synthetic-nonce"), claims["nonce"]);
-    assert_eq!(json!("Practitioner/synthetic-1"), claims["fhirUser"]);
+    assert_eq!(json!(PERSON), claims["fhirUser"]);
     assert_ne!(
         json!("synthetic-person"),
         claims["sub"],
@@ -658,7 +661,7 @@ async fn a_person_without_a_granting_role_sees_which_role_is_missing() {
     );
     assert!(page.contains("A role that would: clinician."), "{page}");
     assert!(
-        !page.contains("synthetic-person") && !page.contains("Practitioner/synthetic-1"),
+        !page.contains("synthetic-person") && !page.contains(PERSON),
         "no claim value: {page}"
     );
     assert!(
@@ -806,7 +809,7 @@ async fn with_claims(smart: &Smart, scope: &str, extra: &Value) -> Value {
     let cookie = set_cookie(&headers);
     let mut claims = json!({
         "sub": "synthetic-person", "roles": ["clinician"],
-        "fhir_user": "Practitioner/synthetic-1",
+        "fhir_user": PERSON,
         "nonce": param(&upstream, "nonce").expect("a nonce")
     });
     if let (Some(base), Some(over)) = (claims.as_object_mut(), extra.as_object()) {
@@ -1699,7 +1702,7 @@ async fn an_offline_access_launch_issues_a_refresh_token_that_rotates() {
     )
     .expect("claims");
     // NOTE: docs/architecture.md §13.6 item 2, fhirUser rides in the access token.
-    assert_eq!(json!("Practitioner/synthetic-1"), access["fhirUser"]);
+    assert_eq!(json!(PERSON), access["fhirUser"]);
     let second = renewed["refresh_token"].as_str().expect("rotated");
     assert_ne!(first, second);
     // NOTE: RFC 9700 §4.14.2, the rotated token presented again after the repeat
@@ -2000,7 +2003,9 @@ async fn to_picker_asking(
     subject: &str,
     fhir_user: &str,
 ) -> String {
-    let path = authorize_path(&[("aud", base), ("scope", scope)]);
+    // NOTE: OpenID Connect Core 1.0 §3.1.2.1, prompt=consent drives the page that a
+    // professional's administered app would spare, which the picker cases go on to.
+    let path = authorize_path(&[("aud", base), ("scope", scope), ("prompt", "consent")]);
     let (_, headers, _) = smart.get(&path, None).await;
     let upstream = location(&headers);
     let cookie = set_cookie(&headers);
@@ -2518,7 +2523,6 @@ async fn a_token_response_is_readable_from_the_app_s_origin_alone() {
     smart.stop().await;
 }
 
-mod approval;
 mod assurance;
 mod consent_basis;
 mod core_op;
@@ -2531,6 +2535,7 @@ mod picker_purpose;
 mod preset;
 mod providers;
 mod public_redirect;
+mod registration;
 mod saml;
 mod secret_basic;
 mod self_registered;

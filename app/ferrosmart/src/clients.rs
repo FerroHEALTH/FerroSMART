@@ -169,78 +169,9 @@ pub struct ClientMetadata {
     pub policy_uri: String,
     /// The app's terms of service (RFC 7591 §2 `tos_uri`); empty for none.
     pub tos_uri: String,
-    /// The administrator's approval of the client for the whole
-    /// organisation, under which a professional sees no consent page
-    /// (`docs/architecture.md` §13.6 item 6).
-    pub organisation_approval: Option<ApprovalMetadata>,
-}
-
-/// The organisation approval a registration states: what an administrator
-/// of the controller approved for every professional, who and when.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApprovalMetadata {
-    /// The approved scopes: `user/` and `patient/` scopes with the launch,
-    /// OpenID, refresh and extension scopes that go with them, each within
-    /// the client's ceiling. A `patient/` scope answers a professional's
-    /// EHR launch, and for a `first_party` app any person's launch.
-    pub scopes: Vec<String>,
-    /// The administrator who approved, as the controller names them.
-    pub approved_by: String,
-    /// When they approved, an RFC 3339 instant.
-    pub approved_at: String,
-    /// Whether the app is the organisation's own (first party), which the
-    /// approval may then cover `patient/` scopes for and a patient's own
-    /// login too; the mark is set and cleared with the approval, by its
-    /// approver at its time.
+    /// Whether the app is the controller's own or acts for it, which only
+    /// an administrator sets (`docs/architecture.md` §13.6 item 6).
     pub first_party: bool,
-}
-
-/// A client's approval for the whole organisation, checked.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Approval {
-    /// The approved scopes.
-    pub scopes: Vec<String>,
-    /// Who approved.
-    pub approved_by: String,
-    /// When, in seconds since the epoch.
-    pub approved_at: i64,
-    /// Whether the app is the organisation's own (first party).
-    pub first_party: bool,
-}
-
-impl Approval {
-    /// Returns whether the approval covers every scope of `offered`.
-    #[must_use]
-    pub fn covers(&self, offered: &[&str]) -> bool {
-        offered
-            .iter()
-            .all(|wanted| self.scopes.iter().any(|approved| approved == wanted))
-    }
-}
-
-/// Returns whether an organisation may approve `scope`, for its staff or,
-/// for its `first_party` app, for its patients too.
-///
-/// A `user/` or `patient/` scope may be approved, with a launch, OpenID,
-/// refresh or extension scope that goes with one. A `patient/` scope of an
-/// app not the organisation's own answers only a professional's EHR launch.
-/// A `system/` scope, which no person holds, never (`docs/architecture.md`
-/// §13.6 item 6).
-#[must_use]
-pub fn approvable(scope: &str) -> bool {
-    scope.starts_with("user/")
-        || scope.starts_with("patient/")
-        || crate::scopes::is_extension(scope)
-        || matches!(
-            scope,
-            "openid"
-                | "fhirUser"
-                | "launch"
-                | "launch/patient"
-                | "launch/encounter"
-                | "online_access"
-                | "offline_access"
-        )
 }
 
 /// A registered client, checked.
@@ -287,10 +218,14 @@ pub struct Client {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Registration {
     /// An administrator, through the admin API or `ferrosmart client
-    /// apply`, with the approval for the whole organisation they gave, if any.
-    Administered(Option<Approval>),
+    /// apply`; the registration is the organisation's administrative
+    /// consent (OpenID Connect Core 1.0 §3.1.2.4).
+    Administered {
+        /// Whether the app is the controller's own or acts for it.
+        first_party: bool,
+    },
     /// The app itself (RFC 7591). RFC 7591 §5 has its metadata treated as
-    /// self-asserted, so it carries no approval and is never first party.
+    /// self-asserted, so it is never first party.
     Dynamic,
 }
 
@@ -310,14 +245,13 @@ impl Client {
             .min()
     }
 
-    /// Returns its approval for the whole organisation, when an
-    /// administrator gave one.
+    /// Returns whether the app is the controller's own or acts for it.
     #[must_use]
-    pub const fn approval(&self) -> Option<&Approval> {
-        match &self.registration {
-            Registration::Administered(approval) => approval.as_ref(),
-            Registration::Dynamic => None,
-        }
+    pub const fn first_party(&self) -> bool {
+        matches!(
+            self.registration,
+            Registration::Administered { first_party: true }
+        )
     }
 
     /// Returns whether the app registered itself (RFC 7591).
@@ -356,7 +290,7 @@ impl Client {
     /// Returns whether a redirect to `redirect_uri` assures this client's
     /// identity.
     ///
-    /// Only then may a remembered consent or an organisation approval
+    /// Only then may a remembered consent or the registration
     /// answer for the person with no page: always for a confidential
     /// client, which authenticates at the token endpoint, and for a public
     /// client only through a claimed `https` redirect URI (RFC 8252 §8.6,
@@ -392,21 +326,19 @@ pub fn claimed_https(uri: &str) -> bool {
     })
 }
 
-/// Returns a warning when `client` is a first-party public app with no
-/// claimed `https` redirect URI.
+/// Returns a warning when `client` is a public app an administrator
+/// registered with no claimed `https` redirect URI.
 ///
 /// No sign-in of such an app can assure its identity, so every one shows
-/// the consent page (RFC 8252 §8.6).
+/// the consent page (RFC 8252 §8.6), the registration's consent unused.
 #[must_use]
-pub fn unassured_first_party(client: &Client) -> Option<String> {
+pub fn unassured_public(client: &Client) -> Option<String> {
     let unassured = client.kind() == ClientKind::Public
-        && client
-            .approval()
-            .is_some_and(|approval| approval.first_party)
+        && !client.registered_itself()
         && !client.redirect_uris.iter().any(|uri| claimed_https(uri));
     unassured.then(|| {
         format!(
-            "client {:?} is a first-party public app with no claimed https redirect URI, so every sign-in shows the consent page (RFC 8252 §8.6): register an https redirect the app claims, such as a Universal Link or an App Link",
+            "client {:?} is a public app with no claimed https redirect URI, so every sign-in shows the consent page (RFC 8252 §8.6): register an https redirect the app claims, such as a Universal Link or an App Link",
             client.client_id
         )
     })
@@ -657,11 +589,13 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
     }
     check_acr(section)?;
     let launch_uri = resolve_launch_uri(section, &grant_types)?;
-    let approval = section
-        .organisation_approval
-        .as_ref()
-        .map(|approval| resolve_approval(section, &grant_types, approval))
-        .transpose()?;
+    // NOTE: our own design, first party speaks of a person's sign-in, which only
+    // the authorization code grant has.
+    if section.first_party && !grant_types.contains(&GrantType::AuthorizationCode) {
+        return Err(rule(
+            "`first_party` needs `authorization_code`, the grant a person signs in to",
+        ));
+    }
     let about = resolve_about(section)?;
     Ok(Client {
         client_id: section.client_id.clone(),
@@ -681,7 +615,9 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
         scopes: section.scopes.clone(),
         grant_types,
         launch_uri,
-        registration: Registration::Administered(approval),
+        registration: Registration::Administered {
+            first_party: section.first_party,
+        },
         about,
     })
 }
@@ -800,58 +736,6 @@ fn resolve_launch_uri(
         .ok_or_else(|| ClientError::LaunchUri {
             client_id: section.client_id.clone(),
         })
-}
-
-/// Returns the organisation approval `approval` of the client `section`,
-/// checked: a person's grant to approve, an approver and an instant, and
-/// scopes an organisation may approve within the client's ceiling.
-fn resolve_approval(
-    section: &ClientMetadata,
-    grant_types: &[GrantType],
-    approval: &ApprovalMetadata,
-) -> Result<Approval, ClientError> {
-    let rule = |rule| ClientError::Rule {
-        client_id: section.client_id.clone(),
-        rule,
-    };
-    if !grant_types.contains(&GrantType::AuthorizationCode) {
-        return Err(rule(
-            "an `organisation_approval` needs `authorization_code`, the grant a person signs in to",
-        ));
-    }
-    if approval.scopes.is_empty() {
-        return Err(rule("the `organisation_approval` approves no scope"));
-    }
-    if approval.scopes.iter().any(|scope| !approvable(scope)) {
-        return Err(rule(
-            "the `organisation_approval` lists a scope no organisation approves: only `user/`, `patient/`, launch, OpenID, refresh and `__` extension scopes",
-        ));
-    }
-    if !approval
-        .scopes
-        .iter()
-        .all(|scope| crate::scopes::admits(&section.scopes, scope))
-    {
-        return Err(rule(
-            "the `organisation_approval` lists a scope beyond the client's `scopes`",
-        ));
-    }
-    if approval.approved_by.trim().is_empty() {
-        return Err(rule("the `organisation_approval` names no `approved_by`"));
-    }
-    let approved_at = approval
-        .approved_at
-        .parse::<jiff::Timestamp>()
-        .map_err(|_unparsed| {
-            rule("the `organisation_approval`'s `approved_at` is no RFC 3339 instant")
-        })?
-        .as_second();
-    Ok(Approval {
-        scopes: approval.scopes.clone(),
-        approved_by: approval.approved_by.clone(),
-        approved_at,
-        first_party: approval.first_party,
-    })
 }
 
 /// Returns the JWK Set a confidential asymmetric client registers: by URL
