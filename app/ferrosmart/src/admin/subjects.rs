@@ -55,9 +55,6 @@ pub(super) async fn lookup(
     let (Some(name), Some(sub)) = (params.get("upstream"), params.get("sub")) else {
         return Err(AdminError::Query("the query names `upstream` and `sub`"));
     };
-    if sub.is_empty() {
-        return Err(AdminError::Query("`sub` is empty"));
-    }
     let upstream = state
         .settings()
         .upstreams
