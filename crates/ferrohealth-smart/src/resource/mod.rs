@@ -496,9 +496,8 @@ pub struct Caller {
     client_id: Option<String>,
     /// Who stands behind the credential.
     kind: CallerKind,
-    /// The value of the issuer profile's person key and tenant claim, when
-    /// the token carries them.
-    person_key: (Option<String>, Option<String>),
+    /// The current RFC 8693 §4.1 actor the token names.
+    actor: Option<crate::kind::Actor>,
     /// What the token says about the authentication behind it, under the
     /// issuer's assurance mapping.
     assurance: Assessment,
@@ -533,7 +532,7 @@ impl PartialEq for Caller {
         self.subject == other.subject
             && self.client_id == other.client_id
             && self.kind == other.kind
-            && self.person_key == other.person_key
+            && self.actor == other.actor
             && self.assurance == other.assurance
             && self.scope == other.scope
             && self.scopes == other.scopes

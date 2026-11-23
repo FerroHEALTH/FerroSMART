@@ -24,12 +24,10 @@ use crate::config::issuer::check_entry;
 use crate::config::read::secret;
 use crate::config::shown;
 use crate::federation::FederationSection;
-use crate::federation::Field;
 use crate::federation::person::AttributesSection;
 use crate::kind::IssuerKind;
 use crate::party::config::PartySection;
 use crate::profile::Profile;
-use crate::profile::ProfileKeys;
 use crate::resource::Settings;
 use crate::resource::configuration::SmartOptions;
 use crate::resource::configuration::is_capability;
@@ -95,7 +93,7 @@ impl Resolved {
             .map(|name| {
                 let issuer = self.issuer_named(key, name)?;
                 match self.kinds.get(issuer) {
-                    Some(&kind) if kind != IssuerKind::Persons => Err(ConfigError::RoleIssuer {
+                    Some(&kind) if kind != IssuerKind::Smart => Err(ConfigError::RoleIssuer {
                         key,
                         name: name.clone(),
                         kind,
@@ -127,8 +125,7 @@ impl AuthSection {
     /// # Errors
     ///
     /// Returns [`ConfigError`] naming the first rule broken: no issuer and
-    /// no Basic user, an issuer name outside the name form, an issuer
-    /// without `kind` under a preset that names none, no audience, an
+    /// no Basic user, an issuer name outside the name form, no audience, an
     /// issuer outside the URL rule, a symmetric algorithm, a skew over the
     /// bound, a profile or a kind-bound setting refused, a nested table on
     /// an issuer of a kind that takes none, a name no issuer table carries,
@@ -191,12 +188,12 @@ impl AuthSection {
                 check_nested(entry, kind)?;
                 kinds.insert(entry.issuer.expose().to_owned(), kind);
                 names.insert(name.to_owned(), entry.issuer.expose().to_owned());
-                if let Some(table) = party_of(entry)? {
+                if let Some(table) = party_of(entry) {
                     party.push(table);
                 }
                 match entry.mode {
                     AuthMode::Jwt => {
-                        let mut settings = settings_of(entry, kind, bases)?;
+                        let mut settings = settings_of(entry, kind, bases);
                         settings.tls = tls.clone();
                         settings.validate().map_err(|source| ConfigError::Issuer {
                             issuer: shown(&entry.issuer),
@@ -221,11 +218,6 @@ impl AuthSection {
         if self.enabled {
             self.check_party(&party)?;
         }
-        let adapters = if self.enabled {
-            self.idp.adapters()?
-        } else {
-            crate::idp::section::Adapters::default()
-        };
         let basic = self.basic_store()?;
         let dpop = self.dpop_settings()?;
         let mut resolved = Resolved {
@@ -243,7 +235,6 @@ impl AuthSection {
             #[cfg(feature = "fetch")]
             introspection,
             party,
-            adapters,
         };
         if let Some(name) = &self.described_issuer {
             let issuer = resolved.issuer_named("auth.described_issuer", name)?;
@@ -308,22 +299,16 @@ impl AuthSection {
     /// another, or whose issuer's profile breaks a binding rule (no
     /// specification governs this: our own design).
     fn check_party(&self, party: &[PartySection]) -> Result<(), ConfigError> {
-        let profiles = self
+        let kinds = self
             .issuers()
             .filter(|(_, entry)| entry.party.is_some())
-            .map(|(_, entry)| {
-                Ok((
-                    entry.issuer.expose(),
-                    check_entry(entry)?,
-                    profile_of(entry)?,
-                ))
-            })
+            .map(|(_, entry)| Ok((entry.issuer.expose(), check_entry(entry)?)))
             .collect::<Result<Vec<_>, ConfigError>>()?;
         crate::party::config::check_tables(party, |issuer| {
-            profiles
+            kinds
                 .iter()
-                .find(|(named, _, _)| *named == issuer)
-                .map(|(_, kind, profile)| (*kind, profile))
+                .find(|(named, _)| *named == issuer)
+                .map(|(_, kind)| *kind)
         })
         .map_err(|source| ConfigError::Party { source })
     }
@@ -364,15 +349,11 @@ impl AuthSection {
 
 /// Returns the settings of the JWT issuer `entry`, an issuer of `kind`, for
 /// a product serving `bases`.
-fn settings_of(
-    entry: &IssuerEntry,
-    kind: IssuerKind,
-    bases: &[&str],
-) -> Result<Settings, ConfigError> {
+fn settings_of(entry: &IssuerEntry, kind: IssuerKind, bases: &[&str]) -> Settings {
     let mut settings = Settings::new(entry.issuer.expose(), String::new(), kind);
     settings.audience = audience_of(entry, bases);
     settings.algorithms.clone_from(&entry.algorithms);
-    settings.profile = profile_of(entry)?;
+    settings.profile = profile_of(entry);
     settings.clock_skew = entry.clock_skew.get();
     settings.jwks_max_age = entry.jwks_max_age.get();
     settings.jwks_refresh_interval = entry.jwks_refresh_interval.get();
@@ -380,10 +361,10 @@ fn settings_of(
     settings.timeout = entry.timeout.get();
     settings.role_claims = role_claims_of(entry, kind);
     settings.assurance.clone_from(&entry.assurance);
-    settings.federation = federation_of(entry)?;
+    settings.federation = federation_of(entry);
     settings.attributes = attributes_of(entry);
     settings.sender_constraint = entry.sender_constraint;
-    Ok(settings)
+    settings
 }
 
 /// Returns the introspection settings of the `mode = "introspection"`
@@ -458,9 +439,9 @@ fn introspection_of(
     settings.cache_capacity = section.cache_capacity;
     settings.timeout = entry.timeout.get();
     settings.role_claims = role_claims_of(entry, kind);
-    settings.profile = profile_of(entry)?;
+    settings.profile = profile_of(entry);
     settings.assurance.clone_from(&entry.assurance);
-    settings.federation = federation_of(entry)?;
+    settings.federation = federation_of(entry);
     settings.attributes = attributes_of(entry);
     settings.sender_constraint = entry.sender_constraint;
     settings
@@ -483,9 +464,8 @@ fn audience_of(entry: &IssuerEntry, bases: &[&str]) -> Vec<String> {
 
 /// Refuses a nested table on an issuer of a kind that takes none: a
 /// `federation` issuer requires its federation table and takes no
-/// attributes table, and an attributes table of a `patients` or `machines`
-/// issuer states only the purpose of use (no specification governs this:
-/// our own design). The party table's rules are [`AuthSection`]'s.
+/// attributes table (no specification governs this: our own design). The
+/// party table's rules are [`AuthSection`]'s.
 fn check_nested(entry: &IssuerEntry, kind: IssuerKind) -> Result<(), ConfigError> {
     let issuer = || shown(&entry.issuer);
     match (kind, &entry.federation) {
@@ -503,24 +483,11 @@ fn check_nested(entry: &IssuerEntry, kind: IssuerKind) -> Result<(), ConfigError
             });
         }
     }
-    if let Some(attributes) = &entry.attributes {
-        if kind == IssuerKind::Federation {
-            return Err(ConfigError::Attributes {
-                issuer: issuer(),
-                reason: "a federation issuer takes no attributes table",
-            });
-        }
-        if kind != IssuerKind::Persons
-            && attributes
-                .fields
-                .keys()
-                .any(|field| *field != Field::PurposeOfUse)
-        {
-            return Err(ConfigError::Attributes {
-                issuer: issuer(),
-                reason: "a patients or machines issuer states only purpose_of_use",
-            });
-        }
+    if entry.attributes.is_some() && kind == IssuerKind::Federation {
+        return Err(ConfigError::Attributes {
+            issuer: issuer(),
+            reason: "a federation issuer takes no attributes table",
+        });
     }
     Ok(())
 }
@@ -533,30 +500,19 @@ fn attributes_of(entry: &IssuerEntry) -> Option<AttributesSection> {
     })
 }
 
-/// Returns the federation table of `entry`, set over its preset's
-/// federation defaults and attributed to its issuer; the defaults alone
-/// when it has no table, which an issuer of another kind then refuses.
-fn federation_of(entry: &IssuerEntry) -> Result<Option<FederationSection>, ConfigError> {
-    let file = entry.profile_file()?;
-    crate::config::issuer::federation_over(
-        entry.preset,
-        file.as_ref(),
-        entry.federation.clone(),
-        &entry.issuer,
-    )
-    .map_err(|source| ConfigError::Issuer {
-        issuer: shown(&entry.issuer),
-        source: Box::new(source.into()),
+/// Returns the federation table of `entry`, attributed to its issuer.
+fn federation_of(entry: &IssuerEntry) -> Option<FederationSection> {
+    entry.federation.clone().map(|table| FederationSection {
+        issuer: entry.issuer.clone(),
+        ..table
     })
 }
 
 /// Returns the party table of `entry`, attributed to its issuer, with the
-/// issuer's identifier as its `identifier_issuer` and the profile's
-/// `party_identifier_type` as its `identifier_type` where it names none.
-fn party_of(entry: &IssuerEntry) -> Result<Option<PartySection>, ConfigError> {
-    let Some(table) = &entry.party else {
-        return Ok(None);
-    };
+/// issuer's identifier as its `identifier_issuer` and `pairwise` as its
+/// `identifier_type` where it names none.
+fn party_of(entry: &IssuerEntry) -> Option<PartySection> {
+    let table = entry.party.as_ref()?;
     let mut table = PartySection {
         issuer: entry.issuer.clone(),
         ..table.clone()
@@ -567,12 +523,12 @@ fn party_of(entry: &IssuerEntry) -> Result<Option<PartySection>, ConfigError> {
             .expose()
             .clone_into(&mut table.identifier_issuer);
     }
-    if table.identifier_type.is_empty()
-        && let Some(kind) = profile_of(entry)?.party_identifier_type
-    {
-        table.identifier_type = kind;
+    // NOTE: docs/architecture.md §13.6 item 9: FerroSMART's `sub` is a pairwise
+    // subject, compared exactly.
+    if table.identifier_type.is_empty() {
+        table.identifier_type = String::from("pairwise");
     }
-    Ok(Some(table))
+    Some(table)
 }
 
 /// Returns whether `name` is an issuer name: a lower-case ASCII letter, then
@@ -588,20 +544,9 @@ fn is_issuer_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
-/// Returns the profile of `entry`: its preset, its profile file over it,
-/// and its `profile` table over both.
-fn profile_of(entry: &IssuerEntry) -> Result<Profile, ConfigError> {
-    let file = match entry.profile_file()? {
-        Some(file) => file.keys,
-        None => ProfileKeys::default(),
-    };
-    let refused = |source: crate::profile::ProfileError| ConfigError::Issuer {
-        issuer: shown(&entry.issuer),
-        source: Box::new(source.into()),
-    };
-    Profile::resolve(entry.preset, &file)
-        .map(|profile| profile.with_keys(entry.profile.clone()))
-        .map_err(refused)
+/// Returns the profile of `entry`: its `profile` table over the defaults.
+fn profile_of(entry: &IssuerEntry) -> Profile {
+    Profile::default().with_keys(entry.profile.clone())
 }
 
 /// Returns the role claims of `entry`: its own, or the RFC 9068 §2.2.3.1
@@ -627,7 +572,6 @@ impl Default for AuthSection {
             basic: None,
             dpop: None,
             tls: TlsClientSection::default(),
-            idp: crate::idp::section::IdpSection::default(),
         }
     }
 }

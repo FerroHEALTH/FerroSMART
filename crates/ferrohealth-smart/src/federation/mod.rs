@@ -560,15 +560,6 @@ pub enum FederationError {
         /// The field.
         field: &'static str,
     },
-    /// A field other than the purpose of use in the table of a `patients`
-    /// or `machines` issuer, which states no professional.
-    #[error(
-        "the field {field} is read on a persons issuer only; this issuer states only purpose_of_use"
-    )]
-    PurposeOnly {
-        /// The field.
-        field: &'static str,
-    },
 }
 
 /// One coded value: a FHIR Coding's `system` and `code`.

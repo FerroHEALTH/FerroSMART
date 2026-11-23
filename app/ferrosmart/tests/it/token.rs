@@ -334,11 +334,11 @@ async fn a_backend_services_token_is_read_under_the_ferrosmart_preset() {
     assert_eq!(StatusCode::OK, status, "{body}");
     let token = body["access_token"].as_str().expect("a token");
     let jwks = server.post_get_jwks().await;
-    let caller = crate::support::read_under_preset(
+    let caller = crate::support::read_at_resource_server(
         &jwks,
         ISSUER,
         RESOURCE,
-        ferrohealth_smart::kind::IssuerKind::Machines,
+        ferrohealth_smart::kind::IssuerKind::Smart,
         &ferrohealth_smart::profile::ProfileKeys::default(),
         token,
     )
@@ -349,11 +349,11 @@ async fn a_backend_services_token_is_read_under_the_ferrosmart_preset() {
     assert_eq!(Some("export"), caller.client_id());
     assert_eq!(&[String::from("system/Observation.rs")], caller.scope());
     // NOTE: RFC 9068 §4, a token for another resource server is refused.
-    let elsewhere = crate::support::read_under_preset(
+    let elsewhere = crate::support::read_at_resource_server(
         &jwks,
         ISSUER,
         "https://other.example.org/fhir",
-        ferrohealth_smart::kind::IssuerKind::Machines,
+        ferrohealth_smart::kind::IssuerKind::Smart,
         &ferrohealth_smart::profile::ProfileKeys::default(),
         token,
     )
@@ -361,11 +361,11 @@ async fn a_backend_services_token_is_read_under_the_ferrosmart_preset() {
     assert!(elsewhere.is_err(), "another audience");
     // NOTE: RFC 9068 §2.2, under the one `persons` table of docs/architecture.md
     // §13.21 an app-only token (`sub` is `client_id`) reads as the system too.
-    let one_table = crate::support::read_under_preset(
+    let one_table = crate::support::read_at_resource_server(
         &jwks,
         ISSUER,
         RESOURCE,
-        ferrohealth_smart::kind::IssuerKind::Persons,
+        ferrohealth_smart::kind::IssuerKind::Smart,
         &ferrohealth_smart::profile::ProfileKeys::default(),
         token,
     )

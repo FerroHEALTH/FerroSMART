@@ -21,9 +21,7 @@ fn section(text: &str) -> AuthSection {
 
 /// One `persons` issuer table, with `extra` keys.
 fn issuer(extra: &str) -> String {
-    format!(
-        "[issuer.i1]\nissuer = \"https://as.example.org\"\nkind = \"persons\"\naudience = [\"a\"]\n{extra}\n"
-    )
+    format!("[issuer.i1]\nissuer = \"https://as.example.org\"\naudience = [\"a\"]\n{extra}\n")
 }
 
 #[test]

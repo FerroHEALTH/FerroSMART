@@ -34,7 +34,6 @@ use crate::kind::IssuerKind;
 use crate::metadata::DiscoveryError;
 use crate::party::config::PartyError;
 use crate::party::config::PartySection;
-use crate::profile::Preset;
 use crate::profile::ProfileKeys;
 use crate::resource::ResourceError;
 use crate::resource::Settings;
@@ -317,15 +316,6 @@ pub enum ConfigError {
         /// Which rule.
         reason: &'static str,
     },
-    /// An `[auth.idp]` table is refused.
-    #[error("the [auth.idp] table of the {adapter} adapter is refused")]
-    Adapter {
-        /// The adapter.
-        adapter: &'static str,
-        /// What the adapter reported.
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
     /// An `[auth.issuer.<name>.party]` table breaks a rule.
     #[error("an [auth.issuer.<name>.party] table is refused")]
     Party {
@@ -421,9 +411,6 @@ pub struct AuthSection {
     /// the minimum version. The crate reads none of it: the product's
     /// [`TlsBuilder`] builds it once at start.
     pub tls: TlsClientSection,
-    /// The `[auth.idp]` table: the vendor adapters a profile may name, each
-    /// read in a build that compiles it in.
-    pub idp: crate::idp::section::IdpSection,
 }
 
 /// How a bearer token is checked.
@@ -468,10 +455,7 @@ pub struct IntrospectionSection {
 }
 
 /// One `[auth.issuer.<name>]` table: the issuer, its kind, how its tokens
-/// are checked, its profile, and the tables nested under it.
-///
-/// The profile is a [`Preset`], a deployment's `profile_file` over it, and
-/// the `[auth.issuer.<name>.profile]` keys over both.
+/// are checked, its profile keys, and the tables nested under it.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -481,12 +465,9 @@ pub struct IssuerEntry {
     /// itself.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub issuer: ferrohealth_secret::secret_url::SecretUrl,
-    /// Whose tokens the issuer signs; the preset's kind when unset
-    /// ([`Preset::kind`]), and required under a preset that names none.
+    /// `federation` for another party's issuer; unset for a SMART
+    /// authorization server ([`IssuerKind`]).
     pub kind: Option<IssuerKind>,
-    /// The shipped preset the profile starts from ([`Preset`]); the
-    /// standards-only `rfc9068` by default.
-    pub preset: Preset,
     /// The audiences, of which a token's `aud` must contain one; the base
     /// URLs the product resolves the section for when empty.
     pub audience: Vec<String>,
@@ -512,12 +493,11 @@ pub struct IssuerEntry {
     /// issuer requires and no other kind takes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub federation: Option<FederationSection>,
-    /// The `[auth.issuer.<name>.attributes]` table: where a `persons` issuer
-    /// states its professionals' attributes, or a `patients` or `machines`
-    /// issuer the purpose of use.
+    /// The `[auth.issuer.<name>.attributes]` table: where a SMART issuer
+    /// states its professionals' attributes and the purpose of use.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attributes: Option<AttributesSection>,
-    /// The `[auth.issuer.<name>.party]` table of a `persons` issuer whose
+    /// The `[auth.issuer.<name>.party]` table of a SMART issuer whose
     /// logins are bound to a party.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub party: Option<PartySection>,
@@ -531,13 +511,8 @@ pub struct IssuerEntry {
     /// default `roles`, `groups` and `entitlements` (RFC 9068 §2.2.3.1), and
     /// none, never settable, on a `federation` issuer.
     pub role_claims: Option<Vec<String>>,
-    /// A profile file a deployment supplies, in the form of the shipped
-    /// presets: its keys, `kind` and `[federation]` table set over the
-    /// preset's; absent for none.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub profile_file: Option<PathBuf>,
     /// The `[auth.issuer.<name>.profile]` table: the profile keys set over
-    /// the preset and the profile file, which win over both.
+    /// the defaults.
     #[serde(skip_serializing_if = "crate::config::is_default")]
     pub profile: ProfileKeys,
 }
@@ -663,9 +638,6 @@ pub struct Resolved {
     /// The party tables, each checked against its issuer and carrying its
     /// identifier.
     pub party: Vec<PartySection>,
-    /// The vendor adapters the `[auth.idp]` tables build, which the party
-    /// binding registers.
-    pub adapters: crate::idp::section::Adapters,
 }
 
 /// The product's reader of an outbound `tls` table, which builds the TLS

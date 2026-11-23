@@ -18,7 +18,6 @@ use serde::Serialize;
 use crate::assurance::AssuranceSection;
 use crate::federation::FederationSection;
 use crate::kind::IssuerKind;
-use crate::profile::Preset;
 use crate::profile::ProfileKeys;
 
 /// One `[<lane>.credentials.onward]` table.
@@ -31,17 +30,11 @@ pub struct OnwardSection {
     /// with any userinfo masked, as [`SecretUrl`] renders itself.
     #[cfg_attr(feature = "schema", schemars(with = "String"))]
     pub issuer: SecretUrl,
-    /// Whose tokens the issuer signs: `persons` (a delegated exchange),
-    /// `patients` (a patient's own token) or `federation`; required, with no
-    /// default.
+    /// `federation` for another party's issuer; unset for a SMART
+    /// authorization server.
     pub kind: Option<IssuerKind>,
-    /// The preset the issuer's profile starts from.
-    pub preset: Preset,
-    /// A profile file a deployment supplies, set over the preset; absent for
-    /// none.
-    pub profile_file: Option<std::path::PathBuf>,
-    /// The `profile` table: the keys set over the preset and the profile
-    /// file; `max_onward_lifetime` is required in one of the three.
+    /// The `profile` table: the keys set over the defaults;
+    /// `max_onward_lifetime` is required.
     pub profile: ProfileKeys,
     /// The token endpoint itself; empty to discover it from `issuer`. It
     /// renders with its userinfo and its query masked.
@@ -83,8 +76,6 @@ impl Default for OnwardSection {
         Self {
             issuer: SecretUrl::default(),
             kind: None,
-            preset: Preset::default(),
-            profile_file: None,
             profile: ProfileKeys::default(),
             token_endpoint: SecretUrl::default(),
             client_id: String::new(),
@@ -123,10 +114,7 @@ mod resolve {
     use crate::config::onward::OnwardSection;
     use crate::config::read::parse_url;
     use crate::federation::FederationSection;
-    use crate::kind::IssuerKind;
     use crate::profile::Profile;
-    use crate::profile::ProfileFile;
-    use crate::profile::ProfileKeys;
     use crate::resource::ResourceError;
     use crate::resource::Settings;
     use crate::scope::is_scope_token;
@@ -191,10 +179,10 @@ mod resolve {
         ///
         /// # Errors
         ///
-        /// [`ConfigError::Missing`] naming `credentials.onward.issuer`,
-        /// `kind` or `audiences` when unset; [`ConfigError::Scope`] for a
-        /// scope token outside RFC 6749 §3.3; [`ConfigError::Issuer`] for a
-        /// preset, profile or table the issuer's rules refuse; and
+        /// [`ConfigError::Missing`] naming `credentials.onward.issuer` or
+        /// `audiences` when unset; [`ConfigError::Scope`] for a scope token
+        /// outside RFC 6749 §3.3; [`ConfigError::Issuer`] for a profile or
+        /// table the issuer's rules refuse; and
         /// [`ConfigError::Onward`] for an issuer the onward client refuses
         /// (another kind, no `max_onward_lifetime`, a federation table
         /// without `exchanges_from` or `person_mapping`) or a target its
@@ -208,9 +196,7 @@ mod resolve {
                     key: "credentials.onward.issuer",
                 });
             }
-            let kind = self.kind.ok_or(ConfigError::Missing {
-                key: "credentials.onward.kind",
-            })?;
+            let kind = self.kind.unwrap_or_default();
             if self.audiences.iter().all(String::is_empty) {
                 return Err(ConfigError::Missing {
                     key: "credentials.onward.audiences",
@@ -245,23 +231,12 @@ mod resolve {
             // check never reads `audience`, which the settings require one of.
             let mut settings =
                 Settings::new(self.issuer.expose(), credentials.client_id.clone(), kind);
-            let file = self
-                .profile_file
-                .as_deref()
-                .map(ProfileFile::read)
-                .transpose()
-                .map_err(|source| refused(source.into()))?;
-            let keys = match &file {
-                Some(file) => file.keys.clone(),
-                None => ProfileKeys::default(),
-            };
-            settings.profile = Profile::resolve(self.preset, &keys)
-                .map(|profile| profile.with_keys(self.profile.clone()))
-                .map_err(|source| refused(source.into()))?;
+            settings.profile = Profile::default().with_keys(self.profile.clone());
             settings.assurance.clone_from(&self.assurance);
-            settings.federation = self
-                .federation_of(kind, file.as_ref())
-                .map_err(|source| refused(source.into()))?;
+            settings.federation = self.federation.clone().map(|table| FederationSection {
+                issuer: self.issuer.clone(),
+                ..table
+            });
             settings.validate().map_err(refused)?;
             let mut target = Target::new(
                 self.audiences
@@ -303,24 +278,6 @@ mod resolve {
                     source: Box::new(source),
                 })?;
             Ok(OnwardLane { onward, target })
-        }
-
-        /// Returns the federation table of a `federation` issuer: the table's
-        /// own over its preset's defaults, naming this issuer.
-        fn federation_of(
-            &self,
-            kind: IssuerKind,
-            file: Option<&ProfileFile>,
-        ) -> Result<Option<FederationSection>, crate::profile::ProfileError> {
-            if kind != IssuerKind::Federation {
-                return Ok(self.federation.clone());
-            }
-            crate::config::issuer::federation_over(
-                self.preset,
-                file,
-                self.federation.clone(),
-                &self.issuer,
-            )
         }
     }
 }

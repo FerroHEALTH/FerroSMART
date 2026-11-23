@@ -585,8 +585,7 @@ provider_identifier_prefixes = ["{PREFIX}"]
     let resolved = section.resolve(&[])?;
     let settings = resolved.issuers.first().ok_or("one issuer")?;
     assert!(settings.federation.is_some());
-    let stray: AuthSection =
-        toml::from_str(&text.replace("kind = \"federation\"", "kind = \"persons\""))?;
+    let stray: AuthSection = toml::from_str(&text.replace("kind = \"federation\"\n", ""))?;
     assert!(matches!(
         stray.resolve(&[]),
         Err(ConfigError::Federation { .. })

@@ -48,7 +48,10 @@ fn planted(kind: CallerKind) -> Caller {
     .with_issuer(String::from("https://as.example.org"))
     .with_roles(vec![String::from(PLANTED)])
     .with_assurance(assurance)
-    .with_person_key(Some(String::from(PLANTED)), Some(String::from(PLANTED)))
+    .with_actor(ferrohealth_smart::kind::Actor {
+        issuer: String::from(PLANTED),
+        sub: String::from(PLANTED),
+    })
     .with_claims(claims)
     .with_extension(PatientClaim::new("patient_id").expect("a valid path"))
 }
@@ -73,10 +76,7 @@ fn a_callers_debug_names_sub_client_iss_and_kind_alone() {
 #[test]
 fn no_type_holding_a_claim_renders_it() {
     let caller = planted(CallerKind::Patient);
-    let representative = planted(CallerKind::Representative {
-        represented: String::from(PLANTED),
-        ground: Some(String::from(PLANTED)),
-    });
+    let representative = planted(CallerKind::RelatedPerson);
     let renderings = [
         format!("{:?}", Access::Caller(Arc::new(caller.clone()))),
         format!("{:?}", caller.assurance()),

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Cadasto B.V.
 # SPDX-License-Identifier: BUSL-1.1
 #
-# An example issuer profile a deployment loads with `profile_file`: the
+# An example issuer table a deployment copies into its `[auth]` section: the
 # harmonised BgZ and eOverdracht authentication of the openEHR Federation
 # Tier specification 1.0.1, Informative Annex B "Dutch Generic Functions
 # binding", §B.4a, which attributes it to the VWS memo concept v0.9 of 13 July
@@ -9,10 +9,8 @@
 # syntaric/openehr-federation-spec at b4242c29). The products ship no country
 # content; this file is the deployment's. The issuer is one requesting care
 # provider, whose tokens arrive on a `federation` issuer. Each value cites its
-# section; every profile key can be set in the issuer's
-# `[auth.issuer.<name>.profile]` table, and every key of the `federation`
-# table below in its `[auth.issuer.<name>.federation]` table, which win over
-# this file.
+# section; the deployment adds the issuer, its audience, the `token_types` it
+# observes and its URA.
 #
 # §B.4a "is a national track distinct from, and not a refinement of, the
 # Nuts Generic-Functions profile of §B.4", and "A Dutch deployment SHOULD
@@ -22,7 +20,12 @@
 
 # §B.4a.2: the requesting care provider's own tokens, read on this node as
 # another party's.
+[auth.issuer.nl]
 kind = "federation"
+# §B.4a.2: FAPI 2.0 brings "sender-constrained access tokens".
+sender_constraint = "required"
+
+[auth.issuer.nl.profile]
 # §B.4a.2 names no `typ` header, so the profile accepts none: the issuer
 # fails to load until the deployment sets `token_types` itself.
 token_types = []
@@ -34,7 +37,7 @@ token_types = []
 # `authorization_details` object".
 required_claims = ["iss", "sub", "aud", "exp", "jti", "client_id", "authorization_details"]
 
-[federation]
+[auth.issuer.nl.federation]
 # Annex B is a "regional alternative" for a Dutch deployment, not a
 # MyHealth@EU contact point.
 contact_point = false
@@ -58,7 +61,7 @@ authorization_details_type = "nl-gis-v1"
 # profile maps no professional field.
 organisation_types = ["nl-gis-v1"]
 # §B.4a.2: FAPI 2.0 brings "sender-constrained access tokens", so the issuer
-# fails to load without `sender_constraint = "required"`.
+# fails to load without `sender_constraint = "required"` above.
 requires_sender_constraint = true
 # §B.4a.3: the purpose travels in every entry. §B.4a.4: for "the query use
 # case", which a federated query is, the "Organization type must travel".
@@ -83,6 +86,6 @@ required_fields = [
 # with RFC 9396 §2.2 `locations` it names the organisation at the resource
 # server, this node's (our own reading), so it is not read as the
 # requester's.
-[federation.fields]
+[auth.issuer.nl.federation.fields]
 "purpose_of_use" = [{ authorization_details = "purpose_of_use" }]
 "provider.facility_type" = [{ authorization_details = "subject_organisation_type" }]
