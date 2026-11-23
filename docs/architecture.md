@@ -5132,8 +5132,11 @@ choice to the server, the rules below are our own design.
   delegation (`rfc8693 §1.1`); a `requested_token_type`, when named, of an
   access token; `resource` or `audience`, when named, the paired openEHR
   base, any other `invalid_target`; `scope` within `patient/composition-*.r`
-  and the client's ceiling, `invalid_scope` beyond it, and
-  `patient/composition-*.r` when named none.
+  and `patient/aql-*.s` (reading the person's compositions and running a
+  query on their EHR, `master08 §Resource Scopes`) and the client's
+  ceiling, `invalid_scope` beyond it, and those of the two the client's
+  ceiling admits when named none. SMART on openEHR has no scope for a
+  demographic read, so the exchange issues none.
 - **The subject token.** An access token FerroSMART issued, its signature
   verified with its own keys, its record active (unexpired, neither it nor
   its grant revoked), under a grant that is the person's own access
