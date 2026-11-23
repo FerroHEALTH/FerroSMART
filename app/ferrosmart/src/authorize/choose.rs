@@ -151,11 +151,24 @@ pub(super) fn start(
 
 /// Returns the login request at `provider`, carrying what `asking` passes
 /// on, with its `state`, `nonce` and PKCE verifier, or for a SAML provider
-/// its `RelayState`, its request `ID` and an unused random value.
+/// its `RelayState`, its request `ID` and an unused random value, or for
+/// the wallet its `state`, `nonce` and ephemeral key.
 pub(super) fn sign_in_at(
     provider: &LoginProvider,
     asking: &Asking,
 ) -> Result<(Departure, [String; 3]), Stop> {
+    if let Some(login) = provider.wallet() {
+        // NOTE: OpenID4VP 1.0 §5.2, a fresh nonce and state per request; HAIP 1.0 §5, a
+        // fresh encryption key, which the request keeps in the verifier's slot.
+        let begun = login.begin().map_err(fail)?;
+        return Ok((
+            Departure::Redirect {
+                to: begun.invocation,
+                saml: false,
+            },
+            [begun.state, begun.nonce, begun.key],
+        ));
+    }
     if let Some(login) = provider.saml() {
         // NOTE: saml-bindings-2.0-os §3.4.3, the RelayState is at most 80 bytes; 256
         // random bits in base64url are 43, and they find the pending request again.

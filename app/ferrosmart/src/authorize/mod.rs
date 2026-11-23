@@ -19,6 +19,7 @@ mod oidc;
 pub mod par;
 pub mod request;
 pub mod saml;
+pub mod wallet;
 
 use axum::response::{IntoResponse, Response};
 use base64::Engine as _;

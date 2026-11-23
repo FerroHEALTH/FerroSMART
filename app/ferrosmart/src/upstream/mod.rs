@@ -4,9 +4,10 @@
 //! The upstream identity providers a person logs in at, for login only.
 //!
 //! Each is a named `[[ferrosmart.upstream]]` entry with the table of its
-//! protocol, `oidc` or `saml`, whichever is present (`docs/architecture.md`
-//! §13.10). OpenID Connect is reached through `ferrohealth-smart`'s relying
-//! party, and SAML 2.0 through [`saml`]; each protocol is a [`Protocol`]
+//! protocol, `oidc`, `saml` or `openid4vp`, whichever is present
+//! (`docs/architecture.md` §13.10). OpenID Connect is reached through
+//! `ferrohealth-smart`'s relying party, SAML 2.0 through [`saml`] and the
+//! EUDI Wallet through [`wallet`]; each protocol is a [`Protocol`]
 //! variant and a table of its own, with no change to the entry or to the
 //! login flow. An OpenID Connect entry may name a [`preset::Preset`], whose
 //! data file fills the keys its table leaves out.
@@ -19,6 +20,7 @@
 pub mod preset;
 pub mod registration;
 pub mod saml;
+pub mod wallet;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -59,6 +61,10 @@ pub struct UpstreamSection {
     /// speaks SAML 2.0 when it is present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub saml: Option<saml::SamlSection>,
+    /// `[ferrosmart.upstream.openid4vp]`: the EUDI Wallet verifier; a person
+    /// logs in by presenting their PID when it is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub openid4vp: Option<wallet::WalletSection>,
     /// `[ferrosmart.upstream.assurance]`: the eIDAS level each of the
     /// provider's values stands for, and its minimum.
     pub assurance: crate::assurance::AssuranceSection,
@@ -77,14 +83,15 @@ impl UpstreamSection {
     }
 
     /// Returns the issuer a person's pairwise `sub` is derived under, exactly
-    /// as configured: the OpenID Provider's issuer identifier, or the SAML
-    /// identity provider's entity ID; none when the entry has both tables
-    /// or neither.
+    /// as configured: the OpenID Provider's issuer identifier, the SAML
+    /// identity provider's entity ID, or the wallet's first credential type;
+    /// none unless the entry has exactly one protocol table.
     #[must_use]
     pub fn issuer(&self) -> Option<&str> {
-        match (&self.oidc, &self.saml) {
-            (Some(oidc), None) => Some(&oidc.issuer),
-            (None, Some(saml)) => Some(&saml.entity_id),
+        match (&self.oidc, &self.saml, &self.openid4vp) {
+            (Some(oidc), None, None) => Some(&oidc.issuer),
+            (None, Some(saml), None) => Some(&saml.entity_id),
+            (None, None, Some(wallet)) => wallet.issuer(),
             _ => None,
         }
     }
@@ -268,6 +275,9 @@ pub enum UpstreamError {
     /// A SAML provider is configured without `[ferrosmart.saml]`.
     #[error("a SAML provider needs `[ferrosmart.saml]`")]
     NoServiceProvider,
+    /// The wallet verifier cannot be set up.
+    #[error("the wallet verifier cannot be set up")]
+    Wallet(#[from] wallet::WalletError),
 }
 
 /// An upstream provider, resolved.
@@ -296,6 +306,8 @@ pub enum Protocol {
     Oidc(OidcUpstream),
     /// SAML 2.0.
     Saml(saml::SamlUpstream),
+    /// The EUDI Wallet, by OpenID4VP.
+    Wallet(wallet::WalletUpstream),
 }
 
 impl Upstream {
@@ -307,6 +319,7 @@ impl Upstream {
         match &self.protocol {
             Protocol::Oidc(oidc) => &oidc.issuer,
             Protocol::Saml(saml) => &saml.entity_id,
+            Protocol::Wallet(wallet) => &wallet.issuer,
         }
     }
 
@@ -319,7 +332,7 @@ impl Upstream {
                 Authentication::PrivateKeyJwt(keys) => Some(keys.ring.published()),
                 Authentication::ClientSecretBasic(_) => None,
             },
-            Protocol::Saml(_) => None,
+            Protocol::Saml(_) | Protocol::Wallet(_) => None,
         }
     }
 }
@@ -376,7 +389,7 @@ impl OidcUpstream {
 
 /// What a provider's login says about the person, whatever its protocol:
 /// what the steps after the login read.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Identity {
     /// The provider's issuer identifier or entity ID.
     pub issuer: String,
@@ -463,6 +476,8 @@ pub enum Login {
     Oidc(Box<RelyingParty>),
     /// The SAML 2.0 service provider's login at one identity provider.
     Saml(Box<saml::SamlLogin>),
+    /// The wallet verifier.
+    Wallet(Box<wallet::WalletLogin>),
 }
 
 /// A provider people log in at: its settings and its login.
@@ -493,7 +508,7 @@ impl LoginProvider {
     pub fn oidc(&self) -> Option<&RelyingParty> {
         match &self.login {
             Login::Oidc(party) => Some(party),
-            Login::Saml(_) => None,
+            Login::Saml(_) | Login::Wallet(_) => None,
         }
     }
 
@@ -502,7 +517,16 @@ impl LoginProvider {
     pub fn saml(&self) -> Option<&saml::SamlLogin> {
         match &self.login {
             Login::Saml(login) => Some(login),
-            Login::Oidc(_) => None,
+            Login::Oidc(_) | Login::Wallet(_) => None,
+        }
+    }
+
+    /// Returns the wallet login, when the provider is the EUDI Wallet.
+    #[must_use]
+    pub fn wallet(&self) -> Option<&wallet::WalletLogin> {
+        match &self.login {
+            Login::Wallet(login) => Some(login),
+            Login::Oidc(_) | Login::Saml(_) => None,
         }
     }
 
@@ -514,6 +538,7 @@ impl LoginProvider {
         match &self.login {
             Login::Oidc(party) => Some(party.provider().authorization_endpoint().clone()),
             Login::Saml(login) => login.single_sign_on(),
+            Login::Wallet(login) => Some(login.endpoint().clone()),
         }
     }
 
@@ -526,6 +551,7 @@ impl LoginProvider {
         let pages = match &self.login {
             Login::Oidc(party) => party.provider().end_session_endpoint().cloned(),
             Login::Saml(login) => login.single_sign_on(),
+            Login::Wallet(_) => None,
         };
         origins_of(issuer.iter().chain(pages.iter()))
     }
@@ -580,6 +606,9 @@ impl Providers {
                     Login::Saml(Box::new(
                         saml::SamlLogin::connect(entry, Arc::clone(sp)).await?,
                     ))
+                }
+                Protocol::Wallet(entry) => {
+                    Login::Wallet(Box::new(wallet::WalletLogin::connect(entry)?))
                 }
             };
             providers.push(LoginProvider {

@@ -19,6 +19,7 @@ pub mod logout;
 pub mod pushed;
 pub mod recent;
 pub mod signing;
+pub mod wallet;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -234,9 +235,9 @@ impl Store {
         insert_token(&self.pool, token).await
     }
 
-    /// Deletes the assertion ids, the SAML assertion ids, the access and
-    /// refresh tokens, the launches and the pushed requests past their
-    /// expiry, and the grants an hour old with no token left.
+    /// Deletes the assertion ids, the SAML assertion ids, the wallet answers,
+    /// the access and refresh tokens, the launches and the pushed requests
+    /// past their expiry, and the grants an hour old with no token left.
     ///
     /// # Errors
     /// Returns [`StoreError::Database`] when a statement fails.
@@ -245,6 +246,9 @@ impl Store {
             .execute(&self.pool)
             .await?;
         sqlx::query("DELETE FROM seen_saml_assertion WHERE expires_at < now()")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM wallet_answer WHERE expires_at < now()")
             .execute(&self.pool)
             .await?;
         sqlx::query("DELETE FROM access_token WHERE expires_at < now()")

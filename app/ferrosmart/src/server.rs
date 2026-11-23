@@ -267,6 +267,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .merge(crate::admin::router(&state))
         .merge(crate::admin::register::router())
+        .merge(authorize::wallet::router())
         .merge(crate::admin::openapi::routes(
             crate::audit_log::table()
                 .into_iter()

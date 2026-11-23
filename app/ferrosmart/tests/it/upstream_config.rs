@@ -52,7 +52,7 @@ fn resolved(text: &str, keys: &Keys) -> Upstream {
 fn oidc_upstream(upstream: &Upstream) -> &OidcUpstream {
     match &upstream.protocol {
         Protocol::Oidc(oidc) => Some(oidc),
-        Protocol::Saml(_) => None,
+        Protocol::Saml(_) | Protocol::Wallet(_) => None,
     }
     .expect("the provider speaks OpenID Connect")
 }
