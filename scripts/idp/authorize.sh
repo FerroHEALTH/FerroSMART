@@ -5,7 +5,7 @@
 # without script would take it: from the authorization request an app sent
 # the browser to, through the upstream provider's login form, FerroSMART's
 # patient picker when the app asks for `launch/patient`, and its consent
-# page, approving every scope offered, to the redirect
+# page when it shows one, approving every scope offered, to the redirect
 # back to the app (SMART App Launch 2.2.0, Obtain authorization code). It
 # prints that redirect and, with --follow, also requests it, which is how
 # the Inferno lane hands the code to the kit. No specification governs the
@@ -100,17 +100,23 @@ if [[ "$location" == "$issuer"/picker* ]]; then
   location=$(redirect --data-urlencode "form_token=$form_token" --data-urlencode "patient=$patient" "$issuer/picker")
 fi
 
-# 3. FerroSMART shows the consent page; the person approves every scope
-#    offered.
-case "$location" in "$issuer"/consent*) ;; *) fail "FerroSMART did not ask for consent: $location" ;; esac
-page=$(curl -sS -c "$jar" -b "$jar" "$location")
-form_token=$(attribute "$page" '<input[^>]*name="form_token"[^>]*>' value)
-[ -n "$form_token" ] || fail "the consent page has no form token"
-approve=(--data-urlencode "form_token=$form_token" --data-urlencode "decision=approve")
-while IFS= read -r offered; do
-  approve+=(--data-urlencode "scope=$offered")
-done < <(grep -oE '<input[^>]*name="scope"[^>]*>' <<< "$page" | grep -oE 'value="[^"]*"' | sed -E 's/^value="//; s/"$//')
-location=$(redirect "${approve[@]}" "$issuer/consent")
+# 3. FerroSMART shows the consent page, unless the client's registration
+#    answers for the person (a professional at an administrator-registered
+#    app) and the code goes to the app at once; on the page the person
+#    approves every scope offered.
+case "$location" in
+  "$issuer"/consent*)
+    page=$(curl -sS -c "$jar" -b "$jar" "$location")
+    form_token=$(attribute "$page" '<input[^>]*name="form_token"[^>]*>' value)
+    [ -n "$form_token" ] || fail "the consent page has no form token"
+    approve=(--data-urlencode "form_token=$form_token" --data-urlencode "decision=approve")
+    while IFS= read -r offered; do
+      approve+=(--data-urlencode "scope=$offered")
+    done < <(grep -oE '<input[^>]*name="scope"[^>]*>' <<< "$page" | grep -oE 'value="[^"]*"' | sed -E 's/^value="//; s/"$//')
+    location=$(redirect "${approve[@]}" "$issuer/consent")
+    ;;
+  "$issuer"*) fail "FerroSMART answered neither the consent page nor the app: $location" ;;
+esac
 printf '%s\n' "$location"
 
 # 4. The browser follows the redirect to the app.
