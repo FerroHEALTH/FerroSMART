@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! `GET {issuer}/audit`: FerroSMART's own audit records, read by subject and
-//! time.
+//! `GET {issuer}/audit`: FerroSMART's own audit records, read by subject,
+//! client, event, outcome and time, a page at a time.
 //!
 //! Regulation (EU) 2025/327 Art 9 gives a person access to the information
 //! on who accessed their data, so the records FerroSMART keeps of logins and
 //! tokens are readable by an operator's client without a database client.
 //! The caller presents a bearer access token FerroSMART issued for its own
 //! issuer with [`AUDIT_SCOPE`]; the answer is a FHIR R4 `searchset` Bundle of
-//! `AuditEvent` resources, newest first. No specification governs the
-//! endpoint's parameters: our own design.
+//! `AuditEvent` resources, newest first, whose `next` link reads the next
+//! page (FHIR R4 Bundle.link). No specification governs the endpoint's
+//! parameters: our own design.
 
 use std::sync::Arc;
 
@@ -22,7 +23,7 @@ use serde_json::{Value, json};
 use crate::admin::openapi::Operation;
 use crate::introspect::{Refused, bearer, presented};
 use crate::server::AppState;
-use crate::store::audit::AuditQuery;
+use crate::store::audit::{AuditCursor, AuditQuery};
 
 /// The route of the audit records under the issuer.
 pub const AUDIT_ROUTE: &str = "/audit";
@@ -44,7 +45,7 @@ pub fn table() -> Vec<Operation> {
     vec![Operation::get(AUDIT_ROUTE, audit_log)]
 }
 
-/// `GET {issuer}/audit?subject=&since=&until=&_count=`.
+/// `GET {issuer}/audit?subject=&client=&event=&outcome=&since=&until=&_count=&cursor=`.
 pub async fn audit_log(
     State(state): State<Arc<AppState>>,
     headers: http::HeaderMap,
@@ -70,13 +71,27 @@ pub async fn audit_log(
         )
             .into_response();
     };
-    match state.store().audit_records(&asked).await {
-        Ok(records) => {
-            let entry: Vec<Value> = records
+    match state.store().audit_page(&asked).await {
+        Ok(page) => {
+            let entry: Vec<Value> = page
+                .records
                 .into_iter()
                 .map(|resource| json!({ "resource": resource }))
                 .collect();
-            let bundle = json!({ "resourceType": "Bundle", "type": "searchset", "entry": entry });
+            let audit = state.settings().endpoint(AUDIT_ROUTE);
+            let mut link =
+                vec![json!({ "relation": "self", "url": page_url(&audit, &asked, asked.after) })];
+            if let Some(next) = page.next {
+                link.push(
+                    json!({ "relation": "next", "url": page_url(&audit, &asked, Some(next)) }),
+                );
+            }
+            let bundle = json!({
+                "resourceType": "Bundle",
+                "type": "searchset",
+                "link": link,
+                "entry": entry,
+            });
             let mut response = axum::Json(bundle).into_response();
             response.headers_mut().insert(
                 header::CONTENT_TYPE,
@@ -110,17 +125,47 @@ fn challenge(status: StatusCode, error: Option<&str>) -> Response {
     response
 }
 
+/// Returns the URL of the page of `asked` that starts after `cursor`, at
+/// the audit endpoint `audit`.
+fn page_url(audit: &str, asked: &AuditQuery, cursor: Option<AuditCursor>) -> String {
+    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    for (name, value) in [
+        ("subject", &asked.subject),
+        ("client", &asked.client),
+        ("event", &asked.event),
+        ("outcome", &asked.outcome),
+        ("since", &asked.since),
+        ("until", &asked.until),
+    ] {
+        if let Some(value) = value {
+            query.append_pair(name, value);
+        }
+    }
+    query.append_pair("_count", &asked.limit.to_string());
+    if let Some(cursor) = cursor {
+        query.append_pair("cursor", &cursor.to_string());
+    }
+    format!("{audit}?{}", query.finish())
+}
+
+/// The `AuditEvent.outcome` codes (FHIR R4, the `AuditEventOutcome` value set).
+const OUTCOMES: [&str; 4] = ["0", "4", "8", "12"];
+
 /// Why a query could not be read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Unreadable;
 
-/// Reads `query`: `subject`, `since` and `until` as RFC 3339 instants, and
-/// `_count` from 1 to [`MAX_COUNT`], each at most once.
+/// Reads `query`, each parameter at most once.
+///
+/// `subject`, `client` and `event` are taken as given, `outcome` as an
+/// `AuditEvent.outcome` code, `since` and `until` as RFC 3339 instants,
+/// `_count` from 1 to [`MAX_COUNT`], and `cursor` as a next link names it.
 ///
 /// # Errors
 ///
 /// Returns [`Unreadable`] for a parameter named twice, an unknown one, an
-/// instant that is no RFC 3339 instant or a count outside its range.
+/// instant that is no RFC 3339 instant, an outcome that is no
+/// outcome code, a count outside its range or a cursor no link names.
 pub fn read_query(query: &str) -> Result<AuditQuery, Unreadable> {
     let params =
         crate::form::Params::parse(query.as_bytes(), &[]).map_err(|_repeated| Unreadable)?;
@@ -142,16 +187,34 @@ pub fn read_query(query: &str) -> Result<AuditQuery, Unreadable> {
     if !(1..=MAX_COUNT).contains(&limit) {
         return Err(Unreadable);
     }
-    if params
-        .names()
-        .any(|name| !matches!(name, "subject" | "since" | "until" | "_count"))
+    if params.names().any(|name| {
+        !matches!(
+            name,
+            "subject" | "client" | "event" | "outcome" | "since" | "until" | "_count" | "cursor"
+        )
+    }) {
+        return Err(Unreadable);
+    }
+    let text = |name: &str| params.get(name).map(str::to_owned);
+    let outcome = text("outcome");
+    if outcome
+        .as_deref()
+        .is_some_and(|code| !OUTCOMES.contains(&code))
     {
         return Err(Unreadable);
     }
+    let after = params
+        .get("cursor")
+        .map(|cursor| cursor.parse::<AuditCursor>().map_err(|_unread| Unreadable))
+        .transpose()?;
     Ok(AuditQuery {
-        subject: params.get("subject").map(str::to_owned),
+        subject: text("subject"),
+        client: text("client"),
+        event: text("event"),
+        outcome,
         since: instant("since")?,
         until: instant("until")?,
+        after,
         limit,
     })
 }
