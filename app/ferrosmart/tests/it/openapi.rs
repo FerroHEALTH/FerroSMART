@@ -18,7 +18,7 @@ const OPEN: &str = "[ferrosmart.registration]\nopen = true\n\
 
 /// Returns the document the server answers, asserting it answers without
 /// a token.
-async fn served(server: &Server) -> Value {
+pub(crate) async fn served(server: &Server) -> Value {
     let (status, headers, body) = server
         .call(Method::GET, "/admin/openapi.json", None, None)
         .await;
@@ -113,7 +113,7 @@ async fn the_document_names_exactly_the_operations_the_router_serves() {
 
 /// Asserts `answer` holds to the schema `document` gives `method` `path`
 /// for its status and `media` type.
-fn holds(document: &Value, method: &str, path: &str, media: &str, answer: &Answer) {
+pub(crate) fn holds(document: &Value, method: &str, path: &str, media: &str, answer: &Answer) {
     let status = answer.0.as_str();
     let escaped = path.replace('~', "~0").replace('/', "~1");
     let mut response = document
