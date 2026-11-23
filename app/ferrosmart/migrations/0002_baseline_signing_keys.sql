@@ -1,13 +1,14 @@
 -- SPDX-FileCopyrightText: Cadasto B.V.
 -- SPDX-License-Identifier: BUSL-1.1
 --
--- The state of each token signing key (docs/architecture.md section 13.11),
--- which every replica reads so they agree on the key that signs. The
--- private key stays in the files the configuration names.
+-- Where each token signing key stands in its rotation (docs/architecture.md
+-- section 13.11), which every replica reads so they sign with the same key.
+-- The private key stays in the files the configuration names.
 
 CREATE TABLE signing_key (
     kid text PRIMARY KEY,
-    state text NOT NULL CHECK (state IN ('next', 'active', 'retiring', 'retired')),
+    state text NOT NULL CONSTRAINT signing_key_state_check
+        CHECK (state IN ('next', 'active', 'retiring', 'retired')),
     published_at timestamptz NOT NULL,
     active_at timestamptz,
     retiring_at timestamptz,

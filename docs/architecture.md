@@ -3157,7 +3157,7 @@ specification governs.
    one is listed: in the identifier form at an unpaired base, beside the
    patient choice at a paired one. The EHR lookup and the look-up-again of
    the choice send its code in the header. The pending request keeps the
-   first lookup's code (migration 0021), so the look-up-again, and any
+   first lookup's code (`pending_authorization.purpose_of_use`), so the look-up-again, and any
    later search, declares the same one; a request naming another code, a
    code the base does not list, or none while several are listed is a
    `400` page and asks nothing. A patient's lookup of their own record
@@ -3565,7 +3565,10 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 
 Expired rows are deleted by a sweep on each replica under a PostgreSQL
 advisory lock. The migrations ship in the binary and run at start under
-the same lock.
+the same lock. They are one baseline file per area of the schema, each
+table in its final shape, and a schema change edits its area's file in
+place; nothing runs in production, so a database from before a change is
+created fresh, since sqlx refuses a file whose checksum changed.
 
 ### 13.10 The configuration
 

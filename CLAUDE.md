@@ -239,6 +239,9 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
 - **NEVER add AI or Claude attribution** to a commit, PR, issue, comment, or
   code comment. A `PreToolUse` hook blocks a commit or PR command carrying
   one.
+- **The schema changes in place.** `app/ferrosmart/migrations/` is one
+  baseline file per area; a schema change edits that file and never adds a
+  numbered migration (owner 2026-11-23, `.claude/memory/migrations-in-place.md`).
 - **Never weaken, skip, or delete a test** (`.claude/rules/testing.md`).
 - **Keep the changelog** with a fragment, never an edit of `[Unreleased]`:
   a change a product sees adds
