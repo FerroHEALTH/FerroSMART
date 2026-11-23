@@ -172,6 +172,9 @@ pub struct ClientMetadata {
     /// Whether the app is the controller's own or acts for it, which only
     /// an administrator sets (`docs/architecture.md` §13.6 item 6).
     pub first_party: bool,
+    /// Whether the client may start an authorization request only by
+    /// pushing it (RFC 9126 §6).
+    pub require_pushed_authorization_requests: bool,
 }
 
 /// A registered client, checked.
@@ -212,6 +215,9 @@ pub struct Client {
     pub registration: Registration,
     /// What the consent page shows about the app.
     pub about: About,
+    /// Whether it may start an authorization request only by pushing it
+    /// (RFC 9126 §6).
+    pub require_pushed_authorization_requests: bool,
 }
 
 /// Who registered a client.
@@ -619,6 +625,7 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
             first_party: section.first_party,
         },
         about,
+        require_pushed_authorization_requests: section.require_pushed_authorization_requests,
     })
 }
 

@@ -60,6 +60,7 @@ secret or an assertion.
 | `refresh_idle` | `30d` | How long an `offline_access` refresh token lasts unused; each refresh starts it again |
 | `online_idle` | `8h` | How long an `online_access` refresh token lasts unused, and never past the person's login at the identity provider |
 | `assurance_minimum` | `substantial` | The eIDAS level of assurance every person's login reaches: `none`, `low`, `substantial` or `high`. `substantial` is the least Implementing Regulation (EU) 2026/2099 admits; a deployment outside the eIDAS area sets `none`. Each provider's `[ferrosmart.upstream.assurance]` must map a value that reaches it |
+| `require_pushed_authorization_requests` | `false` | Whether every authorization request arrives pushed to `POST {issuer}/par` (RFC 9126 §4); `false` still holds a client whose own `require_pushed_authorization_requests` is `true` to it |
 
 None of the three lifetimes may be zero.
 

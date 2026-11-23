@@ -2,9 +2,19 @@
 -- SPDX-License-Identifier: BUSL-1.1
 --
 -- An authorization in flight (docs/architecture.md sections 13.6 and 13.9):
--- the validated request through its login, the code it ends in, the EHR
--- launches an app redeems, and the jti of every client assertion and launch
--- JWT until it expires. Codes and launch values are kept only as SHA-256.
+-- the pushed request a request_uri names, the validated request through its
+-- login, the code it ends in, the EHR launches an app redeems, and the jti of
+-- every client assertion and launch JWT until it expires. Request URIs, codes
+-- and launch values are kept only as SHA-256.
+
+-- A pushed authorization request (RFC 9126 §2), used once (§4).
+CREATE TABLE pushed_request (
+    request_uri_hash text PRIMARY KEY,
+    client_id text NOT NULL,
+    parameters text NOT NULL,
+    expires_at timestamptz NOT NULL
+);
+CREATE INDEX pushed_request_expires_at ON pushed_request (expires_at);
 
 CREATE TABLE pending_authorization (
     id text PRIMARY KEY,

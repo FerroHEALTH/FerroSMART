@@ -135,9 +135,11 @@ impl AppState {
         self.smart = discovery::smart_configuration(&self.settings, &metadata, true);
         let mut openid = discovery::openid_configuration(&metadata);
         discovery::add_acr_values(&mut openid, &self.settings);
+        discovery::add_pushed_requests(&mut openid, &self.settings);
         self.openid = Some(openid);
         self.metadata = discovery::metadata_document(&metadata);
         discovery::add_acr_values(&mut self.metadata, &self.settings);
+        discovery::add_pushed_requests(&mut self.metadata, &self.settings);
         self.providers = providers;
         self
     }
@@ -195,6 +197,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(JWKS_ROUTE, get(jwks))
         .route(UPSTREAM_JWKS_ROUTE, get(upstream_jwks))
         .route(TOKEN_ROUTE, post(crate::token::token))
+        .route(authorize::par::PAR_ROUTE, post(authorize::par::par))
         .route(crate::launch::LAUNCH_ROUTE, post(crate::launch::launch))
         .route(
             crate::audit_log::AUDIT_ROUTE,

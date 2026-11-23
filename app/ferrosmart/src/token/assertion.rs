@@ -182,13 +182,15 @@ fn verified(
         return Err(Refusal::client("the client_assertion has expired"));
     }
     // NOTE: RFC 10070 §4, a sole audience value; SMART App Launch 2.2.0 names the
-    // token URL, and the issuer identifier is admitted beside it (13.6 item 1).
+    // token URL, the issuer identifier is admitted beside it (13.6 item 1), and RFC
+    // 9126 §2 has the PAR endpoint URL admitted too.
     let settings = state.settings();
     let token_url = settings.endpoint(TOKEN_ROUTE);
+    let par_url = settings.endpoint(crate::authorize::par::PAR_ROUTE);
     let admitted = claims
         .get("aud")
         .and_then(Value::as_str)
-        .is_some_and(|aud| aud == token_url || aud == settings.issuer);
+        .is_some_and(|aud| aud == token_url || aud == par_url || aud == settings.issuer);
     if !admitted {
         return Err(Refusal::client(
             "the client_assertion's aud is not this server",
