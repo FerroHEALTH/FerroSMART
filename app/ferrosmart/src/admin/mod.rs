@@ -15,6 +15,7 @@ pub mod document;
 pub mod guard;
 pub mod openapi;
 pub mod register;
+pub mod subjects;
 pub mod upstreams;
 
 use std::sync::Arc;
@@ -66,6 +67,11 @@ fn table() -> Vec<Operation> {
         Operation::post(SECRET_ROUTE, secret),
         Operation::get(KEYS_ROUTE, keys),
         Operation::get(upstreams::UPSTREAMS_ROUTE, upstreams::upstreams),
+        Operation::get(subjects::SUBJECTS_ROUTE, subjects::lookup),
+        Operation::get(subjects::GRANTS_ROUTE, subjects::grants),
+        Operation::delete(subjects::GRANT_ROUTE, subjects::revoke),
+        Operation::delete(subjects::CONSENT_ROUTE, subjects::withdraw),
+        Operation::delete(subjects::SESSIONS_ROUTE, subjects::end_sessions),
     ]
 }
 
@@ -123,6 +129,15 @@ pub enum AdminError {
     /// The client authenticates with no secret.
     #[error("the client `{0}` authenticates with no client secret")]
     NoSecret(String),
+    /// The query is not one the route reads.
+    #[error("{0}")]
+    Query(&'static str),
+    /// No provider is configured under the name.
+    #[error("no provider is configured as `{0}`")]
+    NoProvider(String),
+    /// The person holds no live grant under the id.
+    #[error("the person holds no live grant under the id")]
+    NoGrant,
 }
 
 impl From<StoreError> for AdminError {
@@ -143,14 +158,18 @@ impl AdminError {
     fn code(&self) -> (StatusCode, &'static str) {
         match self {
             Self::Unreadable(rejection) => (rejection.status(), "invalid_request"),
-            Self::OtherClient | Self::NoSecret(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
+            Self::OtherClient | Self::NoSecret(_) | Self::Query(_) => {
+                (StatusCode::BAD_REQUEST, "invalid_request")
+            }
             Self::Metadata(ClientError::RedirectUri { .. }) => {
                 (StatusCode::BAD_REQUEST, "invalid_redirect_uri")
             }
             Self::Metadata(_) | Self::UnknownUpstream { .. } | Self::UnknownResource { .. } => {
                 (StatusCode::BAD_REQUEST, "invalid_client_metadata")
             }
-            Self::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
+            Self::NotFound(_) | Self::NoProvider(_) | Self::NoGrant => {
+                (StatusCode::NOT_FOUND, "not_found")
+            }
             Self::Exists(_) => (StatusCode::CONFLICT, "client_exists"),
             Self::LaunchUriTaken => (StatusCode::CONFLICT, "launch_uri_taken"),
             Self::Unchanged(_) => (StatusCode::CONFLICT, "unchanged"),
