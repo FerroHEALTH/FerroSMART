@@ -226,6 +226,7 @@ secrets stay in the file and are never answered.
   ]
 }
 ```
+
 ## A person's access
 
 An administrator finds a person and ends their access through the API,
