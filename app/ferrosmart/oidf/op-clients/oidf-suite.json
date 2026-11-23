@@ -1,15 +1,11 @@
 {
   "client_id": "oidf-suite",
-  "name": "OpenID Foundation conformance suite",
-  "kind": "confidential_symmetric",
+  "client_name": "OpenID Foundation conformance suite",
+  "token_endpoint_auth_method": "client_secret_basic",
   "redirect_uris": [
     "https://localhost.emobix.co.uk:8443/test/a/ferrosmart-op/callback"
   ],
-  "scopes": [
-    "openid",
-    "fhirUser",
-    "offline_access"
-  ],
+  "scope": "openid fhirUser offline_access",
   "resources": [
     "https://localhost.emobix.co.uk:9443/fhir"
   ],

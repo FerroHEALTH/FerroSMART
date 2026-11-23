@@ -6,7 +6,7 @@
 //! may `CREATE DATABASE` for the first case. CI sets it (the `nextest (core and axum)` job's PostgreSQL
 //! service); a run without it fails the case, never skips it.
 
-use ferrosmart::clients::{ClientKind, ClientMetadata, GrantType, Material, resolve};
+use ferrosmart::clients::{AuthMethod, ClientMetadata, GrantType, Material, resolve};
 use ferrosmart::store::Store;
 use secrecy::SecretString;
 
@@ -16,7 +16,7 @@ use crate::support::Database;
 fn backend(client_id: &str, scope: &str) -> ClientMetadata {
     ClientMetadata {
         client_id: client_id.to_owned(),
-        kind: ClientKind::ConfidentialAsymmetric,
+        auth_method: AuthMethod::PrivateKeyJwt,
         jwks_uri: String::from("https://export.example.org/jwks.json"),
         scopes: vec![scope.to_owned()],
         grant_types: vec![GrantType::ClientCredentials],

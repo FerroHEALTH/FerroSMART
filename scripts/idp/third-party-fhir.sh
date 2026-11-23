@@ -78,13 +78,6 @@ jq -n --arg n "$modulus" '{keys: [{kty: "RSA", kid: "lane", alg: "RS384", n: $n,
   > "$LANE_DIR/client.jwks.json"
 psql "$LANE_PG/postgres" -qc 'CREATE DATABASE ferrosmart_third_party'
 
-# The gateway's client secret, made for the run: FerroSMART holds its
-# Argon2id hash, and APISIX's route the secret itself.
-gateway_secret=$(openssl rand -hex 24)
-printf '%s' "$gateway_secret" |
-  "$root/target/debug/ferrosmart" --config "$lane/ferrosmart.toml" client hash-secret \
-    > "$LANE_DIR/gateway.phc"
-sed "s/GATEWAY_SECRET/$gateway_secret/" "$lane/apisix.yaml" > "$LANE_DIR/apisix.yaml"
 
 # The FHIR server, on a port of its own behind the validator, and one
 # synthetic patient written to it directly.
@@ -109,9 +102,12 @@ mkdir -p "$LANE_DIR/clients"
 cp "$lane/clients/example-app.json" "$LANE_DIR/clients/"
 jq --slurpfile set "$LANE_DIR/client.jwks.json" '.jwks = $set[0]' \
   "$lane/clients/third-party-lane.json" > "$LANE_DIR/clients/third-party-lane.json"
-jq --rawfile hash "$LANE_DIR/gateway.phc" '.secret_hash = ($hash | rtrimstr("\n"))' \
-  "$lane/clients/third-party-gateway.json" > "$LANE_DIR/clients/third-party-gateway.json"
-"${ferrosmart[@]}" client apply "$LANE_DIR"/clients/*.json
+cp "$lane/clients/third-party-gateway.json" "$LANE_DIR/clients/"
+"${ferrosmart[@]}" client apply "$LANE_DIR"/clients/*.json > "$LANE_DIR/apply.log"
+# APISIX's route takes the secret FerroSMART issued the gateway (RFC 7591 §3.2.1).
+gateway_secret=$(awk '$3 == "\"third-party-gateway\"" && $4 == "client_secret" { print $5 }' "$LANE_DIR/apply.log")
+[ -n "$gateway_secret" ] || fail "FerroSMART issued the gateway no secret"
+sed "s/GATEWAY_SECRET/$gateway_secret/" "$lane/apisix.yaml" > "$LANE_DIR/apisix.yaml"
 "${ferrosmart[@]}" serve > "$LANE_DIR/ferrosmart-third-party.log" 2>&1 &
 smart=$!
 for _ in $(seq 1 30); do

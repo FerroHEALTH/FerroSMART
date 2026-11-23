@@ -1,16 +1,11 @@
 {
   "client_id": "example-app",
-  "name": "Example SMART app",
-  "kind": "public",
+  "client_name": "Example SMART app",
+  "token_endpoint_auth_method": "none",
   "redirect_uris": [
     "https://app.example.org/callback"
   ],
-  "scopes": [
-    "openid",
-    "fhirUser",
-    "user/Patient.rs",
-    "user/Observation.rs"
-  ],
+  "scope": "openid fhirUser user/Patient.rs user/Observation.rs",
   "resources": [
     "https://ehr.example.org/fhir"
   ],

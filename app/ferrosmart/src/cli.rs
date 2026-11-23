@@ -6,9 +6,9 @@
 //! `serve` runs the server, `config check` reads and resolves the
 //! configuration the way `serve` would and exits, `healthcheck` asks the
 //! server on this host for its readiness, `client apply` writes client
-//! documents to the registry, `client hash-secret` turns a confidential
-//! symmetric client's secret into the hash its document holds, `subject`
-//! prints a person's pairwise subject,
+//! documents to the registry, `client secret` issues a confidential
+//! symmetric client a new secret, `subject` prints a person's pairwise
+//! subject,
 //! and `upstream registration` prints what a provider must be configured
 //! with. No specification governs the command line: our own design, the
 //! family's.
@@ -83,9 +83,12 @@ pub enum ClientCommand {
         #[arg(required = true)]
         files: Vec<std::path::PathBuf>,
     },
-    /// Reads a client secret from standard input and prints its Argon2id PHC
-    /// hash, for a confidential symmetric client's `secret_hash`.
-    HashSecret,
+    /// Issues the confidential symmetric client `client_id` a new secret and
+    /// prints it once (RFC 7591 §3.2.1).
+    Secret {
+        /// The client.
+        client_id: String,
+    },
 }
 
 #[cfg(test)]
@@ -122,9 +125,11 @@ mod tests {
                 },
             ),
             (
-                vec!["ferrosmart", "client", "hash-secret"],
+                vec!["ferrosmart", "client", "secret", "portal"],
                 Command::Client {
-                    command: ClientCommand::HashSecret,
+                    command: ClientCommand::Secret {
+                        client_id: String::from("portal"),
+                    },
                 },
             ),
             (

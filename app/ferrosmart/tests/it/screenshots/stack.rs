@@ -134,17 +134,17 @@ impl Stack {
              [[ferrosmart.resource]]\nbase = {base:?}\n\
              [[ferrosmart.role]]\nname = \"clinician\"\n\
              scopes = [\"user/Observation.rs\", \"user/Patient.rs\", \"patient/Observation.rs\"]\n\
-             [[client]]\nclient_id = \"ward-overview\"\nname = \"Ward Overview\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"ward-overview\"\nclient_name = \"Ward Overview\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{WARD_REDIRECT:?}]\ngrant_types = [\"authorization_code\", \"refresh_token\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\", \"user/Patient.rs\", \"offline_access\"]\n\
+             scope = [\"openid\", \"fhirUser\", \"user/Observation.rs\", \"user/Patient.rs\", \"offline_access\"]\n\
              upstreams = [\"idp\"]\n\
-             [[client]]\nclient_id = \"growth-chart\"\nname = \"Growth Chart\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"growth-chart\"\nclient_name = \"Growth Chart\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{CHART_REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]\n\
+             scope = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]\n\
              upstreams = [\"idp\"]\n\
-             [[client]]\nclient_id = \"my-record\"\nname = \"My Record\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"my-record\"\nclient_name = \"My Record\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{WARD_REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]",
+             scope = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]",
             secrecy::ExposeSecret::expose_secret(&database.url),
             provider.server.uri(),
             portal.server.uri()

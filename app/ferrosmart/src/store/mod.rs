@@ -30,7 +30,7 @@ use sqlx::{Postgres, Row as _};
 use url::Url;
 
 use crate::clients::{
-    About, Approval, Client, ClientKeys, ClientKind, GrantType, Registration, SecretHash,
+    About, Approval, AuthMethod, Client, ClientKeys, GrantType, Registration, SecretHash,
 };
 use crate::launch::context::Context;
 
@@ -400,20 +400,20 @@ pub(crate) async fn write_client(
         .collect();
     let approval = client.approval();
     sqlx::query(
-        "INSERT INTO client (client_id, name, kind, jwks_uri, jwks, redirect_uris, scopes, grant_types, secret_hash, \
+        "INSERT INTO client (client_id, client_name, token_endpoint_auth_method, jwks_uri, jwks, redirect_uris, scope, grant_types, secret_hash, \
          launch_uri, approved_scope, approved_by, approved_at, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
-         post_logout_redirect_uris, upstreams, registered_by, resources, assurance_minimum) \
+         post_logout_redirect_uris, upstreams, registered_by, resources, default_acr_values) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, to_timestamp($13), $14, $15, $16, $17, $18, $19, \
          $20, $21, $22, $23) \
-         ON CONFLICT (client_id) DO UPDATE SET name = $2, kind = $3, jwks_uri = $4, jwks = $5, \
-         redirect_uris = $6, scopes = $7, grant_types = $8, secret_hash = $9, launch_uri = $10, \
+         ON CONFLICT (client_id) DO UPDATE SET client_name = $2, token_endpoint_auth_method = $3, jwks_uri = $4, jwks = $5, \
+         redirect_uris = $6, scope = $7, grant_types = $8, secret_hash = $9, launch_uri = $10, \
          approved_scope = $11, approved_by = $12, approved_at = to_timestamp($13), first_party = $14, \
          client_uri = $15, logo_uri = $16, policy_uri = $17, tos_uri = $18, post_logout_redirect_uris = $19, upstreams = $20, \
-         registered_by = $21, resources = $22, assurance_minimum = $23, updated_at = now()",
+         registered_by = $21, resources = $22, default_acr_values = $23, updated_at = now()",
     )
     .bind(&client.client_id)
     .bind(&client.name)
-    .bind(client.kind.as_str())
+    .bind(client.auth_method.as_str())
     .bind(jwks_uri)
     .bind(jwks)
     .bind(&client.redirect_uris)
@@ -433,17 +433,17 @@ pub(crate) async fn write_client(
     .bind(&client.upstreams)
     .bind(RegisteredBy::of(client).as_str())
     .bind(&client.resources)
-    .bind(client.assurance_minimum.map(AssuranceLevel::as_str))
+    .bind(&client.default_acr_values)
     .execute(&mut **tx)
     .await?;
     Ok(())
 }
 
 /// The columns [`read_client`] reads.
-pub(crate) const CLIENT_COLUMNS: &str = "client_id, name, kind, jwks_uri, jwks, secret_hash, redirect_uris, \
-     post_logout_redirect_uris, upstreams, resources, scopes, grant_types, launch_uri, approved_scope, approved_by, \
+pub(crate) const CLIENT_COLUMNS: &str = "client_id, client_name, token_endpoint_auth_method, jwks_uri, jwks, secret_hash, redirect_uris, \
+     post_logout_redirect_uris, upstreams, resources, scope, grant_types, launch_uri, approved_scope, approved_by, \
      extract(epoch FROM approved_at)::bigint AS approved_at, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
-     assurance_minimum, registered_by";
+     default_acr_values, registered_by";
 
 /// Reads a `client` row.
 pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreError> {
@@ -451,12 +451,8 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
     let corrupt = || StoreError::Corrupt {
         client_id: client_id.clone(),
     };
-    let kind = match row.try_get::<String, _>("kind")?.as_str() {
-        "public" => ClientKind::Public,
-        "confidential_asymmetric" => ClientKind::ConfidentialAsymmetric,
-        "confidential_symmetric" => ClientKind::ConfidentialSymmetric,
-        _ => return Err(corrupt()),
-    };
+    let auth_method = AuthMethod::parse(&row.try_get::<String, _>("token_endpoint_auth_method")?)
+        .ok_or_else(corrupt)?;
     let secret_hash = row
         .try_get::<Option<String>, _>("secret_hash")?
         .map(SecretHash::from);
@@ -506,16 +502,16 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
         (RegisteredBy::Admin, approval) => Registration::Administered(approval),
     };
     Ok(Client {
-        name: row.try_get("name")?,
-        kind,
+        name: row.try_get("client_name")?,
+        auth_method,
         keys,
         secret_hash,
         redirect_uris: row.try_get("redirect_uris")?,
         post_logout_redirect_uris: row.try_get("post_logout_redirect_uris")?,
         upstreams: row.try_get("upstreams")?,
-        assurance_minimum: read_level(row, "assurance_minimum", &corrupt)?,
+        default_acr_values: row.try_get("default_acr_values")?,
         resources: row.try_get("resources")?,
-        scopes: row.try_get("scopes")?,
+        scopes: row.try_get("scope")?,
         grant_types,
         launch_uri: row.try_get("launch_uri")?,
         registration,

@@ -226,7 +226,7 @@ pub(crate) async fn identify(
         .get("client_id")
         .ok_or(Refusal::client("the request names no client"))?;
     match state.store().client(client_id).await {
-        Ok(Some(client)) if client.kind == ClientKind::Public => Ok(client),
+        Ok(Some(client)) if client.kind() == ClientKind::Public => Ok(client),
         Ok(_) => Err(Refusal::client(
             "the client is not a registered public client",
         )),

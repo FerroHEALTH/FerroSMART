@@ -110,7 +110,7 @@ impl Transaction {
     /// another client registers included.
     pub async fn create_client(&mut self, client: &Client) -> Result<bool, StoreError> {
         let claimed = sqlx::query(
-            "INSERT INTO client (client_id, name, kind, registered_by) VALUES ($1, $1, 'public', $2) \
+            "INSERT INTO client (client_id, client_name, token_endpoint_auth_method, registered_by) VALUES ($1, $1, 'none', $2) \
              ON CONFLICT (client_id) DO NOTHING",
         )
         .bind(&client.client_id)
@@ -131,6 +131,23 @@ impl Transaction {
     /// another client registers included.
     pub async fn update_client(&mut self, client: &Client) -> Result<(), StoreError> {
         write_client(&mut self.tx, client).await
+    }
+
+    /// Replaces the secret hash of `client_id` with `hash`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Database`] when the statement fails.
+    pub async fn set_secret(
+        &mut self,
+        client_id: &str,
+        hash: &crate::clients::SecretHash,
+    ) -> Result<(), StoreError> {
+        sqlx::query("UPDATE client SET secret_hash = $2, updated_at = now() WHERE client_id = $1")
+            .bind(client_id)
+            .bind(hash.phc())
+            .execute(&mut *self.tx)
+            .await?;
+        Ok(())
     }
 
     /// Disables `client_id`: no request finds it again, every grant and

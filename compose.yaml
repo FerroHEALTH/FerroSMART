@@ -55,10 +55,10 @@
 #   cat > config/admin.json <<'JSON'
 #   {
 #     "client_id": "admin",
-#     "name": "Administrator",
-#     "kind": "confidential_asymmetric",
+#     "client_name": "Administrator",
+#     "token_endpoint_auth_method": "private_key_jwt",
 #     "jwks_uri": "https://admin.example.org/jwks.json",
-#     "scopes": ["system/admin"],
+#     "scope": "system/admin",
 #     "grant_types": ["client_credentials"]
 #   }
 #   JSON

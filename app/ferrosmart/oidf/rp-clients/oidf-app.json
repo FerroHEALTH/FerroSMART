@@ -1,13 +1,11 @@
 {
   "client_id": "oidf-app",
-  "name": "The OpenID Foundation lane's app",
-  "kind": "public",
+  "client_name": "The OpenID Foundation lane's app",
+  "token_endpoint_auth_method": "none",
   "redirect_uris": [
     "http://localhost:9000/callback"
   ],
-  "scopes": [
-    "openid"
-  ],
+  "scope": "openid",
   "resources": [
     "https://localhost.emobix.co.uk:9443/fhir"
   ],

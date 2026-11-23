@@ -23,10 +23,10 @@ document with `ferrosmart client apply`:
 ```json
 {
   "client_id": "ehr",
-  "name": "Example EHR",
-  "kind": "confidential_asymmetric",
+  "client_name": "Example EHR",
+  "token_endpoint_auth_method": "private_key_jwt",
   "jwks_uri": "https://ehr.example.org/.well-known/jwks.json",
-  "scopes": ["system/launch.c"],
+  "scope": "system/launch.c",
   "grant_types": ["client_credentials"]
 }
 ```

@@ -81,9 +81,9 @@ impl Server {
         let database = Database::create().await;
         let text = format!(
             "[ferrosmart]\nissuer = {ISSUER:?}\n{extra}\n[ferrosmart.database]\nurl = {:?}\n\
-             [[client]]\nclient_id = \"export\"\nkind = \"confidential_asymmetric\"\n{registration}\n\
-             scopes = [\"system/Patient.rs\", \"system/Observation.rs\", \"system/AuditEvent.rs\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[client]]\nclient_id = \"app\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"export\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\n{registration}\n\
+             scope = [\"system/Patient.rs\", \"system/Observation.rs\", \"system/AuditEvent.rs\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"app\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://app.example.org/callback\"]\ngrant_types = [\"authorization_code\"]",
             secrecy::ExposeSecret::expose_secret(&database.url)
         );

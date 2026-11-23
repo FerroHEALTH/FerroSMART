@@ -43,8 +43,8 @@ pub async fn dispatch(cli: Cli) -> Result<ExitCode, Failure> {
             command: ClientCommand::Apply { files },
         } => return Box::pin(apply_clients(&cli.config, &files)).await,
         Command::Client {
-            command: ClientCommand::HashSecret,
-        } => return hash_secret(),
+            command: ClientCommand::Secret { client_id },
+        } => return Box::pin(rotate_secret(&cli.config, &client_id)).await,
         Command::Subject { upstream, sub } => return subject(&cli.config, &upstream, &sub),
         Command::Upstream {
             command: UpstreamCommand::Registration { name },
@@ -69,32 +69,6 @@ pub async fn dispatch(cli: Cli) -> Result<ExitCode, Failure> {
     }
 }
 
-/// Runs `client hash-secret`: the secret on standard input, without its
-/// final line break, hashed with Argon2id at the OWASP Password Storage
-/// Cheat Sheet floor (m=19456, t=2, p=1) under a fresh 16-byte salt, and the
-/// PHC string printed. The parameters are those `secret_hash_file` requires
-/// (`docs/architecture.md` §13.9); the subcommand is our own design.
-#[expect(
-    clippy::print_stdout,
-    reason = "the job's one answer goes to standard output"
-)]
-fn hash_secret() -> Result<ExitCode, Failure> {
-    let mut secret = String::new();
-    std::io::Read::read_to_string(&mut std::io::stdin(), &mut secret)
-        .map_err(|error| Failure::from(error).with_context("cannot read the secret"))?;
-    let secret = secret.strip_suffix('\n').map_or(secret.as_str(), |line| {
-        line.strip_suffix('\r').unwrap_or(line)
-    });
-    if secret.is_empty() {
-        return Err(Failure::boxed("the secret is empty"));
-    }
-    println!(
-        "{}",
-        crate::clients::hash_secret(secret).map_err(Failure::from)?
-    );
-    Ok(ExitCode::SUCCESS)
-}
-
 /// Runs `client apply`: each file's client document written to the
 /// registry by [`crate::admin::apply`], in the order given, one line per
 /// client. The first file that cannot be read or is refused stops the job;
@@ -107,12 +81,7 @@ async fn apply_clients(
     args: &ConfigArgs,
     files: &[std::path::PathBuf],
 ) -> Result<ExitCode, Failure> {
-    let settings = Config::load(args)
-        .and_then(|loaded| loaded.settings().resolve())
-        .map_err(Failure::refused_configuration)?;
-    let store = migrated(&settings, 1).await?;
-    let audit = crate::audit::Audit::new(settings.audit.observer.clone());
-    let state = AppState::new(settings, store, audit);
+    let state = registry(args).await?;
     for file in files {
         let named = |context: &str| format!("{context} {}", file.display());
         let bytes = std::fs::read(file)
@@ -129,10 +98,44 @@ async fn apply_clients(
             "replaced"
         };
         println!("ferrosmart: client {:?} {done}", client.client_id);
+        if let Some(secret) = &applied.secret {
+            println!(
+                "ferrosmart: client {:?} client_secret {}",
+                client.client_id,
+                secrecy::ExposeSecret::expose_secret(secret)
+            );
+        }
         if let Some(warning) = crate::clients::unassured_first_party(client) {
             println!("ferrosmart: warning: {warning}");
         }
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Returns the state the `client` jobs write the registry through: the
+/// settings `args` name and the store, migrated.
+async fn registry(args: &ConfigArgs) -> Result<AppState, Failure> {
+    let settings = Config::load(args)
+        .and_then(|loaded| loaded.settings().resolve())
+        .map_err(Failure::refused_configuration)?;
+    let store = migrated(&settings, 1).await?;
+    let audit = crate::audit::Audit::new(settings.audit.observer.clone());
+    Ok(AppState::new(settings, store, audit))
+}
+
+/// Runs `client secret`: a new secret for the confidential symmetric client
+/// `client_id`, its hash stored and the change recorded, the secret printed
+/// once (RFC 7591 §3.2.1).
+#[expect(
+    clippy::print_stdout,
+    reason = "the job's one answer goes to standard output"
+)]
+async fn rotate_secret(args: &ConfigArgs, client_id: &str) -> Result<ExitCode, Failure> {
+    let state = registry(args).await?;
+    let secret = crate::admin::issue_secret(&state, client_id)
+        .await
+        .map_err(|error| Failure::from(error).with_context("cannot issue the secret"))?;
+    println!("{}", secrecy::ExposeSecret::expose_secret(&secret));
     Ok(ExitCode::SUCCESS)
 }
 

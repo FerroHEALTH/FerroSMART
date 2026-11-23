@@ -3,21 +3,19 @@
 
 //! The JSON documents of `/admin/clients`.
 //!
-//! The client an administrator sends to the API or applies with
-//! `ferrosmart client apply` is one document, with the JWK Set and the
-//! secret hash by value; the client the API answers with never carries the
-//! secret hash.
-//!
-//! No specification governs the documents: our own design, with the RFC
-//! 7591 §2 member names wherever the registry has one.
+//! The document is RFC 7591 §2 client metadata, so the admin API, `ferrosmart
+//! client apply` and an app's own registration read one shape. `resources`,
+//! `launch_uri`, `upstreams` and `organisation_approval` are FerroSMART's
+//! own. The server issues a symmetric client's `client_secret` and keeps
+//! only its hash (RFC 7591 §3.2.1); no document or answer carries the hash.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
 
 use crate::clients::{
-    ApprovalMetadata, Client, ClientKeys, ClientKind, ClientMetadata, GrantType, Material,
-    SecretHash,
+    ApprovalMetadata, AuthMethod, Client, ClientKeys, ClientKind, ClientMetadata, GrantType,
+    Material,
 };
 use crate::store::admin::Registered;
 
@@ -66,28 +64,25 @@ pub struct Fields {
     /// The `client_id`; on an update absent or the path's.
     pub client_id: String,
     /// The name shown to the person who approves the client.
-    pub name: String,
-    /// How the client authenticates.
-    pub kind: ClientKind,
+    pub client_name: String,
+    /// How the client authenticates at the token endpoint.
+    pub token_endpoint_auth_method: AuthMethod,
     /// The URL of the client's JWK Set; exclusive with `jwks`.
     pub jwks_uri: String,
     /// The client's JWK Set by value; exclusive with `jwks_uri`.
     pub jwks: Option<Value>,
-    /// The Argon2id PHC hash of a confidential symmetric client's secret;
-    /// on an update of such a client, absent keeps the stored one.
-    pub secret_hash: Option<SecretHash>,
     /// The client's complete redirect URIs.
     pub redirect_uris: Vec<String>,
     /// The URIs the end-session endpoint may send the browser back to.
     pub post_logout_redirect_uris: Vec<String>,
     /// The providers a person may log in at for the client, by name.
     pub upstreams: Vec<String>,
-    /// The eIDAS level a person's login for the client reaches.
-    pub assurance_minimum: Option<ferrohealth_smart::assurance::AssuranceLevel>,
+    /// The `acr` values a request without `acr_values` asks for.
+    pub default_acr_values: Vec<String>,
     /// The resource servers the client's tokens may name in `aud`.
     pub resources: Vec<String>,
-    /// The scope ceiling.
-    pub scopes: Vec<String>,
+    /// The scope ceiling, space-separated.
+    pub scope: String,
     /// The grant types.
     pub grant_types: Vec<GrantType>,
     /// The app's launch URL; empty for none.
@@ -145,8 +140,8 @@ impl Fields {
     ) -> (ClientMetadata, Material) {
         let kept_hash = stored
             .filter(|client| {
-                self.kind == ClientKind::ConfidentialSymmetric
-                    && client.kind == ClientKind::ConfidentialSymmetric
+                self.token_endpoint_auth_method.kind() == ClientKind::ConfidentialSymmetric
+                    && client.kind() == ClientKind::ConfidentialSymmetric
             })
             .and_then(|client| client.secret_hash.clone());
         let approval = self.organisation_approval.map(|approval| {
@@ -170,15 +165,15 @@ impl Fields {
         });
         let section = ClientMetadata {
             client_id: client_id.to_owned(),
-            name: self.name,
-            kind: self.kind,
+            name: self.client_name,
+            auth_method: self.token_endpoint_auth_method,
             jwks_uri: self.jwks_uri,
             redirect_uris: self.redirect_uris,
             post_logout_redirect_uris: self.post_logout_redirect_uris,
             upstreams: self.upstreams,
-            assurance_minimum: self.assurance_minimum,
+            default_acr_values: self.default_acr_values,
             resources: self.resources,
-            scopes: self.scopes,
+            scopes: self.scope.split_whitespace().map(str::to_owned).collect(),
             grant_types: self.grant_types,
             launch_uri: self.launch_uri,
             client_uri: self.client_uri,
@@ -189,7 +184,7 @@ impl Fields {
         };
         let material = Material {
             jwks: self.jwks,
-            secret_hash: self.secret_hash.or(kept_hash),
+            secret_hash: kept_hash,
         };
         (section, material)
     }
@@ -200,10 +195,10 @@ impl Fields {
 pub struct ClientView<'a> {
     /// The `client_id`.
     client_id: &'a str,
-    /// The name.
-    name: &'a str,
-    /// How it authenticates.
-    kind: ClientKind,
+    /// Its `client_name`.
+    client_name: &'a str,
+    /// How it authenticates at the token endpoint.
+    token_endpoint_auth_method: AuthMethod,
     /// Its JWK Set URL.
     #[serde(skip_serializing_if = "Option::is_none")]
     jwks_uri: Option<&'a str>,
@@ -216,13 +211,13 @@ pub struct ClientView<'a> {
     post_logout_redirect_uris: &'a [String],
     /// The providers its people log in at, every one when empty.
     upstreams: &'a [String],
-    /// The eIDAS level its people's logins reach.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    assurance_minimum: Option<ferrohealth_smart::assurance::AssuranceLevel>,
+    /// The `acr` values a request without `acr_values` asks for.
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    default_acr_values: &'a [String],
     /// The resource servers its tokens may name in `aud`.
     resources: &'a [String],
-    /// Its scope ceiling.
-    scopes: &'a [String],
+    /// Its scope ceiling, space-separated.
+    scope: String,
     /// Its grant types.
     grant_types: &'a [GrantType],
     /// Its normalized launch URL.
@@ -284,16 +279,16 @@ impl<'a> From<&'a Registered> for ClientView<'a> {
         };
         Self {
             client_id: &client.client_id,
-            name: &client.name,
-            kind: client.kind,
+            client_name: &client.name,
+            token_endpoint_auth_method: client.auth_method,
             jwks_uri,
             jwks,
             redirect_uris: &client.redirect_uris,
             post_logout_redirect_uris: &client.post_logout_redirect_uris,
             upstreams: &client.upstreams,
-            assurance_minimum: client.assurance_minimum,
+            default_acr_values: &client.default_acr_values,
             resources: &client.resources,
-            scopes: &client.scopes,
+            scope: client.scopes.join(" "),
             grant_types: &client.grant_types,
             launch_uri: client.launch_uri.as_deref(),
             client_uri: client.about.home.as_ref().map(Url::as_str),

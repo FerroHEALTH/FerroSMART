@@ -7,13 +7,14 @@
 
 CREATE TABLE client (
     client_id text PRIMARY KEY,
-    name text NOT NULL,
-    kind text NOT NULL CONSTRAINT client_kind_check
-        CHECK (kind IN ('public', 'confidential_asymmetric', 'confidential_symmetric')),
+    client_name text NOT NULL,
+    token_endpoint_auth_method text NOT NULL CONSTRAINT client_token_endpoint_auth_method_check
+        CHECK (token_endpoint_auth_method IN
+            ('none', 'client_secret_basic', 'client_secret_post', 'private_key_jwt')),
     jwks_uri text,
     jwks jsonb,
     redirect_uris text[] NOT NULL DEFAULT '{}',
-    scopes text[] NOT NULL DEFAULT '{}',
+    scope text[] NOT NULL DEFAULT '{}',
     grant_types text[] NOT NULL DEFAULT '{}',
     registered_by text NOT NULL CONSTRAINT client_registered_by_check
         CHECK (registered_by IN ('admin', 'self')),
@@ -33,17 +34,15 @@ CREATE TABLE client (
     upstreams text[] NOT NULL DEFAULT '{}',
     disabled_at timestamptz,
     resources text[] NOT NULL DEFAULT '{}',
-    assurance_minimum text CONSTRAINT client_assurance_minimum_check
-        CHECK (assurance_minimum IN ('low', 'substantial', 'high')),
-    -- An asymmetric client has a JWK Set by URL or by value; a public one has none.
-    CONSTRAINT client_check
-        CHECK (kind <> 'confidential_asymmetric' OR ((jwks_uri IS NULL) <> (jwks IS NULL))),
-    CONSTRAINT client_check1
-        CHECK (kind <> 'public' OR (jwks_uri IS NULL AND jwks IS NULL)),
-    CONSTRAINT client_symmetric_keys_check
-        CHECK (kind <> 'confidential_symmetric' OR (jwks_uri IS NULL AND jwks IS NULL)),
+    default_acr_values text[] NOT NULL DEFAULT '{}',
+    -- A private_key_jwt client has a JWK Set by URL or by value; no other has one.
+    CONSTRAINT client_keys_check
+        CHECK ((token_endpoint_auth_method = 'private_key_jwt')
+            = ((jwks_uri IS NULL) <> (jwks IS NULL))),
+    CONSTRAINT client_one_key_set_check CHECK (jwks_uri IS NULL OR jwks IS NULL),
     CONSTRAINT client_secret_check
-        CHECK ((kind = 'confidential_symmetric') = (secret_hash IS NOT NULL)),
+        CHECK ((token_endpoint_auth_method IN ('client_secret_basic', 'client_secret_post'))
+            = (secret_hash IS NOT NULL)),
     -- The organisation approval is whole or absent, and the first-party mark needs it.
     CONSTRAINT client_approval_check
         CHECK ((approved_scope IS NULL) = (approved_by IS NULL)

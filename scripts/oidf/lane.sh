@@ -190,11 +190,6 @@ make_keys() {
     '.client.jwks.keys = [{kty: "RSA", kid: "oidf-lane", use: "sig", alg: "RS256", n: $n, e: "AQAB"}]' \
     "$lane/rp.json" > "$dir/rp.json"
   jq -j '.client.client_secret' "$lane/rp.json" > "$dir/rp-secret"
-  cp "$lane/op.json" "$dir/op.json"
-  for name in client client2; do
-    jq -j --arg name "$name" '.[$name].client_secret' "$lane/op.json" |
-      "$root/target/debug/ferrosmart" client hash-secret > "$dir/$name.phc"
-  done
   # NOTE: run-test-plan.py reads the key files of the directory `certs-keys` beside it, which
   # no configuration of this lane names, so it runs from a copy beside an empty one.
   mkdir -p "$dir/runner/certs-keys" "$dir/sample-openid-client-nodejs"
@@ -243,12 +238,15 @@ start_provider() {
     --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
     --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem"
     --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_op")
-  mkdir -p "$LANE_DIR/op-clients"
-  jq --rawfile hash "$LANE_DIR/client.phc" '.secret_hash = ($hash | rtrimstr("\n"))' \
-    "$lane/op-clients/oidf-suite.json" > "$LANE_DIR/op-clients/oidf-suite.json"
-  jq --rawfile hash "$LANE_DIR/client2.phc" '.secret_hash = ($hash | rtrimstr("\n"))' \
-    "$lane/op-clients/oidf-suite-2.json" > "$LANE_DIR/op-clients/oidf-suite-2.json"
-  "${op[@]}" client apply "$LANE_DIR"/op-clients/*.json
+  "${op[@]}" client apply "$lane"/op-clients/*.json > "$LANE_DIR/apply.log"
+  # The suite's configuration takes the secrets FerroSMART issued its two
+  # clients (RFC 7591 §3.2.1).
+  local one two
+  one=$(awk '$3 == "\"oidf-suite\"" && $4 == "client_secret" { print $5 }' "$LANE_DIR/apply.log")
+  two=$(awk '$3 == "\"oidf-suite-2\"" && $4 == "client_secret" { print $5 }' "$LANE_DIR/apply.log")
+  [ -n "$one" ] && [ -n "$two" ] || fail "FerroSMART issued the suite's clients no secret"
+  jq --arg one "$one" --arg two "$two" '.client.client_secret = $one | .client2.client_secret = $two' \
+    "$lane/op.json" > "$LANE_DIR/op.json"
   SSL_CERT_FILE="$LANE_DIR/trust.pem" "${op[@]}" serve > "$LANE_DIR/ferrosmart-op.log" 2>&1 &
   smart=$!
   wait_for FerroSMART "$issuer/.well-known/openid-configuration"

@@ -81,28 +81,26 @@ impl Server {
         let signing_key =
             AssertionKey::from_pem(&own, Some(Algorithm::RS256), None).expect("the server's key");
         let database = Database::create().await;
-        let secret_hash = phc(VAULT_SECRET);
-        let gateway_hash = phc(GATEWAY_SECRET);
         let text = format!(
             "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
-             [[client]]\nclient_id = \"export\"\nkind = \"confidential_asymmetric\"\njwks = {set}\n\
-             scopes = [\"system/Patient.rs\", \"system/Observation.rs\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[client]]\nclient_id = \"rs\"\nkind = \"confidential_asymmetric\"\njwks = {set}\n\
-             scopes = [\"system/introspect\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[client]]\nclient_id = \"portal\"\nkind = \"confidential_asymmetric\"\njwks = {set}\n\
+             [[client]]\nclient_id = \"export\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
+             scope = [\"system/Patient.rs\", \"system/Observation.rs\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"rs\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
+             scope = [\"system/introspect\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"portal\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
              redirect_uris = [\"https://portal.example.org/callback\"]\n\
              grant_types = [\"authorization_code\", \"refresh_token\"]\n\
-             [[client]]\nclient_id = \"vault\"\nkind = \"confidential_symmetric\"\n\
-             secret_hash = {secret_hash:?}\nredirect_uris = [\"https://vault.example.org/callback\"]\n\
+             [[client]]\nclient_id = \"vault\"\ntoken_endpoint_auth_method = \"client_secret_basic\"\n\
+             redirect_uris = [\"https://vault.example.org/callback\"]\n\
              grant_types = [\"authorization_code\", \"refresh_token\"]\n\
-             [[client]]\nclient_id = \"gateway\"\nkind = \"confidential_symmetric\"\n\
-             secret_hash = {gateway_hash:?}\nredirect_uris = [\"https://gateway.example.org/callback\"]\n\
-             scopes = [\"system/introspect\"]\ngrant_types = [\"authorization_code\"]\n\
-             [[client]]\nclient_id = \"app\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"gateway\"\ntoken_endpoint_auth_method = \"client_secret_basic\"\n\
+             redirect_uris = [\"https://gateway.example.org/callback\"]\n\
+             scope = [\"system/introspect\"]\ngrant_types = [\"authorization_code\"]\n\
+             [[client]]\nclient_id = \"app\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://app.example.org/callback\"]\n\
              grant_types = [\"authorization_code\", \"refresh_token\"]\n\
-             [[client]]\nclient_id = \"admin\"\nkind = \"confidential_asymmetric\"\njwks = {set}\n\
-             scopes = [\"system/admin\"]\ngrant_types = [\"client_credentials\"]\n{extra}",
+             [[client]]\nclient_id = \"admin\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
+             scope = [\"system/admin\"]\ngrant_types = [\"client_credentials\"]\n{extra}",
             secrecy::ExposeSecret::expose_secret(&database.url)
         );
         let settings = config(&crate::support::reach_every_base(&text), &keys)
@@ -119,6 +117,8 @@ impl Server {
             &crate::support::clients(&crate::support::reach_every_base(&text)),
         )
         .await;
+        crate::support::set_secret(&store, "vault", VAULT_SECRET).await;
+        crate::support::set_secret(&store, "gateway", GATEWAY_SECRET).await;
         let app = router(state);
         Self {
             app,

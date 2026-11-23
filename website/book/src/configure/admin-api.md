@@ -20,10 +20,10 @@ apply its document with `ferrosmart client apply registry-admin.json`
 ```json
 {
   "client_id": "registry-admin",
-  "name": "Registry administration",
-  "kind": "confidential_asymmetric",
+  "client_name": "Registry administration",
+  "token_endpoint_auth_method": "private_key_jwt",
   "jwks_uri": "https://admin.example.org/jwks.json",
-  "scopes": ["system/admin"],
+  "scope": "system/admin",
   "grant_types": ["client_credentials"]
 }
 ```
@@ -63,19 +63,20 @@ Every answer is JSON with `Cache-Control: no-store`.
 ## The client document
 
 The API takes the document `ferrosmart client apply` reads
-([the client registry](clients.md#the-client-registry)). FerroSMART never
-stores or returns a symmetric client's secret, and an answer never carries
-its `secret_hash`. A `PUT` of a symmetric client without `secret_hash` keeps
-the stored one.
+([the client registry](clients.md#the-client-registry)). For a client that
+authenticates with a secret, the answer that registers it carries the
+secret FerroSMART issued, once, as `client_secret` with
+`client_secret_expires_at` 0 (RFC 7591 §3.2.1); a `PUT` keeps the stored
+secret, and no answer repeats it.
 
 ```json
 {
   "client_id": "growth-chart",
-  "name": "Growth chart",
-  "kind": "public",
+  "client_name": "Growth chart",
+  "token_endpoint_auth_method": "none",
   "redirect_uris": ["https://growth-chart.example.org/callback"],
   "resources": ["https://ehr.example.org/fhir"],
-  "scopes": ["openid", "fhirUser", "launch", "user/Observation.rs"],
+  "scope": "openid fhirUser launch user/Observation.rs",
   "grant_types": ["authorization_code"],
   "organisation_approval": {
     "scopes": ["openid", "launch", "user/Observation.rs"],

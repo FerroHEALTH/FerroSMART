@@ -4,7 +4,7 @@
 //! What the client registry admits and refuses, each rule its own case.
 
 use ferrosmart::clients::{
-    Client, ClientError, ClientKeys, ClientKind, ClientMetadata, GrantType, Material, resolve,
+    AuthMethod, Client, ClientError, ClientKeys, ClientMetadata, GrantType, Material, resolve,
 };
 use serde_json::{Value, json};
 
@@ -28,7 +28,7 @@ fn admit_with(section: &ClientMetadata, set: &Value) -> Result<Client, ClientErr
 fn backend(client_id: &str) -> ClientMetadata {
     ClientMetadata {
         client_id: client_id.to_owned(),
-        kind: ClientKind::ConfidentialAsymmetric,
+        auth_method: AuthMethod::PrivateKeyJwt,
         jwks_uri: String::from("https://export.example.org/jwks.json"),
         scopes: vec![String::from("system/Patient.rs")],
         grant_types: vec![GrantType::ClientCredentials],
@@ -115,13 +115,13 @@ fn a_confidential_asymmetric_client_registers_exactly_one_jwk_set() {
 #[test]
 fn a_public_client_neither_registers_keys_nor_uses_client_credentials() {
     let keyed = ClientMetadata {
-        kind: ClientKind::Public,
+        auth_method: AuthMethod::None,
         ..backend("keyed")
     };
     assert!(matches!(admit(&keyed), Err(ClientError::Rule { .. })));
     let public = ClientMetadata {
         client_id: String::from("app"),
-        kind: ClientKind::Public,
+        auth_method: AuthMethod::None,
         grant_types: vec![GrantType::ClientCredentials],
         ..ClientMetadata::default()
     };
@@ -132,7 +132,7 @@ fn a_public_client_neither_registers_keys_nor_uses_client_credentials() {
 fn an_authorization_code_client_registers_absolute_redirect_uris() {
     let app = |uris: Vec<&str>| ClientMetadata {
         client_id: String::from("app"),
-        kind: ClientKind::Public,
+        auth_method: AuthMethod::None,
         redirect_uris: uris.into_iter().map(String::from).collect(),
         grant_types: vec![GrantType::AuthorizationCode, GrantType::AuthorizationCode],
         ..ClientMetadata::default()
@@ -181,7 +181,7 @@ fn a_refresh_token_continues_an_authorization_code_grant_only() {
     ));
     let app = ClientMetadata {
         client_id: String::from("app"),
-        kind: ClientKind::Public,
+        auth_method: AuthMethod::None,
         redirect_uris: vec![String::from("https://app.example.org/callback")],
         grant_types: vec![GrantType::RefreshToken, GrantType::AuthorizationCode],
         ..ClientMetadata::default()
@@ -199,7 +199,7 @@ fn a_refresh_token_continues_an_authorization_code_grant_only() {
 fn a_launch_url_is_normalized_and_registered_once() {
     let app = |client_id: &str, launch_uri: &str| ClientMetadata {
         client_id: client_id.to_owned(),
-        kind: ClientKind::Public,
+        auth_method: AuthMethod::None,
         redirect_uris: vec![String::from("https://app.example.org/callback")],
         grant_types: vec![GrantType::AuthorizationCode],
         launch_uri: launch_uri.to_owned(),
@@ -236,7 +236,7 @@ fn the_app_s_urls_are_absolute_https_urls() {
     let app = |key: &str, value: &str| {
         let mut section = ClientMetadata {
             client_id: String::from("app"),
-            kind: ClientKind::Public,
+            auth_method: AuthMethod::None,
             redirect_uris: vec![String::from("https://app.example.org/callback")],
             grant_types: vec![GrantType::AuthorizationCode],
             ..ClientMetadata::default()
@@ -277,13 +277,14 @@ fn the_app_s_urls_are_absolute_https_urls() {
     assert_eq!(None, about.home);
 }
 
-/// Returns a client of `kind` that registers `redirect`, first party when
-/// `first_party`, its JWK Set at a URL when it is confidential.
-fn redirecting(kind: ClientKind, redirect: &str, first_party: bool) -> ClientMetadata {
+/// Returns a client authenticating by `auth_method` that registers
+/// `redirect`, first party when `first_party`, its JWK Set at a URL when it
+/// authenticates with a key.
+fn redirecting(auth_method: AuthMethod, redirect: &str, first_party: bool) -> ClientMetadata {
     ClientMetadata {
         client_id: String::from("app"),
-        kind,
-        jwks_uri: if kind == ClientKind::ConfidentialAsymmetric {
+        auth_method,
+        jwks_uri: if auth_method == AuthMethod::PrivateKeyJwt {
             String::from("https://app.example.org/jwks.json")
         } else {
             String::new()
@@ -313,7 +314,7 @@ fn a_public_client_is_assured_only_by_a_claimed_https_redirect() {
         ("https://127.0.0.1/callback", false),
         ("https://localhost/callback", false),
     ] {
-        let client = admit(&redirecting(ClientKind::Public, redirect, false)).expect("admitted");
+        let client = admit(&redirecting(AuthMethod::None, redirect, false)).expect("admitted");
         assert_eq!(assured, client.assured_by(redirect), "{redirect}");
     }
 }
@@ -321,12 +322,7 @@ fn a_public_client_is_assured_only_by_a_claimed_https_redirect() {
 #[test]
 fn a_confidential_client_is_assured_whatever_its_redirect() {
     let redirect = "com.example.app:/callback";
-    let client = admit(&redirecting(
-        ClientKind::ConfidentialAsymmetric,
-        redirect,
-        false,
-    ))
-    .expect("admitted");
+    let client = admit(&redirecting(AuthMethod::PrivateKeyJwt, redirect, false)).expect("admitted");
     assert!(
         client.assured_by(redirect),
         "it authenticates at the token endpoint"
@@ -341,7 +337,7 @@ fn a_first_party_public_app_without_a_claimed_https_redirect_is_warned_of() {
         let client = admit(&redirecting(kind, redirect, first_party)).expect("admitted");
         ferrosmart::clients::unassured_first_party(&client)
     };
-    let warning = warned(ClientKind::Public, "com.example.app:/callback", true);
+    let warning = warned(AuthMethod::None, "com.example.app:/callback", true);
     assert!(
         warning
             .as_deref()
@@ -349,24 +345,43 @@ fn a_first_party_public_app_without_a_claimed_https_redirect_is_warned_of() {
         "{warning:?}"
     );
     assert!(
-        warned(ClientKind::Public, "http://127.0.0.1:8400/callback", true).is_some(),
+        warned(AuthMethod::None, "http://127.0.0.1:8400/callback", true).is_some(),
         "a loopback redirect"
     );
     assert!(
-        warned(ClientKind::Public, "https://app.example.org/callback", true).is_none(),
+        warned(AuthMethod::None, "https://app.example.org/callback", true).is_none(),
         "a claimed https redirect"
     );
     assert!(
-        warned(ClientKind::Public, "com.example.app:/callback", false).is_none(),
+        warned(AuthMethod::None, "com.example.app:/callback", false).is_none(),
         "no first-party approval"
     );
     assert!(
-        warned(
-            ClientKind::ConfidentialAsymmetric,
-            "com.example.app:/callback",
-            true
-        )
-        .is_none(),
+        warned(AuthMethod::PrivateKeyJwt, "com.example.app:/callback", true).is_none(),
         "a confidential client"
     );
+}
+
+// NOTE: OpenID Connect Dynamic Client Registration 1.0 §2, default_acr_values;
+// FerroSMART knows the eIDAS levels (docs/architecture.md §13.28).
+#[test]
+fn default_acr_values_name_eidas_levels_alone() {
+    let with = |values: &[&str]| ClientMetadata {
+        default_acr_values: values.iter().map(|value| String::from(*value)).collect(),
+        ..backend("export")
+    };
+    let client = admit(&with(&[
+        "http://eidas.europa.eu/LoA/high",
+        "http://eidas.europa.eu/LoA/substantial",
+    ]))
+    .expect("admitted");
+    assert_eq!(
+        Some(ferrohealth_smart::assurance::AssuranceLevel::Substantial),
+        client.default_acr(),
+        "any listed value answers, so the lowest"
+    );
+    assert!(matches!(
+        admit(&with(&["urn:example:loa:2"])),
+        Err(ClientError::Rule { .. })
+    ));
 }

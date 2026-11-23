@@ -14,25 +14,74 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
 
-/// How a client authenticates at the token endpoint (SMART App Launch
-/// 2.2.0, Conformance, Client Types).
+/// How a client authenticates at the token endpoint: its RFC 7591 §2
+/// `token_endpoint_auth_method`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum AuthMethod {
+    /// No client authentication.
+    #[default]
+    None,
+    /// The client secret by HTTP Basic (RFC 6749 §2.3.1).
+    ClientSecretBasic,
+    /// The client secret in the form (RFC 6749 §2.3.1).
+    ClientSecretPost,
+    /// A JWT assertion signed with a key of the client's JWK Set (RFC 7523
+    /// §2.2).
+    PrivateKeyJwt,
+}
+
+impl AuthMethod {
+    /// Returns the method as RFC 7591 §2 and the store spell it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ClientSecretBasic => "client_secret_basic",
+            Self::ClientSecretPost => "client_secret_post",
+            Self::PrivateKeyJwt => "private_key_jwt",
+        }
+    }
+
+    /// Returns the method the store wrote as `text`.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        [
+            Self::None,
+            Self::ClientSecretBasic,
+            Self::ClientSecretPost,
+            Self::PrivateKeyJwt,
+        ]
+        .into_iter()
+        .find(|method| method.as_str() == text)
+    }
+
+    /// Returns the SMART client type the method makes.
+    #[must_use]
+    pub const fn kind(self) -> ClientKind {
+        match self {
+            Self::None => ClientKind::Public,
+            Self::ClientSecretBasic | Self::ClientSecretPost => ClientKind::ConfidentialSymmetric,
+            Self::PrivateKeyJwt => ClientKind::ConfidentialAsymmetric,
+        }
+    }
+}
+
+/// A SMART client type (SMART App Launch 2.2.0, Conformance, Client Types),
+/// which the client's [`AuthMethod`] makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientKind {
     /// No client authentication (`client-public`).
-    #[default]
     Public,
-    /// A JWT assertion signed with a key of its registered JWK Set
+    /// A JWT assertion signed with a key of its JWK Set
     /// (`client-confidential-asymmetric`).
     ConfidentialAsymmetric,
-    /// A client secret, sent by HTTP Basic or in the form
-    /// (`client-confidential-symmetric`, SMART App Launch 2.2.0, Client
-    /// Authentication: Symmetric; RFC 6749 §2.3.1).
+    /// A client secret (`client-confidential-symmetric`).
     ConfidentialSymmetric,
 }
 
 impl ClientKind {
-    /// Returns the kind as the store writes it.
+    /// Returns the type as the audit record names it.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -55,6 +104,7 @@ pub enum GrantType {
     RefreshToken,
     /// The token exchange of a patient's own token for their openEHR base
     /// (RFC 8693 §2.1; `docs/architecture.md` §13.29).
+    #[serde(rename = "urn:ietf:params:oauth:grant-type:token-exchange")]
     TokenExchange,
 }
 
@@ -78,10 +128,10 @@ pub struct ClientMetadata {
     /// client SHALL be assigned a `client_id`", SMART App Launch 2.2.0,
     /// Client Authentication: Asymmetric).
     pub client_id: String,
-    /// The name shown to the person who approves the client.
+    /// The `client_name` shown to the person who approves the client.
     pub name: String,
-    /// How the client authenticates.
-    pub kind: ClientKind,
+    /// Its `token_endpoint_auth_method`.
+    pub auth_method: AuthMethod,
     /// The URL of the client's JWK Set; exclusive with a JWK Set by value.
     pub jwks_uri: String,
     /// The client's complete redirect URIs.
@@ -94,14 +144,14 @@ pub struct ClientMetadata {
     /// the client, by name; every provider when empty. With more than one,
     /// the person chooses on a page.
     pub upstreams: Vec<String>,
-    /// The eIDAS level a person's login for the client reaches, above the
-    /// deployment's floor and the provider's minimum; none leaves those.
-    pub assurance_minimum: Option<ferrohealth_smart::assurance::AssuranceLevel>,
+    /// The `acr` values a request that sends no `acr_values` asks for
+    /// (OpenID Connect Dynamic Client Registration 1.0 §2).
+    pub default_acr_values: Vec<String>,
     /// The `[[ferrosmart.resource]]` bases the client's tokens may name in
     /// `aud`; none when empty, which leaves the client FerroSMART's own
     /// endpoints alone (`docs/architecture.md` §13.6 item 12).
     pub resources: Vec<String>,
-    /// The scopes the client may be granted at most.
+    /// Its `scope`, split: the scopes the client may be granted at most.
     pub scopes: Vec<String>,
     /// The grant types the client may use.
     pub grant_types: Vec<GrantType>,
@@ -202,10 +252,10 @@ pub fn approvable(scope: &str) -> bool {
 pub struct Client {
     /// The `client_id`.
     pub client_id: String,
-    /// The name.
+    /// Its `client_name`.
     pub name: String,
-    /// How it authenticates.
-    pub kind: ClientKind,
+    /// Its `token_endpoint_auth_method`.
+    pub auth_method: AuthMethod,
     /// Its JWK Set, by URL or by value.
     pub keys: Option<ClientKeys>,
     /// The Argon2id PHC hash of its secret, for a confidential symmetric
@@ -217,8 +267,8 @@ pub struct Client {
     pub post_logout_redirect_uris: Vec<String>,
     /// The providers a person may log in at for it, every one when empty.
     pub upstreams: Vec<String>,
-    /// The eIDAS level a person's login for it reaches, when it sets one.
-    pub assurance_minimum: Option<ferrohealth_smart::assurance::AssuranceLevel>,
+    /// The `acr` values a request without `acr_values` asks for.
+    pub default_acr_values: Vec<String>,
     /// The resource servers its tokens may name in `aud`.
     pub resources: Vec<String>,
     /// Its scope ceiling.
@@ -245,6 +295,21 @@ pub enum Registration {
 }
 
 impl Client {
+    /// Returns its SMART client type.
+    #[must_use]
+    pub const fn kind(&self) -> ClientKind {
+        self.auth_method.kind()
+    }
+
+    /// Returns the level its `default_acr_values` ask for, when it sets any.
+    #[must_use]
+    pub fn default_acr(&self) -> Option<ferrohealth_smart::assurance::AssuranceLevel> {
+        self.default_acr_values
+            .iter()
+            .filter_map(|value| crate::assurance::of_uri(value))
+            .min()
+    }
+
     /// Returns its approval for the whole organisation, when an
     /// administrator gave one.
     #[must_use]
@@ -298,7 +363,7 @@ impl Client {
     /// §7.2; RFC 6749 §10.2).
     #[must_use]
     pub fn assured_by(&self, redirect_uri: &str) -> bool {
-        self.kind != ClientKind::Public || claimed_https(redirect_uri)
+        self.kind() != ClientKind::Public || claimed_https(redirect_uri)
     }
 
     /// Returns whether the client's tokens may name `base` in `aud`: a base
@@ -334,7 +399,7 @@ pub fn claimed_https(uri: &str) -> bool {
 /// the consent page (RFC 8252 §8.6).
 #[must_use]
 pub fn unassured_first_party(client: &Client) -> Option<String> {
-    let unassured = client.kind == ClientKind::Public
+    let unassured = client.kind() == ClientKind::Public
         && client
             .approval()
             .is_some_and(|approval| approval.first_party)
@@ -444,7 +509,7 @@ pub enum ClientError {
         client_id: String,
     },
     /// The secret hash is no Argon2id PHC string at the OWASP floor.
-    #[error("the client `{client_id}`: `secret_hash` is no usable Argon2id hash")]
+    #[error("the client `{client_id}`: its secret hash is no usable Argon2id hash")]
     SecretHash {
         /// The client.
         client_id: String,
@@ -537,12 +602,13 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
         return Err(rule("no `grant_types`"));
     }
     let jwks = !section.jwks_uri.is_empty() || material.jwks.is_some();
-    if section.kind != ClientKind::ConfidentialSymmetric && material.secret_hash.is_some() {
+    let kind = section.auth_method.kind();
+    if kind != ClientKind::ConfidentialSymmetric && material.secret_hash.is_some() {
         return Err(rule(
             "only a confidential symmetric client registers a secret hash",
         ));
     }
-    let (keys, secret_hash) = match section.kind {
+    let (keys, secret_hash) = match kind {
         ClientKind::Public => {
             if jwks {
                 return Err(rule("a public client registers no JWK Set"));
@@ -554,7 +620,7 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
             }
             // NOTE: RFC 8693 §2.1, the exchanging client authenticates.
             if grant_types.contains(&GrantType::TokenExchange) {
-                return Err(rule("a public client cannot use `token_exchange`"));
+                return Err(rule("a public client cannot use the token exchange grant"));
             }
             (None, None)
         }
@@ -580,17 +646,7 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
     {
         return Err(rule("`refresh_token` needs `authorization_code`"));
     }
-    if grant_types.contains(&GrantType::AuthorizationCode) && section.redirect_uris.is_empty() {
-        return Err(rule("`authorization_code` needs `redirect_uris`"));
-    }
-    for uri in &section.redirect_uris {
-        // NOTE: RFC 6749 §3.1.2, "The redirection endpoint URI MUST be an
-        // absolute URI" and "MUST NOT include a fragment component".
-        let absolute = Url::parse(uri).is_ok_and(|url| url.fragment().is_none());
-        if !absolute {
-            return Err(ClientError::RedirectUri { client_id: id() });
-        }
-    }
+    check_redirects(section, &grant_types)?;
     check_post_logout(section, &grant_types)?;
     if !section
         .scopes
@@ -599,6 +655,7 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
     {
         return Err(ClientError::Scope { client_id: id() });
     }
+    check_acr(section)?;
     let launch_uri = resolve_launch_uri(section, &grant_types)?;
     let approval = section
         .organisation_approval
@@ -613,13 +670,13 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
         } else {
             section.name.clone()
         },
-        kind: section.kind,
+        auth_method: section.auth_method,
         keys,
         secret_hash,
         redirect_uris: section.redirect_uris.clone(),
         post_logout_redirect_uris: section.post_logout_redirect_uris.clone(),
         upstreams: section.upstreams.clone(),
-        assurance_minimum: section.assurance_minimum,
+        default_acr_values: section.default_acr_values.clone(),
         resources: section.resources.clone(),
         scopes: section.scopes.clone(),
         grant_types,
@@ -654,6 +711,46 @@ fn resolve_about(section: &ClientMetadata) -> Result<About, ClientError> {
         logo: url("logo_uri", &section.logo_uri)?,
         policy: url("policy_uri", &section.policy_uri)?,
         terms: url("tos_uri", &section.tos_uri)?,
+    })
+}
+
+/// Checks the client's `redirect_uris`: at least one beside the
+/// authorization code grant, each absolute with no fragment.
+fn check_redirects(section: &ClientMetadata, grant_types: &[GrantType]) -> Result<(), ClientError> {
+    if grant_types.contains(&GrantType::AuthorizationCode) && section.redirect_uris.is_empty() {
+        return Err(ClientError::Rule {
+            client_id: section.client_id.clone(),
+            rule: "`authorization_code` needs `redirect_uris`",
+        });
+    }
+    // NOTE: RFC 6749 §3.1.2, "The redirection endpoint URI MUST be an absolute
+    // URI" and "MUST NOT include a fragment component".
+    if section
+        .redirect_uris
+        .iter()
+        .all(|uri| Url::parse(uri).is_ok_and(|url| url.fragment().is_none()))
+    {
+        return Ok(());
+    }
+    Err(ClientError::RedirectUri {
+        client_id: section.client_id.clone(),
+    })
+}
+
+/// Checks that each of the client's `default_acr_values` is an eIDAS level
+/// FerroSMART knows (`docs/architecture.md` §13.28); OpenID Connect Dynamic
+/// Client Registration 1.0 §2 leaves the values to the server.
+fn check_acr(section: &ClientMetadata) -> Result<(), ClientError> {
+    if section
+        .default_acr_values
+        .iter()
+        .all(|value| crate::assurance::of_uri(value).is_some())
+    {
+        return Ok(());
+    }
+    Err(ClientError::Rule {
+        client_id: section.client_id.clone(),
+        rule: "`default_acr_values` names a value other than an eIDAS level",
     })
 }
 
@@ -813,9 +910,36 @@ pub const HASH_MEMORY_KIB: u32 = 19_456;
 /// The Argon2id passes of a hash [`hash_secret`] makes.
 pub const HASH_PASSES: u32 = 2;
 
+/// A client secret FerroSMART issued, answered once and kept only as its
+/// hash (RFC 7591 §3.2.1).
+#[derive(Debug)]
+pub struct IssuedSecret {
+    /// The secret, which the answer carries once.
+    pub secret: secrecy::SecretString,
+    /// Its Argon2id hash, which the store keeps.
+    pub hash: SecretHash,
+}
+
+/// Returns a fresh client secret: 32 random bytes, base64url without
+/// padding, with its Argon2id hash.
+///
+/// # Errors
+/// Returns [`HashError`] when no random bytes or salt can be drawn or the
+/// hash fails.
+pub fn issue_secret() -> Result<IssuedSecret, HashError> {
+    use base64::Engine as _;
+    let mut bytes = [0_u8; 32];
+    aws_lc_rs::rand::fill(&mut bytes).map_err(|_unspecified| HashError::Salt)?;
+    let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    let hash = SecretHash(hash_secret(&secret)?);
+    Ok(IssuedSecret {
+        secret: secrecy::SecretString::from(secret),
+        hash,
+    })
+}
+
 /// Returns the Argon2id PHC hash of `secret` at [`HASH_MEMORY_KIB`] and
-/// [`HASH_PASSES`], one lane, under a fresh 16-byte salt: the string a
-/// confidential symmetric client's `secret_hash` holds.
+/// [`HASH_PASSES`], one lane, under a fresh 16-byte salt.
 ///
 /// # Errors
 /// Returns [`HashError`] when no salt can be drawn or the hash fails.
@@ -834,8 +958,8 @@ pub fn hash_secret(secret: &str) -> Result<String, HashError> {
 /// Why a secret could not be hashed.
 #[derive(Debug, thiserror::Error)]
 pub enum HashError {
-    /// No salt could be drawn.
-    #[error("no salt could be drawn")]
+    /// No random bytes could be drawn.
+    #[error("no random bytes could be drawn")]
     Salt,
     /// The parameters were refused.
     #[error("the Argon2id parameters were refused")]

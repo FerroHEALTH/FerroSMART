@@ -154,7 +154,11 @@ async fn begin(
         description: "the request names no scope",
     }))?;
     let mut asking = super::oidc::read(params).map_err(Stop::Deny)?;
-    asking.acr = asking.acr.max(client.assurance_minimum);
+    // NOTE: OpenID Connect Core 1.0 §3.1.2.1 and Dynamic Client Registration 1.0 §2,
+    // a request without acr_values asks for the client's default_acr_values.
+    if asking.acr.is_none() {
+        asking.acr = client.default_acr();
+    }
     let launch_context = match params.get("launch") {
         Some(launch) => {
             match crate::launch::redeem(state, &client.client_id, launch, audience, scope, from)

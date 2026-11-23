@@ -234,7 +234,7 @@ async fn a_patient_s_own_login_shows_the_page() {
 fn an_approval_beyond_the_ceiling_or_of_a_system_scope_is_refused() {
     let section = |scopes: &[&str], first_party: bool| ClientMetadata {
         client_id: String::from("app"),
-        kind: ClientKind::Public,
+        auth_method: AuthMethod::None,
         redirect_uris: vec![String::from(REDIRECT)],
         grant_types: vec![GrantType::AuthorizationCode],
         scopes: ["openid", "user/Observation.rs", "patient/Observation.rs"]

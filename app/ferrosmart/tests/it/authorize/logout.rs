@@ -363,7 +363,7 @@ async fn a_logout_request_that_does_not_check_is_a_page_and_no_redirect() {
 fn post_logout_redirect_uris_need_the_code_grant_and_absolute_urls() {
     let section = |grant: GrantType, uri: &str| ClientMetadata {
         client_id: String::from("app"),
-        kind: ClientKind::Public,
+        auth_method: AuthMethod::None,
         redirect_uris: vec![String::from(REDIRECT)],
         post_logout_redirect_uris: vec![String::from(uri)],
         grant_types: vec![grant],
