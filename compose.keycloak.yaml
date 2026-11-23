@@ -75,6 +75,8 @@ services:
       keycloak:
         condition: service_started
     environment:
+      # A workforce login with no eIDAS level of assurance (docs/architecture.md §13.28).
+      FERROSMART__FERROSMART__ASSURANCE_MINIMUM: none
       # The upstream login and its claims (ferrosmart.toml of the example).
       FERROSMART__FERROSMART__UPSTREAM__0__NAME: keycloak
       # The keycloak preset brings the scope, the two claims and RS256.

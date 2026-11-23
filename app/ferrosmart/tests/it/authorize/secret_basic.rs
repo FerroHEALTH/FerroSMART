@@ -21,6 +21,7 @@ fn with_secret(issuer: &str, keys: &Keys) -> String {
          [[ferrosmart.upstream]]\nname = \"idp\"\n\
          [ferrosmart.upstream.oidc]\nissuer = {issuer:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
          [ferrosmart.upstream.oidc.client_secret_basic]\nsecret_file = {:?}\n\
+         {ASSURANCE}\
          [[ferrosmart.client]]\nclient_id = \"app\"\nkind = \"public\"\n\
          redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\nscopes = [\"openid\"]\n\
          resources = [{RESOURCE:?}]",

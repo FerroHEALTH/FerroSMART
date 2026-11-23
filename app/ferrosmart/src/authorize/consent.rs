@@ -299,6 +299,7 @@ pub(super) async fn approve(
         },
         roles: pending.roles.clone(),
         person_claims: pending.person_claims.granted(&granted.join(" ")),
+        acr: pending.acr,
     };
     if let Err(error) = issue_code(state, &hash, &grant, basis, from).await {
         tracing::error!(error = %ferrohealth_server::run::chain(&error), "the code could not be stored");

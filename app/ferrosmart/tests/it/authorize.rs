@@ -27,7 +27,8 @@ use url::Url;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 use crate::support::{
-    Database, Keys, RESOURCE, audit, bases, commit, config, events, from_client, iua_71, records,
+    ASSURANCE, Database, Keys, RESOURCE, SUBSTANTIAL_ACR, audit, bases, commit, config, events,
+    from_client, iua_71, records,
 };
 
 /// FerroSMART's issuer in every case.
@@ -118,7 +119,8 @@ impl Provider {
     pub(crate) async fn answer_claims(&self, claims: &Value) {
         let now = jiff::Timestamp::now().as_second();
         let mut body = json!({
-            "iss": self.server.uri(), "aud": UPSTREAM_CLIENT, "iat": now, "exp": now + 300
+            "iss": self.server.uri(), "aud": UPSTREAM_CLIENT, "iat": now, "exp": now + 300,
+            "acr": SUBSTANTIAL_ACR
         });
         if let (Some(base), Some(over)) = (body.as_object_mut(), claims.as_object()) {
             base.extend(over.clone());
@@ -234,7 +236,7 @@ impl Smart {
         let assertion = crate::support::upstream_assertion(keys.dir.path());
         let text = format!(
             "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
-             [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\nfhir_user_claim = \"fhir_user\"\n{assertion}\
+             [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\nfhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [ferrosmart.branding]\nsmart_style_url = {STYLE:?}\n{resource}\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = {role}\n\
              [[ferrosmart.client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
@@ -2507,6 +2509,7 @@ async fn a_token_response_is_readable_from_the_app_s_origin_alone() {
 }
 
 mod approval;
+mod assurance;
 mod consent_basis;
 mod core_op;
 mod ehr_picker;

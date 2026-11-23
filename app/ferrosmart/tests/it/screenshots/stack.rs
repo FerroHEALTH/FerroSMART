@@ -26,7 +26,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 use crate::authorize::{
     CHALLENGE, Provider, UPSTREAM_CLIENT, VERIFIER, form_token, location, param, set_cookie,
 };
-use crate::support::{Database, Keys, audit, config, from_client};
+use crate::support::{ASSURANCE, Database, Keys, audit, config, from_client};
 
 /// The clinician app's redirect URI.
 const WARD_REDIRECT: &str = "https://ward.example.org/callback";
@@ -125,10 +125,10 @@ impl Stack {
             "[ferrosmart]\nissuer = {issuer:?}\n[ferrosmart.database]\nurl = {:?}\n\
              [[ferrosmart.upstream]]\nname = \"idp\"\nlabel = \"Hospital staff\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
-             fhir_user_claim = \"fhir_user\"\n{assertion}\
+             fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [[ferrosmart.upstream]]\nname = \"portal\"\nlabel = \"Patient portal\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
-             fhir_user_claim = \"fhir_user\"\n{assertion}\
+             fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [ferrosmart.branding]\nname = \"Example Hospital\"\n\
              consent_text = \"Example Hospital records every access to your record.\"\n\
              [[ferrosmart.resource]]\nbase = {base:?}\n\

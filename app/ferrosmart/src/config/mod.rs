@@ -131,6 +131,9 @@ pub struct FerroSmartSection {
     /// by default, and never past the end of the person's upstream login
     /// (`docs/architecture.md` §13.6 item 7).
     pub online_idle: Span,
+    /// The eIDAS level every person's login reaches; `substantial` by
+    /// default (`docs/architecture.md` §13.28).
+    pub assurance_minimum: crate::assurance::Floor,
     /// `[ferrosmart.keys]`: the key ring that signs every token.
     pub keys: KeysSection,
     /// `[ferrosmart.database]`: the PostgreSQL database of the state.
@@ -342,6 +345,7 @@ impl Default for FerroSmartSection {
             access_token_lifetime: Span::from_mins(5),
             refresh_idle: Span::from_days(30),
             online_idle: Span::from_hours(8),
+            assurance_minimum: crate::assurance::Floor::Substantial,
             keys: KeysSection::default(),
             database: DatabaseSection::default(),
             client: Vec::new(),

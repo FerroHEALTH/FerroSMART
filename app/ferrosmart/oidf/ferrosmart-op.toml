@@ -12,6 +12,10 @@ listen = "127.0.0.1:9443"
 
 [ferrosmart]
 issuer = "https://localhost.emobix.co.uk:9443"
+# A test lane's login with no eIDAS level of assurance; an EU deployment keeps the
+# substantial floor and maps its provider's values under
+# [ferrosmart.upstream.assurance] (docs/architecture.md §13.28).
+assurance_minimum = "none"
 
 [ferrosmart.database]
 max_connections = 4

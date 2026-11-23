@@ -16,7 +16,7 @@ use crate::form::Params;
 use crate::server::AppState;
 
 use super::assertion::authenticate;
-use super::mint::{Grant, Identity, mint};
+use super::mint::{Authentication, Grant, Identity, mint};
 use super::{Issued, Refusal, server_error};
 
 /// The longest a Backend Services access token lives: five minutes, the
@@ -53,6 +53,7 @@ pub(super) async fn client_credentials(state: &AppState, form: &Params) -> Resul
             context: &Map::new(),
             // NOTE: RFC 9068 §2.2.3.1, roles are a person's; Backend Services has none.
             roles: &[],
+            login: None,
         },
     )
 }
@@ -160,6 +161,10 @@ pub(super) async fn authorization_code(
             under: Some(&launch.grant_id),
             context: &launch.context,
             roles: &grant.roles,
+            login: Some(Authentication {
+                auth_time: Some(grant.auth_time),
+                acr: grant.acr,
+            }),
         },
     )?;
     issued.response.refresh_token = launch.refresh_token;

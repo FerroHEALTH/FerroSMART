@@ -130,8 +130,11 @@ impl AppState {
         }
         let metadata = discovery::metadata(&self.settings, true);
         self.smart = discovery::smart_configuration(&self.settings, &metadata, true);
-        self.openid = Some(discovery::openid_configuration(&metadata));
+        let mut openid = discovery::openid_configuration(&metadata);
+        discovery::add_acr_values(&mut openid, &self.settings);
+        self.openid = Some(openid);
         self.metadata = discovery::metadata_document(&metadata);
+        discovery::add_acr_values(&mut self.metadata, &self.settings);
         self.providers = providers;
         self
     }

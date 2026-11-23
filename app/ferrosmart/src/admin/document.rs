@@ -78,6 +78,8 @@ pub struct Fields {
     pub post_logout_redirect_uris: Vec<String>,
     /// The providers a person may log in at for the client, by name.
     pub upstreams: Vec<String>,
+    /// The eIDAS level a person's login for the client reaches.
+    pub assurance_minimum: Option<ferrohealth_smart::assurance::AssuranceLevel>,
     /// The resource servers the client's tokens may name in `aud`.
     pub resources: Vec<String>,
     /// The scope ceiling.
@@ -172,6 +174,7 @@ impl Fields {
             redirect_uris: self.redirect_uris,
             post_logout_redirect_uris: self.post_logout_redirect_uris,
             upstreams: self.upstreams,
+            assurance_minimum: self.assurance_minimum,
             resources: self.resources,
             scopes: self.scopes,
             grant_types: self.grant_types,
@@ -211,6 +214,9 @@ pub struct ClientView<'a> {
     post_logout_redirect_uris: &'a [String],
     /// The providers its people log in at, every one when empty.
     upstreams: &'a [String],
+    /// The eIDAS level its people's logins reach.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assurance_minimum: Option<ferrohealth_smart::assurance::AssuranceLevel>,
     /// The resource servers its tokens may name in `aud`.
     resources: &'a [String],
     /// Its scope ceiling.
@@ -284,6 +290,7 @@ impl<'a> From<&'a Registered> for ClientView<'a> {
             redirect_uris: &client.redirect_uris,
             post_logout_redirect_uris: &client.post_logout_redirect_uris,
             upstreams: &client.upstreams,
+            assurance_minimum: client.assurance_minimum,
             resources: &client.resources,
             scopes: &client.scopes,
             grant_types: &client.grant_types,

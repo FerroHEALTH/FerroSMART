@@ -43,7 +43,9 @@ version `docs/VERSIONS.md` pins, and the design of record,
    NCPeH Components Specifications 10.0.0, the Interoperability
    Specifications 8.0.1, and the MyHealth@EU Requirements Catalogue 10.0.0,
    cited by section and never copied), **Implementing Regulation (EU)
-   2026/2099** and **the GDPR** for a MyHealth@EU contact point, and the
+   2026/2099** and **the GDPR** for a MyHealth@EU contact point,
+   **Implementing Regulation (EU) 2015/1502** with 2026/2099 Articles 4(2)
+   and 6(3) for the eIDAS level of assurance in FerroSMART's tokens, and the
    **Federation Tier with AQL specification** 1.0.1 Annex B for the Dutch
    `authorization_details`.
 6. **The docs.rs pages of the pinned crates** (`jsonwebtoken`, `argon2`,

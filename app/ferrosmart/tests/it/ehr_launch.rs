@@ -28,7 +28,7 @@ use url::Url;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 use crate::support::{
-    Database, Keys, RESOURCE, audit, bases, config, ec_key, from_client, records,
+    ASSURANCE, Database, Keys, RESOURCE, audit, bases, config, ec_key, from_client, records,
 };
 
 /// FerroSMART's issuer.
@@ -113,7 +113,7 @@ impl Smart {
         let assertion = crate::support::upstream_assertion(keys.dir.path());
         let text = format!(
             "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
-             [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = {uri:?}\nclient_id = {UPSTREAM_CLIENT:?}\nfhir_user_claim = \"fhir_user\"\n{assertion}\
+             [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = {uri:?}\nclient_id = {UPSTREAM_CLIENT:?}\nfhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [ferrosmart.branding]\nsmart_style_url = {STYLE:?}\n\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = [\"user/Observation.rs\", \"patient/Observation.rs\"]\n\
              [[ferrosmart.client]]\nclient_id = \"ehr\"\nkind = \"confidential_asymmetric\"\n\
@@ -163,6 +163,7 @@ impl Smart {
             &json!({
                 "iss": self.provider.uri(), "aud": UPSTREAM_CLIENT, "sub": "synthetic-person",
                 "nonce": nonce, "iat": now, "exp": now + 300, "name": "Synthetic Clinician",
+                "acr": crate::support::SUBSTANTIAL_ACR,
                 "roles": ["clinician"], "fhir_user": fhir_user
             }),
             &self.provider_key,

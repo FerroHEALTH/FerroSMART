@@ -8,6 +8,10 @@
 
 [ferrosmart]
 issuer = "http://localhost:8080"
+# A test lane's login with no eIDAS level of assurance; an EU deployment keeps the
+# substantial floor and maps its provider's values under
+# [ferrosmart.upstream.assurance] (docs/architecture.md §13.28).
+assurance_minimum = "none"
 # Short, so the lane can show the validator refusing a token past its `exp`
 # (RFC 9068 §4) without waiting minutes.
 access_token_lifetime = "10s"

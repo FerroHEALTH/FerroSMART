@@ -5,7 +5,7 @@
 
 use ferrosmart::config::error::Error;
 
-use crate::support::{Keys, config, ec_key};
+use crate::support::{ASSURANCE, Keys, config, ec_key};
 
 #[test]
 fn a_configuration_with_an_issuer_and_a_key_resolves() {
@@ -442,7 +442,8 @@ fn upstream(keys: &Keys, extra: &str) -> String {
     format!(
         "[ferrosmart]\nissuer = \"https://smart.example.org\"\n\
          [ferrosmart.keys]\nprivate_key_file = {current:?}\n\
-         [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = \"https://idp.example.org\"\nclient_id = \"ferrosmart\"\n{extra}"
+         [[ferrosmart.upstream]]\nname = \"idp\"\n{ASSURANCE}\
+         [ferrosmart.upstream.oidc]\nissuer = \"https://idp.example.org\"\nclient_id = \"ferrosmart\"\n{extra}"
     )
 }
 

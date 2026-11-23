@@ -450,6 +450,7 @@ async fn paired() -> (Server, String) {
             upstream_session: None,
             approved_at: None,
             roles: &[],
+            acr: None,
         })
         .await
         .expect("recorded");

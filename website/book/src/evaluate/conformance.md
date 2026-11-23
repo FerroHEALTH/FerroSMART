@@ -98,10 +98,12 @@ the parameters about that login go there:
 | `prompt=consent` | Shows the consent page even when a remembered consent or an approval would answer |
 | `max_age` | Passed to the identity provider; a login older than it is begun again once with `prompt=login`, and one still older answers `login_required` |
 | `ui_locales` | Passed to the identity provider, and chooses the pages' language before the browser's |
-| `display`, `claims_locales`, `acr_values` | Taken without changing the flow |
+| `acr_values` | An eIDAS level URI is the level the login must reach, asked of the identity provider; a login below it answers `unmet_authentication_requirements` (RFC 9470 §5). Any other value is taken and ignored |
+| `display`, `claims_locales` | Taken without changing the flow |
 
 Every ID Token is signed `RS256` and carries `auth_time`, the time the
-person authenticated at the identity provider. FerroSMART has no UserInfo
+person authenticated at the identity provider, and `acr`, the eIDAS level
+of that login. FerroSMART has no UserInfo
 endpoint: the ID Token and its `fhirUser` claim identify the person.
 
 ## What SMART leaves open, and how FerroSMART decides

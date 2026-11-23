@@ -41,6 +41,17 @@ fn pem(der: &[u8]) -> String {
     )
 }
 
+/// The `acr` the stub providers' ID Tokens carry.
+pub(crate) const SUBSTANTIAL_ACR: &str = "urn:synthetic:loa:substantial";
+
+/// The `[ferrosmart.upstream.assurance]` table of a stub provider: a value
+/// for each eIDAS level, [`SUBSTANTIAL_ACR`] at the deployment's default
+/// floor.
+pub(crate) const ASSURANCE: &str = "[ferrosmart.upstream.assurance]\n\
+     levels = { \"urn:synthetic:loa:low\" = \"low\", \
+     \"urn:synthetic:loa:substantial\" = \"substantial\", \
+     \"urn:synthetic:loa:high\" = \"high\" }\n";
+
 /// The `[ferrosmart.upstream.oidc.private_key_jwt.keys]` table of a case,
 /// with a fresh assertion key under `dir`: `private_key_jwt`, the client
 /// authentication FerroSMART takes upstream when no table names another

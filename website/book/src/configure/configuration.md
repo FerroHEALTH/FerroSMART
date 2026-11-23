@@ -58,6 +58,7 @@ secret or an assertion.
 | `access_token_lifetime` | `5min` | How long an access token lives, for every grant; at most one hour (SMART App Launch 2.2.0, App Launch) |
 | `refresh_idle` | `30d` | How long an `offline_access` refresh token lasts unused; each refresh starts it again |
 | `online_idle` | `8h` | How long an `online_access` refresh token lasts unused, and never past the person's login at the identity provider |
+| `assurance_minimum` | `substantial` | The eIDAS level of assurance every person's login reaches: `none`, `low`, `substantial` or `high`. `substantial` is the least Implementing Regulation (EU) 2026/2099 admits; a deployment outside the eIDAS area sets `none`. Each provider's `[ferrosmart.upstream.assurance]` must map a value that reaches it |
 
 None of the three lifetimes may be zero.
 
@@ -170,6 +171,17 @@ entry, nobody logs in and FerroSMART answers Backend Services alone.
 The table present names the protocol: `[ferrosmart.upstream.oidc]` for
 OpenID Connect or `[ferrosmart.upstream.saml]` for SAML 2.0, exactly one
 per entry.
+
+`[ferrosmart.upstream.assurance]` says what the provider's logins are
+worth. A login below the minimum is refused with `access_denied`, and every
+token issued on a login carries its level as `acr`, the eIDAS URI
+`http://eidas.europa.eu/LoA/low`, `/substantial` or `/high`, beside
+`auth_time`.
+
+| Key | What it is |
+|---|---|
+| `levels` | A table of the provider's value to its eIDAS level (`low`, `substantial`, `high`): an OpenID Connect provider's `acr`, a SAML provider's `AuthnContextClassRef`. A value it does not name carries no level |
+| `minimum` | The level every login at this provider reaches, above `assurance_minimum`; none by default |
 
 Each entry has its own issuer, and two entries never share one. A client
 lists the providers its people may log in at in `upstreams`; with none
