@@ -50,6 +50,12 @@ manage-organisation = Your organisation registered this app for its staff. Disco
 manage-first-party = This is your organisation's own app. Disconnect ends its access now; the app works again the next time you sign in to it.
 manage-disconnect = Disconnect
 manage-scope = Access given
+manage-recent = Patients you chose lately
+manage-recent-count = { $count ->
+    [one] The patient picker keeps one patient you chose, to offer again.
+   *[other] The patient picker keeps { $count } patients you chose, to offer again.
+}
+manage-recent-forget = Forget them
 manage-subject = Your identifier at this server. An administrator may ask for it to link you to your records.
 picker-title = Choose a patient
 picker-intro = The app works with one patient. Find the patient by name or identifier; you see only the patients you may see.
@@ -57,6 +63,8 @@ picker-name = Name
 picker-identifier = Identifier
 picker-search = Search
 picker-results = Patients found
+picker-recent = Patients you chose lately
+picker-assigned = Patients assigned to you
 picker-none = No patient you may see matches the search.
 picker-choose = Choose this patient
 picker-born = born { $date }

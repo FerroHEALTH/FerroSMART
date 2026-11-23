@@ -234,7 +234,7 @@ fn patient(
     // client, which `named_actor` checked, so it is read here as no representative.
     let mut patient_claims = issued.clone();
     patient_claims.remove("act");
-    crate::kind::classify_listed(
+    crate::kind::classify(
         IssuerKind::Patients,
         &settings.profile,
         None,
@@ -286,7 +286,7 @@ fn federation(
             .as_ref()
             .map(|assurance| &assurance.levels),
     };
-    let classified = crate::kind::classify_listed(
+    let classified = crate::kind::classify(
         IssuerKind::Federation,
         &settings.profile,
         Some(&context),

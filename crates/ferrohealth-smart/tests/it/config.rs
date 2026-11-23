@@ -331,7 +331,7 @@ fn a_rendered_section_carries_every_key_and_no_secret() {
         issuer = "https://as.example.org"
         kind = "persons"
         audience = ["https://fhir.example.org"]
-        scopeless_subjects = ["svc"]
+        role_claims = ["roles"]
         [[basic.users]]
         user = "etl"
         password_hash = "{PHC}"
@@ -385,8 +385,8 @@ fn a_rendered_section_carries_every_key_and_no_secret() {
             .is_none()
     );
     assert_eq!(
-        serde_json::json!(["svc"]),
-        auth_json["issuer"]["i6"]["scopeless_subjects"]
+        serde_json::json!(["roles"]),
+        auth_json["issuer"]["i6"]["role_claims"]
     );
     let oauth_json = serde_json::to_value(&oauth).expect("serializes");
     assert_eq!(

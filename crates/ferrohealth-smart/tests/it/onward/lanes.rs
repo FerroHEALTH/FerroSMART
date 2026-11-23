@@ -73,7 +73,7 @@ async fn a_standards_only_lane_loads_and_exchanges_at_its_token_endpoint() {
         &format!(
             "issuer = \"https://as.example.org\"\nkind = \"persons\"\ntoken_endpoint = \"{}/token\"\n\
              audiences = [\"https://ehr.example.org\"]\nindicators = [\"https://ehr.example.org/api\"]\n\
-             [onward.profile]\nmax_onward_lifetime = \"3600s\"\nfirst_party_clients = [\"portal\"]",
+             [onward.profile]\nmax_onward_lifetime = \"3600s\"",
             server.uri()
         ),
     );
@@ -116,7 +116,7 @@ async fn exchanges_for_two_calls(extra: &str) -> (bool, usize, Option<String>) {
         &format!(
             "issuer = \"https://as.example.org\"\nkind = \"persons\"\ntoken_endpoint = \"{}/token\"\n\
              audiences = [\"https://ehr.example.org\"]\nindicators = [\"https://ehr.example.org/api\"]\n{extra}\n\
-             [onward.profile]\nmax_onward_lifetime = \"3600s\"\nfirst_party_clients = [\"portal\"]",
+             [onward.profile]\nmax_onward_lifetime = \"3600s\"",
             server.uri()
         ),
     );
@@ -217,7 +217,7 @@ async fn a_secret_or_mutual_tls_client_names_itself_the_actor_with_its_own_key()
             &format!(
                 "issuer = \"https://as.example.org\"\nkind = \"persons\"\ntoken_endpoint = \"{}/token\"\n\
                  audiences = [\"https://ehr.example.org\"]\nindicators = [\"https://ehr.example.org/api\"]\nactor_assertion = true\n\
-                 [onward.profile]\nmax_onward_lifetime = \"3600s\"\nfirst_party_clients = [\"portal\"]",
+                 [onward.profile]\nmax_onward_lifetime = \"3600s\"",
                 server.uri()
             ),
         );
@@ -257,7 +257,7 @@ fn a_private_key_file_that_signs_nothing_fails_to_load_naming_the_key() {
         &with_actor_key(&ClientKey::new(), "client_secret_basic"),
         "issuer = \"https://as.example.org\"\nkind = \"persons\"\ntoken_endpoint = \"https://as.example.org/token\"\n\
          audiences = [\"https://ehr.example.org\"]\nindicators = [\"https://ehr.example.org/api\"]\n\
-         [onward.profile]\nmax_onward_lifetime = \"3600s\"\nfirst_party_clients = [\"portal\"]",
+         [onward.profile]\nmax_onward_lifetime = \"3600s\"",
     );
     let refused = resolved(&section);
     assert!(

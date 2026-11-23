@@ -66,6 +66,12 @@ pub struct Settings {
     /// The `fhirUser` lookups of each FHIR base that names any
     /// (`docs/architecture.md` §13.6 item 9).
     pub fhir_user_lookups: BTreeMap<String, Vec<crate::config::FhirUserLookupSection>>,
+    /// The search each FHIR base that names one lists a professional's
+    /// assigned patients by.
+    pub assigned: BTreeMap<String, crate::config::Assigned>,
+    /// How long a chosen patient stays on the person's recent list; zero
+    /// keeps none.
+    pub recent_retention: Duration,
     /// The upstream providers people log in at, in configuration order.
     pub upstreams: Vec<Upstream>,
     /// FerroSMART as a SAML 2.0 service provider, when `[ferrosmart.saml]`
@@ -202,6 +208,8 @@ impl Config {
             pairings: pairings(&section.resource)?,
             purposes: purposes(&section.resource)?,
             fhir_user_lookups: fhir_user_lookups(&section.resource)?,
+            assigned: assigned(&section.resource)?,
+            recent_retention: section.picker.recent_retention.get(),
             upstreams: upstreams(&section.upstream, &keys, section.assurance_minimum)?,
             saml: service_provider(section)?,
             roles: roles(&section.role)?,
@@ -499,6 +507,26 @@ pub struct Pairing {
     pub fhir_base: String,
     /// The `system` of the `Patient.identifier` that carries the subject id.
     pub subject_system: String,
+}
+
+/// Returns the assigned-patient search of each FHIR base in `sections` that
+/// names one.
+fn assigned(
+    sections: &[crate::config::ResourceSection],
+) -> Result<BTreeMap<String, crate::config::Assigned>, Error> {
+    let mut assigned = BTreeMap::new();
+    for section in sections {
+        let Some(search) = section.assigned else {
+            continue;
+        };
+        if section.kind != crate::config::ResourceKind::Fhir {
+            return Err(Error::Resource {
+                rule: "`assigned` is for a FHIR base",
+            });
+        }
+        assigned.insert(section.base.clone(), search);
+    }
+    Ok(assigned)
 }
 
 /// Returns the pairing of each openEHR base in `sections` that names a

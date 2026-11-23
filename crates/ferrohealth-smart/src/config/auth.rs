@@ -27,7 +27,6 @@ use crate::federation::FederationSection;
 use crate::federation::Field;
 use crate::federation::person::AttributesSection;
 use crate::kind::IssuerKind;
-use crate::kind::standing::StandingSource;
 use crate::party::config::PartySection;
 use crate::profile::Profile;
 use crate::profile::ProfileKeys;
@@ -138,7 +137,7 @@ impl AuthSection {
     /// outside RFC 6749 §3.3, a product scope in no extension form, or a
     /// cache key the random source cannot draw.
     pub fn resolve(&self, bases: &[&str]) -> Result<Resolved, ConfigError> {
-        self.resolve_over(None, &StandingSource::Lists, bases)
+        self.resolve_over(None, bases)
     }
 
     /// Resolves the section as [`AuthSection::resolve`] does, every `tls`
@@ -154,16 +153,14 @@ impl AuthSection {
         tls: &dyn TlsBuilder,
         bases: &[&str],
     ) -> Result<Resolved, ConfigError> {
-        self.resolve_over(Some(tls), &StandingSource::Lists, bases)
+        self.resolve_over(Some(tls), bases)
     }
 
     /// Resolves the section for a product serving `bases`, over the
-    /// product's TLS builder when one is handed, every issuer's standing
-    /// questions answered by `standing`.
-    pub(super) fn resolve_over(
+    /// product's TLS builder when one is handed.
+    fn resolve_over(
         &self,
         builder: Option<&dyn TlsBuilder>,
-        standing: &StandingSource,
         bases: &[&str],
     ) -> Result<Resolved, ConfigError> {
         self.check_discovery()?;
@@ -201,7 +198,6 @@ impl AuthSection {
                     AuthMode::Jwt => {
                         let mut settings = settings_of(entry, kind, bases)?;
                         settings.tls = tls.clone();
-                        settings.standing = standing.clone();
                         settings.validate().map_err(|source| ConfigError::Issuer {
                             issuer: shown(&entry.issuer),
                             source: Box::new(source),
@@ -210,8 +206,7 @@ impl AuthSection {
                     }
                     #[cfg(feature = "fetch")]
                     AuthMode::Introspection => {
-                        introspection
-                            .push(introspection_of(entry, kind, builder, standing, bases)?);
+                        introspection.push(introspection_of(entry, kind, builder, bases)?);
                     }
                     #[cfg(not(feature = "fetch"))]
                     AuthMode::Introspection => return Err(ConfigError::IntrospectionUnavailable),
@@ -383,7 +378,6 @@ fn settings_of(
     settings.jwks_refresh_interval = entry.jwks_refresh_interval.get();
     settings.jwks_file = (!entry.jwks_file.is_empty()).then(|| PathBuf::from(&entry.jwks_file));
     settings.timeout = entry.timeout.get();
-    settings.scopeless_subjects = entry.scopeless_subjects.iter().cloned().collect();
     settings.role_claims = role_claims_of(entry, kind);
     settings.assurance.clone_from(&entry.assurance);
     settings.federation = federation_of(entry)?;
@@ -399,7 +393,6 @@ fn introspection_of(
     entry: &IssuerEntry,
     kind: IssuerKind,
     builder: Option<&dyn TlsBuilder>,
-    standing: &StandingSource,
     bases: &[&str],
 ) -> Result<crate::resource::introspection::IntrospectionSettings, ConfigError> {
     use crate::resource::introspection::IntrospectionAuth;
@@ -464,8 +457,6 @@ fn introspection_of(
     settings.cache_max_age = section.cache_max_age.get();
     settings.cache_capacity = section.cache_capacity;
     settings.timeout = entry.timeout.get();
-    settings.scopeless_subjects = entry.scopeless_subjects.iter().cloned().collect();
-    settings.standing = standing.clone();
     settings.role_claims = role_claims_of(entry, kind);
     settings.profile = profile_of(entry)?;
     settings.assurance.clone_from(&entry.assurance);
@@ -608,15 +599,9 @@ fn profile_of(entry: &IssuerEntry) -> Result<Profile, ConfigError> {
         issuer: shown(&entry.issuer),
         source: Box::new(source.into()),
     };
-    let profile = Profile::resolve(entry.preset, &file)
+    Profile::resolve(entry.preset, &file)
         .map(|profile| profile.with_keys(entry.profile.clone()))
-        .map_err(refused)?;
-    // NOTE: RFC 9068 §4, `aud` names this resource server; only FerroSMART is known
-    // to issue a client's tokens for the bases its registration lists alone (#682).
-    if profile.audience_delegates && entry.preset != crate::profile::Preset::Ferrosmart {
-        return Err(refused(crate::profile::ProfileError::AudienceDelegates));
-    }
-    Ok(profile)
+        .map_err(refused)
 }
 
 /// Returns the role claims of `entry`: its own, or the RFC 9068 §2.2.3.1

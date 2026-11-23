@@ -18,6 +18,7 @@ use argon2::password_hash::PasswordHasher;
 use ferrohealth_smart::basic::PasswordStore;
 use ferrohealth_smart::config::AuthSection;
 use ferrohealth_smart::config::ConfigError;
+use ferrohealth_smart::kind::Actor;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::party::Bound;
@@ -184,7 +185,6 @@ pub(crate) fn table() -> PartySection {
 /// The profile of the issuer: the defaults, with the deployment's client.
 fn profile() -> Profile {
     Profile {
-        first_party_clients: vec![String::from(CLIENT)],
         ..Profile::default()
     }
 }
@@ -212,7 +212,6 @@ fn caller(kind: CallerKind, key: Option<&str>, claims: &Value) -> Caller {
         Some(String::from(CLIENT)),
         "user/*.rs",
         None,
-        false,
         kind,
     )
     .with_issuer(String::from(ISSUER))
@@ -442,7 +441,15 @@ async fn a_caller_on_a_party_without_its_marker_is_wrong_marker_and_both_bind_ei
         "p-2",
         Markers::REPRESENTATIVE,
     )]));
-    for kind in [CallerKind::Person, CallerKind::Delegated { actor: None }] {
+    for kind in [
+        CallerKind::Person,
+        CallerKind::Delegated {
+            actor: Actor {
+                issuer: String::from("https://as.example.org"),
+                sub: String::from("actor-1"),
+            },
+        },
+    ] {
         let outcome = binding(&represents)
             .resolve(&caller(kind.clone(), Some(LOGIN), &json!({})))
             .await?;
@@ -460,7 +467,12 @@ async fn a_caller_on_a_party_without_its_marker_is_wrong_marker_and_both_bind_ei
     let both = FakeSource::answering(Lookup::Parties(vec![record("p-3", Markers::BOTH)]));
     for kind in [
         CallerKind::Person,
-        CallerKind::Delegated { actor: None },
+        CallerKind::Delegated {
+            actor: Actor {
+                issuer: String::from("https://as.example.org"),
+                sub: String::from("actor-1"),
+            },
+        },
         CallerKind::Representative {
             represented: String::from("subject-1"),
             ground: None,

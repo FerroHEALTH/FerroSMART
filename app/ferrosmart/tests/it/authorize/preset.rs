@@ -5,14 +5,13 @@
 //! under `ferrohealth-smart`'s `ferrosmart` preset (RFC 9068 §2.2; SMART App
 //! Launch 2.2.0, Scopes and Launch Context).
 
-use ferrohealth_smart::kind::{CallerKind, IssuerKind, Unclassified};
+use ferrohealth_smart::kind::{CallerKind, IssuerKind};
 use ferrohealth_smart::profile::ProfileKeys;
-use ferrohealth_smart::resource::Rejection;
 
 use super::*;
 
-// NOTE: SMART App Launch 2.2.0, a SMART app acts for the signed-in person, so a
-// resource server reads it as a delegate it lists by `client_id`.
+// NOTE: RFC 9068 §4 and RFC 8707: a token whose `aud` names the resource server was
+// issued for it, so the resource server reads the signed-in person through any app.
 #[tokio::test]
 async fn a_person_s_token_is_read_under_the_ferrosmart_preset() {
     let (smart, body) = launch_with("offline_access").await;
@@ -24,18 +23,18 @@ async fn a_person_s_token_is_read_under_the_ferrosmart_preset() {
     let audience = claims["aud"].as_str().expect("one audience");
     // NOTE: docs/architecture.md §13.21, the one `persons` table that also reads
     // the Backend Services tokens (token::a_backend_services_token_is_read_...).
-    let listed = crate::support::one_table("app");
+    let keys = ProfileKeys::default();
     let caller = crate::support::read_under_preset(
         &jwks,
         ISSUER,
         audience,
         IssuerKind::Persons,
-        &listed,
+        &keys,
         token,
     )
     .await
     .expect("admitted");
-    assert_eq!(&CallerKind::Delegated { actor: None }, caller.kind());
+    assert_eq!(&CallerKind::Person, caller.kind());
     // NOTE: RFC 9068 §2.2, `sub` is the person, and the app is `client_id`.
     assert_eq!(claims["sub"].as_str(), Some(caller.subject()));
     assert_eq!(Some("app"), caller.client_id());
@@ -46,30 +45,12 @@ async fn a_person_s_token_is_read_under_the_ferrosmart_preset() {
         "{:?}",
         caller.scope()
     );
-    let unlisted = crate::support::read_under_preset(
-        &jwks,
-        ISSUER,
-        audience,
-        IssuerKind::Persons,
-        &ProfileKeys::default(),
-        token,
-    )
-    .await;
-    assert!(
-        matches!(
-            unlisted,
-            Err(Rejection::Unclassified {
-                reason: Unclassified::UnlistedClient
-            })
-        ),
-        "an app the resource server does not list: {unlisted:?}"
-    );
     let elsewhere = crate::support::read_under_preset(
         &jwks,
         "https://other-issuer.example.org",
         audience,
         IssuerKind::Persons,
-        &listed,
+        &keys,
         token,
     )
     .await;

@@ -450,17 +450,25 @@ fn unknown_user(locale: &Locale, pending: &Pending, client_name: &Arg) -> Html {
     Html::raw(format!("<p>{}</p>", Html::text(words)))
 }
 
+/// What the patient picker page shows below its search form.
+#[derive(Debug, Clone, Copy)]
+pub enum Listed<'a> {
+    /// The patients a search found.
+    Found(&'a [crate::picker::Found]),
+    /// Before a search: the person's recent and assigned patients, with the
+    /// words of a notice when it names any.
+    Offered(&'a crate::picker::shortcuts::Shortcuts, Option<&'a str>),
+}
+
 /// Returns the patient picker page of `pending`: the search form, filled
-/// with `asked`, and the patients `found` when a search ran, or else the
-/// words of `notice` when it names any.
+/// with `asked`, and what `listed` holds below it.
 #[must_use]
 pub fn picker(
     state: &AppState,
     headers: &HeaderMap,
     pending: &Pending,
     asked: Option<(Option<&str>, Option<&str>)>,
-    found: Option<&[crate::picker::Found]>,
-    notice: Option<&str>,
+    listed: Listed<'_>,
 ) -> Response {
     let locale = negotiated(headers, pending);
     let words = |id: &str| locale.lookup(&*CATALOG, id);
@@ -486,41 +494,26 @@ pub fn picker(
         primary = Variant::Primary.class(),
         label = label(Some(Glyph::SEARCH), words("picker-search")),
     ));
-    let results = match found {
-        None => notice.map_or_else(Html::empty, |id| {
-            Html::raw(format!("<p role=\"status\">{}</p>", Html::text(words(id))))
-        }),
-        Some([]) => Html::raw(format!("<p>{}</p>", Html::text(words("picker-none")))),
-        Some(found) => {
-            let choices = Html::join(found.iter().enumerate().map(|(index, patient)| {
-                let id = format!("patient-{index}");
-                let radio = Html::raw(format!(
-                    "<input type=\"radio\" id=\"{id}\" name=\"patient\" value=\"{}\" required>",
-                    Html::text(&patient.id)
-                ));
-                let mut words_of = vec![patient.name.clone()];
-                if let Some(date) = &patient.birth_date {
-                    words_of.push(locale.lookup_with(
-                        &*CATALOG,
-                        "picker-born",
-                        &[("date", Arg::from(date.as_str()))],
-                    ));
-                }
-                words_of.extend(patient.gender.clone());
-                words_of.extend(patient.identifier.clone());
-                check(&id, words_of.join(", "), radio)
-            }));
-            Html::raw(format!(
-                "<form method=\"post\" action=\"{action}\" class=\"fui-stack\">\
-                 <input type=\"hidden\" name=\"form_token\" value=\"{token}\">{purpose}{fields}\
-                 <div class=\"fui-cluster\"><button type=\"submit\" class=\"{primary}\">{choose}</button></div></form>",
-                action = Html::text(&action),
-                token = Html::text(&pending.form_token),
-                purpose = purpose_choice(state, &locale, pending),
-                fields = fieldset(words("picker-results"), choices),
-                primary = Variant::Primary.class(),
-                choose = label(Some(Glyph::CHECK), words("picker-choose")),
-            ))
+    let results = match listed {
+        Listed::Found([]) => Html::raw(format!("<p>{}</p>", Html::text(words("picker-none")))),
+        Listed::Found(found) => patient_form(state, &locale, pending, &[("picker-results", found)]),
+        Listed::Offered(offered, notice) => {
+            let notice = notice.map_or_else(Html::empty, |id| {
+                Html::raw(format!("<p role=\"status\">{}</p>", Html::text(words(id))))
+            });
+            let lists: Vec<(&str, &[crate::picker::Found])> = [
+                ("picker-recent", offered.recent.as_slice()),
+                ("picker-assigned", offered.assigned.as_slice()),
+            ]
+            .into_iter()
+            .filter(|(_, patients)| !patients.is_empty())
+            .collect();
+            let form = if lists.is_empty() {
+                Html::empty()
+            } else {
+                patient_form(state, &locale, pending, &lists)
+            };
+            Html::join([notice, form])
         }
     };
     picker_card(
@@ -530,6 +523,49 @@ pub fn picker(
         search,
         results,
     )
+}
+
+/// Returns the form that chooses one of the patients of `lists`, each list
+/// under the catalog's legend of its id.
+fn patient_form(
+    state: &AppState,
+    locale: &Locale,
+    pending: &Pending,
+    lists: &[(&str, &[crate::picker::Found])],
+) -> Html {
+    let words = |id: &str| locale.lookup(&*CATALOG, id);
+    let action = state.settings().endpoint(crate::picker::PICKER_ROUTE);
+    let fieldsets = Html::join(lists.iter().enumerate().map(|(list, (legend, found))| {
+        let choices = Html::join(found.iter().enumerate().map(|(index, patient)| {
+            let id = format!("patient-{list}-{index}");
+            let radio = Html::raw(format!(
+                "<input type=\"radio\" id=\"{id}\" name=\"patient\" value=\"{}\" required>",
+                Html::text(&patient.id)
+            ));
+            let mut words_of = vec![patient.name.clone()];
+            if let Some(date) = &patient.birth_date {
+                words_of.push(locale.lookup_with(
+                    &*CATALOG,
+                    "picker-born",
+                    &[("date", Arg::from(date.as_str()))],
+                ));
+            }
+            words_of.extend(patient.gender.clone());
+            words_of.extend(patient.identifier.clone());
+            check(&id, words_of.join(", "), radio)
+        }));
+        fieldset(words(legend), choices)
+    }));
+    Html::raw(format!(
+        "<form method=\"post\" action=\"{action}\" class=\"fui-stack\">\
+         <input type=\"hidden\" name=\"form_token\" value=\"{token}\">{purpose}{fieldsets}\
+         <div class=\"fui-cluster\"><button type=\"submit\" class=\"{primary}\">{choose}</button></div></form>",
+        action = Html::text(&action),
+        token = Html::text(&pending.form_token),
+        purpose = purpose_choice(state, locale, pending),
+        primary = Variant::Primary.class(),
+        choose = label(Some(Glyph::CHECK), words("picker-choose")),
+    ))
 }
 
 /// Returns the encounter step of the picker for `pending`: the encounters
@@ -726,13 +762,15 @@ fn picker_card(
 ///
 /// The form asks for the patient's identifier; `looked_up` is the
 /// identifier a lookup ran for and the EHR it found, `None` when the server
-/// holds none the person may see.
+/// holds none the person may see. Before a lookup the page offers the EHRs
+/// of the person's `recent` choices.
 #[must_use]
 pub fn ehr_picker(
     state: &AppState,
     headers: &HeaderMap,
     pending: &Pending,
     looked_up: Option<(&str, Option<&crate::picker::openehr::FoundEhr>)>,
+    recent: &[crate::picker::openehr::FoundEhr],
 ) -> Response {
     let asked = looked_up.map(|(asked, _)| asked);
     let locale = negotiated(headers, pending);
@@ -752,7 +790,25 @@ pub fn ehr_picker(
         label = label(Some(Glyph::SEARCH), words("picker-search")),
     ));
     let results = match looked_up {
-        None => Html::empty(),
+        None if recent.is_empty() => Html::empty(),
+        None => fieldset(
+            words("picker-recent"),
+            Html::join(recent.iter().map(|ehr| {
+                Html::raw(format!(
+                    "<form method=\"post\" action=\"{action}\" class=\"fui-cluster\">\
+                     <input type=\"hidden\" name=\"form_token\" value=\"{token}\">\
+                     <input type=\"hidden\" name=\"subject_id\" value=\"{subject}\">\
+                     <input type=\"hidden\" name=\"ehr_id\" value=\"{ehr}\">\
+                     <span>{subject}</span><button type=\"submit\" class=\"{secondary}\">{choose}</button></form>",
+                    action = Html::text(&action),
+                    token = Html::text(&pending.form_token),
+                    subject = Html::text(&ehr.subject_id),
+                    ehr = Html::text(&ehr.ehr_id),
+                    secondary = Variant::Secondary.class(),
+                    choose = label(Some(Glyph::CHECK), words("picker-choose")),
+                ))
+            })),
+        ),
         Some((_, None)) => Html::raw(format!("<p>{}</p>", Html::text(words("picker-ehr-none")))),
         Some((_, Some(ehr))) => {
             let radio = Html::raw(format!(
@@ -828,6 +884,7 @@ pub fn manage(
     headers: &HeaderMap,
     pending: &Pending,
     remembered: &[Remembered],
+    recent: i32,
 ) -> Response {
     let locale = negotiated(headers, pending);
     let words = |id: &str| locale.lookup(&*CATALOG, id);
@@ -896,9 +953,11 @@ pub fn manage(
                 Html::text(subject)
             ))
         });
+    let recent = recent_card(state, &locale, pending, recent);
     let body = Html::join([
         Html::raw(format!("<p>{}</p>", Html::text(words("manage-intro")))),
         rows,
+        recent,
         subject,
     ]);
     let title = words("manage-title");
@@ -912,6 +971,43 @@ pub fn manage(
         page,
         Sources::default(),
     )
+}
+
+/// Returns the management page's card of the person's `recent` patients
+/// with the form that forgets them, none when the picker keeps none.
+fn recent_card(state: &AppState, locale: &Locale, pending: &Pending, recent: i32) -> Html {
+    let words = |id: &str| locale.lookup(&*CATALOG, id);
+    let action = state.settings().endpoint(MANAGE_ROUTE);
+    // NOTE: docs/architecture.md §13.6 item 4, the recent patients are the person's
+    // own data, which they erase here beside their apps' access.
+    if recent == 0 {
+        Html::empty()
+    } else {
+        card(
+            words("manage-recent"),
+            Html::join([
+                Html::raw(format!(
+                    "<p>{}</p>",
+                    Html::text(locale.lookup_with(
+                        &*CATALOG,
+                        "manage-recent-count",
+                        &[("count", Arg::from(recent))]
+                    ))
+                )),
+                Html::raw(format!(
+                    "<form method=\"post\" action=\"{action}\">\
+                     <input type=\"hidden\" name=\"form_token\" value=\"{token}\">\
+                     <input type=\"hidden\" name=\"forget\" value=\"{forget}\">\
+                     <button type=\"submit\" class=\"{danger}\">{label}</button></form>",
+                    action = Html::text(&action),
+                    token = Html::text(&pending.form_token),
+                    forget = crate::authorize::manage::FORGET_RECENT,
+                    danger = Variant::Danger.class(),
+                    label = label(None, words("manage-recent-forget")),
+                )),
+            ]),
+        )
+    }
 }
 
 /// Returns the list of `scopes` named `label` in `locale`: each SMART scope

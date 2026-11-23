@@ -166,6 +166,9 @@ pub struct FerroSmartSection {
     pub audit: AuditSection,
     /// `[ferrosmart.registration]`: whether an app may register itself.
     pub registration: RegistrationSection,
+    /// `[ferrosmart.picker]`: what the patient picker keeps of a person's
+    /// choices.
+    pub picker: PickerSection,
 }
 
 /// `[ferrosmart.registration]`: an app's own registration at `POST
@@ -180,6 +183,23 @@ pub struct RegistrationSection {
     /// space-separated: patient-facing scopes, since professional apps are
     /// registered by an administrator.
     pub scope: String,
+}
+
+/// `[ferrosmart.picker]` (`docs/architecture.md` §13.6 item 4).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PickerSection {
+    /// How long a patient a person chose stays on their recent list; zero
+    /// keeps no list.
+    pub recent_retention: Span,
+}
+
+impl Default for PickerSection {
+    fn default() -> Self {
+        Self {
+            recent_retention: Span::from_days(30),
+        }
+    }
 }
 
 /// `[ferrosmart.branding]`.
@@ -272,6 +292,22 @@ pub struct ResourceSection {
     /// a professional chooses on the patient picker (`docs/architecture.md`
     /// §13.6 item 4); empty, the lookup declares none.
     pub purpose: Vec<PurposeSection>,
+    /// For a FHIR server, the search the patient picker lists a
+    /// professional's assigned patients by; unset, it lists none.
+    pub assigned: Option<Assigned>,
+}
+
+/// The search that lists the patients assigned to a professional, by the
+/// `participant` search parameter of FHIR R4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Assigned {
+    /// The active care teams the professional takes part in
+    /// (`CareTeam?participant=…&status=active`).
+    CareTeam,
+    /// The encounters in progress the professional takes part in
+    /// (`Encounter?participant=…&status=in-progress`).
+    Encounter,
 }
 
 /// One `[[ferrosmart.resource.purpose]]` table: a purpose of use an openEHR
@@ -373,6 +409,7 @@ impl Default for FerroSmartSection {
             brand: None,
             audit: AuditSection::default(),
             registration: RegistrationSection::default(),
+            picker: PickerSection::default(),
         }
     }
 }

@@ -15,13 +15,11 @@
 # credentials token's `sub` is its `client_id` (RFC 9068 §2.2 and §5), the
 # default app-only marker. A resource server trusts FerroSMART in one
 # `kind = "persons"` table, which reads those app-only tokens as the system
-# too; a second table for the same issuer is refused at load. A SMART app
-# acts for the signed-in person, so that table lists the apps it admits in
-# `delegates` by `client_id`, or sets `audience_delegates = true` to admit
-# every app whose token names it in `aud` (FerroSMART issues an app's tokens
-# only for the bases its `resources` lists, #682), and reads their callers
-# as delegated; the preset sets neither, since the apps are each deployment's. FerroSMART grants no token exchange, so a
-# deployment that uses the onward grants sets them for another issuer.
+# too; a second table for the same issuer is refused at load. A token
+# whose `aud` names the resource server was issued for it (RFC 9068 §4,
+# RFC 8707), so every app FerroSMART registered is admitted. FerroSMART
+# grants no token exchange, so a deployment that uses the onward grants
+# sets them for another issuer.
 
 # FerroSMART signs its people's tokens, and its client credentials tokens,
 # which a `persons` issuer reads as the system (docs/architecture.md §13).
@@ -30,10 +28,6 @@ kind = "persons"
 # authorization server establishes the patient context, so FerroSMART's
 # `patient` claim is the launch context.
 patient_context = true
-# SMART App Launch 2.2.0 makes the authorization server responsible for the
-# patient picker; FerroSMART's picker calls with its issuer as `client_id`,
-# so that token is the signed-in person acting with no app (#730).
-issuer_client_is_person = true
 # docs/architecture.md §13.6 item 9: FerroSMART's `sub` is a pairwise
 # subject, compared exactly, which a party table binds by default.
 party_identifier_type = "pairwise"

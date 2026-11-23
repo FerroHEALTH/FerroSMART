@@ -250,6 +250,8 @@ run() {
   secret=$(awk '$3 == "\"inferno-ehr\"" && $4 == "client_secret" { print $5 }' "$LANE_DIR/apply.log")
   [ -n "$secret" ] || { echo "lane: FerroSMART issued inferno-ehr no secret" >&2; return 1; }
   sed "s/INFERNO_EHR_SECRET/$secret/" "$lane/smart_stu2_2.yaml" > "$LANE_DIR/smart_stu2_2.yaml"
+  # NOTE: inferno execute_script reads the expected results beside the script.
+  cp "$lane/smart_stu2_2_expected.json" "$LANE_DIR/"
   SSL_CERT_FILE="$LANE_DIR/trust.pem" "${smart[@]}" serve > "$LANE_DIR/ferrosmart.log" 2>&1 &
   wait_for FerroSMART https://smart.localhost:8443/.well-known/smart-configuration
 

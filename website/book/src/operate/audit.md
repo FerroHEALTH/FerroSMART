@@ -28,6 +28,7 @@ pattern covers it. The subtype comes from FerroSMART's code system
 | A code issued, with its basis as the `basis` detail: `page` (the person approved on the consent page), `remembered` (a remembered consent), `administrative` (a professional, on the administrator's registration) or `first-party` (a first-party app) | `110114` | `authorization-code` | `C` |
 | A consent remembered | `110113` | `110137`, `consent-remembered` | `C` |
 | An app disconnected at the management page, with whether a remembered consent was forgotten and how many grants were revoked | `110113` | `110137`, `consent-withdrawn` | `D` |
+| A person's recent patients forgotten at the management page, with how many | `110113` | `recent-patients-forgotten` | `D` |
 | A code issued to a professional on the administrator's registration, with no consent page | `110113` | `110137`, `consent-administrative` | `C` |
 | A code issued for a first-party app, with no consent page | `110113` | `110137`, `consent-first-party` | `C` |
 | An access token revoked | `110113` | `token-revoked` | `D` |

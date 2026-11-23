@@ -15,7 +15,6 @@
 //! again while the key that verified it is still in the issuer's set; its
 //! binding, its `iat` and its classification are checked on every request.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,12 +30,8 @@ use crate::federation::FederationSection;
 use crate::federation::person::AttributesSection;
 use crate::kind::CallerKind;
 use crate::kind::IssuerKind;
-use crate::kind::Refused;
 use crate::kind::Unclassified;
 use crate::kind::classify;
-use crate::kind::standing::Issued;
-use crate::kind::standing::StandingError;
-use crate::kind::standing::StandingSource;
 use crate::profile::Profile;
 use crate::refusal::Reason;
 use crate::resource::Caller;
@@ -87,7 +82,7 @@ pub(super) async fn held(
         })),
         Ok(None) => Some(Err(invalid(Reason::UnknownKey))),
         Ok(Some(generation)) if generation == verified.generation => {
-            Some(finish(server, verified.claims.clone(), binding).await)
+            Some(finish(server, verified.claims.clone(), binding))
         }
         Ok(Some(_)) => None,
     }
@@ -151,13 +146,13 @@ pub(super) async fn verify(
             jiff::Timestamp::now().as_second(),
         );
     }
-    finish(server, claims, binding).await
+    finish(server, claims, binding)
 }
 
 /// Returns the caller the verified `claims` describe under `server`, the
 /// steps that run on every request: the binding to what `binding` proves,
 /// the subject and the admission.
-async fn finish(
+fn finish(
     server: &ResourceServer,
     claims: Map<String, Value>,
     binding: &Binding,
@@ -178,14 +173,11 @@ async fn finish(
             attributes: settings.attributes.as_ref(),
             audiences: &settings.audience,
             clock_skew: settings.clock_skew,
-            scopeless_subjects: &settings.scopeless_subjects,
-            standing: &settings.standing,
             role_claims: &settings.role_claims,
             resource_types: server.resource_types.as_ref(),
             extensions: &server.extensions,
         },
     )
-    .await
 }
 
 /// What a verified token's claims are read under: the issuer that vouched
@@ -208,10 +200,6 @@ pub(super) struct Admission<'a> {
     pub(super) audiences: &'a [String],
     /// The clock skew `iat` is checked with.
     pub(super) clock_skew: Duration,
-    /// The subjects granted system-wide access without a clinical scope.
-    pub(super) scopeless_subjects: &'a BTreeSet<String>,
-    /// Who answers the standing questions.
-    pub(super) standing: &'a StandingSource,
     /// The claims the roles are read from.
     pub(super) role_claims: &'a [String],
     /// The resource types a clinical scope may name, when the product holds
@@ -225,11 +213,8 @@ pub(super) struct Admission<'a> {
 /// the JWT check and the introspection check share: `iat` within the clock
 /// skew, a subject that is not blank, the caller's kind by the issuer's
 /// profile, and the scope, the client and the `patient` launch context
-/// read the same way. A person's token asks the issuer's standing which
-/// clients and actors it admits, and a system caller whether it is admitted
-/// without a scope; a standing that cannot answer refuses the token as
-/// [`Rejection::Upstream`].
-pub(super) async fn admit(
+/// read the same way.
+pub(super) fn admit(
     claims: Map<String, Value>,
     subject: String,
     admission: &Admission<'_>,
@@ -263,14 +248,8 @@ pub(super) async fn admit(
         federation.as_ref(),
         &claims,
         admission.issuer,
-        admission.standing,
     )
-    .await
-    .map_err(|refused| match refused {
-        Refused::Unclassified(reason) => Rejection::Unclassified { reason },
-        Refused::Standing(error) => unanswered(error),
-    })?;
-    let scopeless = scopeless(&classified.kind, &subject, admission).await?;
+    .map_err(|reason| Rejection::Unclassified { reason })?;
     let professional =
         admission.kind == IssuerKind::Persons && classified.kind != CallerKind::System;
     let attributes = match admission.attributes {
@@ -309,63 +288,25 @@ pub(super) async fn admit(
         None => Scopes::parse(&scope),
     };
     let roles = crate::roles::from_claims(&claims, admission.role_claims);
-    let caller = Caller::new(
-        subject,
-        classified.client,
-        &scope,
-        patient,
-        scopeless,
-        classified.kind,
-    )
-    .with_scopes(scopes)
-    .with_roles(roles)
-    .with_assurance(assurance)
-    .with_person_key(
-        text(&claims, &admission.profile.person_key),
-        admission
-            .profile
-            .tenant_claim
-            .as_deref()
-            .and_then(|claim| text(&claims, claim)),
-    )
-    .with_issuer(admission.issuer.to_owned())
-    .with_claims(claims)
-    .with_extensions(admission.extensions.clone());
+    let caller = Caller::new(subject, classified.client, &scope, patient, classified.kind)
+        .with_scopes(scopes)
+        .with_roles(roles)
+        .with_assurance(assurance)
+        .with_person_key(
+            text(&claims, &admission.profile.person_key),
+            admission
+                .profile
+                .tenant_claim
+                .as_deref()
+                .and_then(|claim| text(&claims, claim)),
+        )
+        .with_issuer(admission.issuer.to_owned())
+        .with_claims(claims)
+        .with_extensions(admission.extensions.clone());
     Ok(match attributes {
         Some(attributes) => caller.with_attributes(attributes),
         None => caller,
     })
-}
-
-/// Returns whether the caller of `kind` named `subject` is admitted
-/// without a scope.
-async fn scopeless(
-    kind: &CallerKind,
-    subject: &str,
-    admission: &Admission<'_>,
-) -> Result<bool, Rejection> {
-    // NOTE: no specification governs the allowlist: our own design; only a
-    // system caller is ever admitted without a scope, so only one is asked.
-    if *kind != CallerKind::System {
-        return Ok(false);
-    }
-    admission
-        .standing
-        .scopeless(
-            admission.scopeless_subjects,
-            Issued::new(admission.issuer, subject),
-        )
-        .await
-        .map_err(unanswered)
-}
-
-/// Returns the rejection of a token the product's standing could not
-/// answer for.
-fn unanswered(error: StandingError) -> Rejection {
-    Rejection::Upstream {
-        upstream: "standing",
-        source: error.into_source(),
-    }
 }
 
 /// Returns the string claim `name` of `claims`.
@@ -459,7 +400,6 @@ mod tests {
 
     async fn server(path: &std::path::Path, max_age: Duration) -> ResourceServer {
         let mut settings = Settings::new(ISSUER, AUDIENCE, IssuerKind::Persons);
-        settings.profile.first_party_clients = vec![String::from("synthetic-client")];
         settings.jwks_file = Some(path.to_owned());
         settings.jwks_max_age = max_age;
         settings.jwks_refresh_interval = Duration::from_secs(3600);

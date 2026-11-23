@@ -134,7 +134,6 @@ impl Flavor {
             ),
         }
         .expect("the preset reads");
-        settings.profile.first_party_clients = vec![String::from(self.front_client())];
         settings
     }
 

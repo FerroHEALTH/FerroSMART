@@ -294,6 +294,9 @@ pub enum Event {
     ClientDeleted,
     /// A disabled client enabled through the admin API.
     ClientEnabled,
+    /// A person's recent patients forgotten at the management page
+    /// (`docs/architecture.md` §13.6 item 4).
+    RecentForgotten,
 }
 
 impl Event {
@@ -324,6 +327,7 @@ impl Event {
             Self::ClientDisabled => "client-disabled",
             Self::ClientDeleted => "client-deleted",
             Self::ClientEnabled => "client-enabled",
+            Self::RecentForgotten => "recent-patients-forgotten",
         }
     }
 
@@ -361,6 +365,7 @@ impl Event {
             Self::ClientDisabled => "Client disabled",
             Self::ClientDeleted => "Client deleted",
             Self::ClientEnabled => "Client enabled",
+            Self::RecentForgotten => "Recent patients forgotten",
         }
     }
 
@@ -388,7 +393,9 @@ impl Event {
             Self::ClientUpdated | Self::ClientEnabled => {
                 (SECURITY_ALERT, vec![SECURITY_ATTRIBUTES_CHANGED, own], "U")
             }
-            Self::TokenRevoked | Self::GrantRevoked => (SECURITY_ALERT, vec![own], "D"),
+            Self::TokenRevoked | Self::GrantRevoked | Self::RecentForgotten => {
+                (SECURITY_ALERT, vec![own], "D")
+            }
             Self::RefreshReused | Self::CodeReused | Self::LaunchRefused => {
                 (SECURITY_ALERT, vec![own], "E")
             }

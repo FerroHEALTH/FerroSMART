@@ -11,3 +11,6 @@
   revokes the grants issued on it. Each code and grant records its basis,
   `page`, `remembered`, `administrative` or `first-party`, and the records
   of a skipped page are `consent-administrative` and `consent-first-party`.
+- The patient picker lists assigned patients for a professional alone, a
+  `fhirUser` that names a `Practitioner` or `PractitionerRole`, as the
+  consent page reads it.
