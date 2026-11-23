@@ -14,6 +14,19 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-23
+
+A security patch: the crate requires the `cookie` release that fixes
+RUSTSEC-2026-0594.
+
+### Security
+
+- Requires `cookie` 0.18.3 (caret `0.18.3`) in place of `0.18.2`
+  (RUSTSEC-2026-0594, GHSA-8wcq-xq25-7fhm): in 0.14.0 up to 0.18.2 a private
+  cookie the sealed store adds in more than one process after a `fork()`
+  could reuse an AES-GCM nonce. A product's lockfile can no longer keep an
+  affected `cookie` (#782).
+
 ## [0.28.0] - 2026-11-21
 
 Releases beside `ferrohealth-smart` 0.33.0, on `ferrohealth-server` 0.12.
@@ -498,7 +511,8 @@ FerroHEALTH operator consoles, over the relying party of `ferrohealth-smart`
   its request's `record::Held` and the `routes::Pages` trait a console draws
   a stopped sign-in through.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.28.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.28.1...HEAD
+[0.28.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.28.0...ferrohealth-session-v0.28.1
 [0.28.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.27.0...ferrohealth-session-v0.28.0
 [0.27.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.26.0...ferrohealth-session-v0.27.0
 [0.26.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.25.1...ferrohealth-session-v0.26.0
