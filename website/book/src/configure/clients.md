@@ -160,7 +160,7 @@ lists to reach an endpoint of FerroSMART itself:
 | `system/introspect` | `POST /introspect`, for a resource server that introspects ([the flows](../integrate/flows.md#refresh-introspection-and-revocation)) |
 | `system/launch.c` | `POST /launch` and the signed launch JWT, for an EHR ([the EHR launch API](../integrate/ehr-launch.md)) |
 | `system/AuditEvent.rs` | `GET /audit`, for an operator's client ([audit records](../operate/audit.md#reading-the-records)) |
-| `system/admin` | `/admin/clients` and `/admin/keys`, for an administrator's client ([the admin API](admin-api.md)) |
+| `system/admin` | `/register`, `/admin/clients` and `/admin/keys`, for an administrator's client ([the admin API](admin-api.md)) |
 
 ## Roles
 

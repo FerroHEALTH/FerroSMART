@@ -33,7 +33,7 @@ async fn narrow(server: &Server, client_id: &str, resources: &[&str]) {
     let (_, _, mut client) = server
         .call(
             Method::GET,
-            &format!("/admin/clients/{client_id}"),
+            &format!("/register/{client_id}"),
             None,
             Some(&token),
         )
@@ -47,7 +47,7 @@ async fn narrow(server: &Server, client_id: &str, resources: &[&str]) {
     let (status, _, body) = server
         .call(
             Method::PUT,
-            &format!("/admin/clients/{client_id}"),
+            &format!("/register/{client_id}"),
             Some(&client),
             Some(&token),
         )
@@ -210,12 +210,7 @@ async fn the_admin_api_refuses_a_base_no_resource_table_configures() {
         "resources": ["https://elsewhere.example.org/fhir"],
     });
     let (status, _, body) = server
-        .call(
-            Method::POST,
-            "/admin/clients",
-            Some(&document),
-            Some(&token),
-        )
+        .call(Method::POST, "/register", Some(&document), Some(&token))
         .await;
     assert_eq!(StatusCode::BAD_REQUEST, status);
     assert_eq!(json!("invalid_client_metadata"), body["error"]);

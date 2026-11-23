@@ -85,6 +85,29 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Returns whether the enabled client `client_id` holds the registration
+    /// access token whose SHA-256 is `hash`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Database`] when the query fails.
+    pub async fn holds_registration_token(
+        &self,
+        client_id: &str,
+        hash: &str,
+    ) -> Result<bool, StoreError> {
+        let held: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM client WHERE client_id = $1 AND registration_token_hash = $2 \
+             AND disabled_at IS NULL",
+        )
+        .bind(client_id)
+        .bind(hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(held.is_some())
+    }
+}
+
 impl Transaction {
     /// Returns the client registered as `client_id`, its row locked until
     /// the transaction ends, so two changes of one client queue.
@@ -131,6 +154,37 @@ impl Transaction {
     /// another client registers included.
     pub async fn update_client(&mut self, client: &Client) -> Result<(), StoreError> {
         write_client(&mut self.tx, client).await
+    }
+
+    /// Replaces the registration access token of `client_id` with the one
+    /// whose SHA-256 is `hash` (RFC 7592 §3).
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Database`] when the statement fails.
+    pub async fn set_registration_token(
+        &mut self,
+        client_id: &str,
+        hash: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query("UPDATE client SET registration_token_hash = $2 WHERE client_id = $1")
+            .bind(client_id)
+            .bind(hash)
+            .execute(&mut *self.tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Deletes `client_id` once [`Transaction::disable_client`] ended
+    /// everything it held (RFC 7592 §2.3).
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Database`] when the statement fails.
+    pub async fn delete_client(&mut self, client_id: &str) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM client WHERE client_id = $1")
+            .bind(client_id)
+            .execute(&mut *self.tx)
+            .await?;
+        Ok(())
     }
 
     /// Replaces the secret hash of `client_id` with `hash`.

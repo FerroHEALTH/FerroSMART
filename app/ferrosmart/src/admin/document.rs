@@ -54,10 +54,74 @@ impl ClientDocument {
     pub fn client_id(&self) -> &str {
         &self.0.client_id
     }
+
+    /// Returns the document a registration request's object `body` holds,
+    /// its members the document does not read ignored (RFC 7591 §2), and
+    /// the `client_secret` it carries, if any (RFC 7592 §2.2).
+    ///
+    /// # Errors
+    /// Returns the [`serde_json::Error`] of a body that is no object or a
+    /// member of the wrong type.
+    pub fn from_registration(
+        body: Value,
+    ) -> Result<(Self, Option<secrecy::SecretString>), serde_json::Error> {
+        let Value::Object(mut members) = body else {
+            return Err(serde::de::Error::custom("a client metadata object"));
+        };
+        members.retain(|name, _| MEMBERS.contains(&name.as_str()));
+        let secret = members
+            .remove("client_secret")
+            .map(|secret| match secret {
+                Value::String(secret) => Ok(secrecy::SecretString::from(secret)),
+                _ => Err(serde::de::Error::custom("client_secret is a string")),
+            })
+            .transpose()?;
+        let fields: Fields = serde_json::from_value(Value::Object(members))?;
+        Ok((Self(fields), secret))
+    }
+
+    /// Returns the first member an app may not set for itself: the ones
+    /// FerroSMART keeps for an administrator (`docs/architecture.md` §13.27).
+    #[must_use]
+    pub fn administrators_only(&self) -> Option<&'static str> {
+        let fields = &self.0;
+        [
+            ("resources", !fields.resources.is_empty()),
+            ("launch_uri", !fields.launch_uri.is_empty()),
+            ("upstreams", !fields.upstreams.is_empty()),
+            ("first_party", fields.first_party),
+        ]
+        .into_iter()
+        .find_map(|(member, set)| set.then_some(member))
+    }
+
+    /// Returns the scope the document asks for, space-separated.
+    #[must_use]
+    pub fn scope(&self) -> &str {
+        &self.0.scope
+    }
+
+    /// Returns the document with `client_id` set, which the registration
+    /// endpoint assigns when an administrator names none.
+    #[must_use]
+    pub fn named(mut self, client_id: String) -> Self {
+        self.0.client_id = client_id;
+        self
+    }
+
+    /// Returns the document with `client_id`, `scope` and `resources` set,
+    /// as the registration of an app that registers itself assigns them.
+    #[must_use]
+    pub fn assigned(mut self, client_id: String, scope: String, resources: Vec<String>) -> Self {
+        self.0.client_id = client_id;
+        self.0.scope = scope;
+        self.0.resources = resources;
+        self
+    }
 }
 
 /// The members of a [`ClientDocument`].
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Fields {
     /// The `client_id`; on an update absent or the path's.
@@ -97,6 +161,57 @@ pub struct Fields {
     /// Whether the app is the controller's own or acts for it.
     pub first_party: bool,
 }
+
+impl Default for Fields {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            client_name: String::new(),
+            // NOTE: RFC 7591 §2, an omitted token_endpoint_auth_method is
+            // client_secret_basic and omitted grant_types are authorization_code.
+            token_endpoint_auth_method: AuthMethod::ClientSecretBasic,
+            jwks_uri: String::new(),
+            jwks: None,
+            redirect_uris: Vec::new(),
+            post_logout_redirect_uris: Vec::new(),
+            upstreams: Vec::new(),
+            default_acr_values: Vec::new(),
+            resources: Vec::new(),
+            scope: String::new(),
+            grant_types: vec![GrantType::AuthorizationCode],
+            launch_uri: String::new(),
+            client_uri: String::new(),
+            logo_uri: String::new(),
+            policy_uri: String::new(),
+            tos_uri: String::new(),
+            first_party: false,
+        }
+    }
+}
+
+/// The members a [`ClientDocument`] reads; a registration request's other
+/// members are ignored (RFC 7591 §2).
+const MEMBERS: [&str; 19] = [
+    "client_id",
+    "client_name",
+    "token_endpoint_auth_method",
+    "jwks_uri",
+    "jwks",
+    "redirect_uris",
+    "post_logout_redirect_uris",
+    "upstreams",
+    "default_acr_values",
+    "resources",
+    "scope",
+    "grant_types",
+    "launch_uri",
+    "client_uri",
+    "logo_uri",
+    "policy_uri",
+    "tos_uri",
+    "first_party",
+    "client_secret",
+];
 
 impl ClientDocument {
     /// Returns the registration this document makes of `client_id`, over

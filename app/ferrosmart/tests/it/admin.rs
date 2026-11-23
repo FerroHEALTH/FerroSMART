@@ -166,7 +166,7 @@ async fn the_registry_is_listed_read_created_and_updated() {
         ids
     );
     let (status, _, vault) = server
-        .call(Method::GET, "/admin/clients/vault", None, Some(&token))
+        .call(Method::GET, "/register/vault", None, Some(&token))
         .await;
     assert_eq!(StatusCode::OK, status);
     assert_eq!(json!("admin"), vault["registered_by"]);
@@ -181,14 +181,14 @@ async fn the_registry_is_listed_read_created_and_updated() {
     let (status, headers, created) = server
         .call(
             Method::POST,
-            "/admin/clients",
+            "/register",
             Some(&staff_app(false)),
             Some(&token),
         )
         .await;
     assert_eq!(StatusCode::CREATED, status, "{created}");
     assert_eq!(
-        Some("https://smart.example.org/admin/clients/staff-app"),
+        Some("https://smart.example.org/register/staff-app"),
         headers
             .get(header::LOCATION)
             .and_then(|value| value.to_str().ok())
@@ -208,7 +208,7 @@ async fn the_registry_is_listed_read_created_and_updated() {
     let answer = server
         .call(
             Method::POST,
-            "/admin/clients",
+            "/register",
             Some(&staff_app(false)),
             Some(&token),
         )
@@ -219,7 +219,7 @@ async fn the_registry_is_listed_read_created_and_updated() {
     let (status, _, updated) = server
         .call(
             Method::PUT,
-            "/admin/clients/staff-app",
+            "/register/staff-app",
             Some(&renamed),
             Some(&token),
         )
@@ -236,7 +236,7 @@ async fn a_registration_breaking_a_rule_is_refused_with_its_error_code() {
     let (status, _, _) = server
         .call(
             Method::POST,
-            "/admin/clients",
+            "/register",
             Some(&staff_app(false)),
             Some(&token),
         )
@@ -247,12 +247,7 @@ async fn a_registration_breaking_a_rule_is_refused_with_its_error_code() {
     fragment["client_id"] = json!("fragment");
     fragment["redirect_uris"] = json!(["https://staff.example.org/callback#here"]);
     let answer = server
-        .call(
-            Method::POST,
-            "/admin/clients",
-            Some(&fragment),
-            Some(&token),
-        )
+        .call(Method::POST, "/register", Some(&fragment), Some(&token))
         .await;
     assert_eq!(
         "invalid_redirect_uri",
@@ -262,7 +257,7 @@ async fn a_registration_breaking_a_rule_is_refused_with_its_error_code() {
     keyed["client_id"] = json!("keyed");
     keyed["jwks_uri"] = json!("https://keyed.example.org/jwks.json");
     let answer = server
-        .call(Method::POST, "/admin/clients", Some(&keyed), Some(&token))
+        .call(Method::POST, "/register", Some(&keyed), Some(&token))
         .await;
     assert_eq!(
         "invalid_client_metadata",
@@ -272,41 +267,41 @@ async fn a_registration_breaking_a_rule_is_refused_with_its_error_code() {
     unknown["client_id"] = json!("unknown");
     unknown["upstreams"] = json!(["nowhere"]);
     let answer = server
-        .call(Method::POST, "/admin/clients", Some(&unknown), Some(&token))
+        .call(Method::POST, "/register", Some(&unknown), Some(&token))
         .await;
     assert_eq!(
         "invalid_client_metadata",
         refused(&answer, StatusCode::BAD_REQUEST)
     );
+    // NOTE: RFC 7591 §2, a member the endpoint does not read is ignored.
     let mut extra = staff_app(false);
-    extra["client_secret"] = json!("never");
-    let answer = server
-        .call(Method::POST, "/admin/clients", Some(&extra), Some(&token))
+    extra["client_id"] = json!("extra");
+    extra["software_version"] = json!("1.0");
+    let (status, _, created) = server
+        .call(Method::POST, "/register", Some(&extra), Some(&token))
         .await;
-    assert_eq!(
-        "invalid_request",
-        refused(&answer, StatusCode::UNPROCESSABLE_ENTITY),
-        "a member the document does not have"
-    );
+    assert_eq!(StatusCode::CREATED, status, "{created}");
+    assert!(created.get("software_version").is_none(), "{created}");
     let answer = server
         .call(
             Method::PUT,
-            "/admin/clients/portal",
+            "/register/portal",
             Some(&staff_app(false)),
             Some(&token),
         )
         .await;
     assert_eq!("invalid_request", refused(&answer, StatusCode::BAD_REQUEST));
+    // NOTE: RFC 7592 §2.1, an unknown client answers 401.
     let answer = server
-        .call(Method::GET, "/admin/clients/nobody", None, Some(&token))
+        .call(Method::GET, "/register/nobody", None, Some(&token))
         .await;
-    assert_eq!("not_found", refused(&answer, StatusCode::NOT_FOUND));
+    assert_eq!("invalid_token", refused(&answer, StatusCode::UNAUTHORIZED));
     let mut launched = staff_app(false);
     launched["launch_uri"] = json!("https://staff.example.org/launch");
     let (status, _, _) = server
         .call(
             Method::PUT,
-            "/admin/clients/staff-app",
+            "/register/staff-app",
             Some(&launched),
             Some(&token),
         )
@@ -316,7 +311,7 @@ async fn a_registration_breaking_a_rule_is_refused_with_its_error_code() {
     twin["client_id"] = json!("twin");
     twin["launch_uri"] = json!("https://STAFF.example.org:443/launch");
     let answer = server
-        .call(Method::POST, "/admin/clients", Some(&twin), Some(&token))
+        .call(Method::POST, "/register", Some(&twin), Some(&token))
         .await;
     assert_eq!("launch_uri_taken", refused(&answer, StatusCode::CONFLICT));
     server.stop().await;
@@ -330,30 +325,31 @@ async fn a_body_that_is_no_bounded_json_client_document_is_refused_unread() {
     let token = admin_token(&server).await;
     let form = vec![(String::from("client_id"), String::from("form-client"))];
     let (status, _, body) = server
-        .post_authorized("/admin/clients", &form, Some(format!("Bearer {token}")))
+        .post_authorized("/register", &form, Some(format!("Bearer {token}")))
         .await;
     assert_eq!(StatusCode::UNSUPPORTED_MEDIA_TYPE, status, "{body}");
     assert_eq!(json!("invalid_request"), body["error"]);
     let mut huge = staff_app(false);
     huge["client_name"] = json!("x".repeat(ferrosmart::admin::DOCUMENT_LIMIT));
     let (status, _, body) = server
-        .call(Method::POST, "/admin/clients", Some(&huge), Some(&token))
+        .call(Method::POST, "/register", Some(&huge), Some(&token))
         .await;
     assert_eq!(StatusCode::PAYLOAD_TOO_LARGE, status, "{body}");
     assert_eq!(json!("invalid_request"), body["error"]);
     let (status, _, body) = server
         .call(
             Method::POST,
-            "/admin/clients",
+            "/register",
             Some(&json!(["staff-app"])),
             Some(&token),
         )
         .await;
+    // NOTE: RFC 7591 §3.2.2, a body that is no metadata object.
     assert_eq!(
-        "invalid_request",
+        "invalid_client_metadata",
         refused(
             &(status, http::HeaderMap::new(), body),
-            StatusCode::UNPROCESSABLE_ENTITY
+            StatusCode::BAD_REQUEST
         )
     );
     assert!(
@@ -388,12 +384,7 @@ async fn a_symmetric_client_is_issued_its_secret_once_and_keeps_its_hash() {
         "grant_types": ["authorization_code"],
     });
     let (status, _, created) = server
-        .call(
-            Method::POST,
-            "/admin/clients",
-            Some(&document),
-            Some(&token),
-        )
+        .call(Method::POST, "/register", Some(&document), Some(&token))
         .await;
     assert_eq!(StatusCode::CREATED, status, "{created}");
     assert!(created["client_secret"].is_string(), "{created}");
@@ -408,7 +399,7 @@ async fn a_symmetric_client_is_issued_its_secret_once_and_keeps_its_hash() {
     let (status, _, updated) = server
         .call(
             Method::PUT,
-            "/admin/clients/ledger",
+            "/register/ledger",
             Some(&document),
             Some(&token),
         )
@@ -422,20 +413,37 @@ async fn a_symmetric_client_is_issued_its_secret_once_and_keeps_its_hash() {
         .expect("reads")
         .expect("registered");
     assert_eq!(stored.secret_hash, kept.secret_hash);
+    // NOTE: RFC 7591 §2, a hash the request names is no member the endpoint
+    // reads: it is ignored and the stored secret stays.
     let mut hashed = document.clone();
     hashed["secret_hash"] = json!("$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNo");
+    let (status, _, _) = server
+        .call(Method::PUT, "/register/ledger", Some(&hashed), Some(&token))
+        .await;
+    assert_eq!(StatusCode::OK, status);
+    let unchanged = server
+        .store
+        .client("ledger")
+        .await
+        .expect("reads")
+        .expect("registered");
+    assert_eq!(stored.secret_hash, unchanged.secret_hash);
+    // NOTE: RFC 7592 §2.2, a client_secret the request names is the one held.
+    let mut wrong = document.clone();
+    wrong["client_secret"] = json!("not the secret");
     let answer = server
-        .call(
-            Method::PUT,
-            "/admin/clients/ledger",
-            Some(&hashed),
-            Some(&token),
-        )
+        .call(Method::PUT, "/register/ledger", Some(&wrong), Some(&token))
         .await;
     assert_eq!(
-        "invalid_request",
-        refused(&answer, StatusCode::UNPROCESSABLE_ENTITY)
+        "invalid_client_metadata",
+        refused(&answer, StatusCode::BAD_REQUEST)
     );
+    let mut right = document.clone();
+    right["client_secret"] = created["client_secret"].clone();
+    let (status, _, _) = server
+        .call(Method::PUT, "/register/ledger", Some(&right), Some(&token))
+        .await;
+    assert_eq!(StatusCode::OK, status);
     server.stop().await;
 }
 
@@ -444,12 +452,8 @@ async fn every_change_is_recorded_naming_the_admin_client_and_the_client_changed
     let server = Server::start().await;
     let token = admin_token(&server).await;
     for (method, path, body) in [
-        (Method::POST, "/admin/clients", Some(staff_app(true))),
-        (
-            Method::PUT,
-            "/admin/clients/staff-app",
-            Some(staff_app(false)),
-        ),
+        (Method::POST, "/register", Some(staff_app(true))),
+        (Method::PUT, "/register/staff-app", Some(staff_app(false))),
         (Method::POST, "/admin/clients/staff-app/disable", None),
         (Method::POST, "/admin/clients/staff-app/enable", None),
     ] {
@@ -536,7 +540,7 @@ async fn disabling_a_client_revokes_its_grants_and_tokens_at_once_at_every_repli
     let (status, _, body) = replica.post("/token", &form, None).await;
     assert_eq!(json!("invalid_client"), body["error"], "{status} {body}");
     let (_, _, listed) = replica
-        .call(Method::GET, "/admin/clients/export", None, Some(&token))
+        .call(Method::GET, "/register/export", None, Some(&token))
         .await;
     assert!(listed["disabled_at"].is_string(), "{listed}");
     assert_eq!(json!("admin"), listed["registered_by"]);
@@ -582,8 +586,8 @@ async fn clearing_first_party_revokes_what_was_issued_on_it_at_every_replica() {
     let replica = server.replica().await;
     let token = admin_token(&server).await;
     for (method, path, body) in [
-        (Method::POST, "/admin/clients", staff_app(true)),
-        (Method::PUT, "/admin/clients/staff-app", staff_app(true)),
+        (Method::POST, "/register", staff_app(true)),
+        (Method::PUT, "/register/staff-app", staff_app(true)),
     ] {
         let (status, _, answer) = server.call(method, path, Some(&body), Some(&token)).await;
         assert!(status.is_success(), "{answer}");
@@ -600,7 +604,7 @@ async fn clearing_first_party_revokes_what_was_issued_on_it_at_every_replica() {
     let (status, _, _) = server
         .call(
             Method::PUT,
-            "/admin/clients/staff-app",
+            "/register/staff-app",
             Some(&staff_app(false)),
             Some(&token),
         )
@@ -658,7 +662,7 @@ async fn client_apply_creates_then_replaces_a_client_and_records_the_command() {
     assert_eq!("Kiosk, changed", applied.registered.client.name);
     let token = admin_token(&server).await;
     let (_, _, read) = server
-        .call(Method::GET, "/admin/clients/kiosk", None, Some(&token))
+        .call(Method::GET, "/register/kiosk", None, Some(&token))
         .await;
     assert_eq!(json!("admin"), read["registered_by"]);
     let kept = crate::support::all_records(&server.store).await;

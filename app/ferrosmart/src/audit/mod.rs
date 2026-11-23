@@ -290,6 +290,8 @@ pub enum Event {
     /// A client disabled through the admin API, with every grant and token
     /// it held.
     ClientDisabled,
+    /// A client deleted at its RFC 7592 registration endpoint.
+    ClientDeleted,
     /// A disabled client enabled through the admin API.
     ClientEnabled,
 }
@@ -320,6 +322,7 @@ impl Event {
             Self::ClientCreated => "client-created",
             Self::ClientUpdated => "client-updated",
             Self::ClientDisabled => "client-disabled",
+            Self::ClientDeleted => "client-deleted",
             Self::ClientEnabled => "client-enabled",
         }
     }
@@ -356,6 +359,7 @@ impl Event {
             Self::ClientCreated => "Client registered",
             Self::ClientUpdated => "Client changed",
             Self::ClientDisabled => "Client disabled",
+            Self::ClientDeleted => "Client deleted",
             Self::ClientEnabled => "Client enabled",
         }
     }
@@ -377,7 +381,7 @@ impl Event {
             Self::ConsentRemembered | Self::ConsentAdministrative | Self::ConsentFirstParty => {
                 (SECURITY_ALERT, vec![SECURITY_ATTRIBUTES_CHANGED, own], "C")
             }
-            Self::ConsentWithdrawn | Self::ClientDisabled => {
+            Self::ConsentWithdrawn | Self::ClientDisabled | Self::ClientDeleted => {
                 (SECURITY_ALERT, vec![SECURITY_ATTRIBUTES_CHANGED, own], "D")
             }
             Self::ClientCreated => (SECURITY_ALERT, vec![SECURITY_ATTRIBUTES_CHANGED, own], "C"),

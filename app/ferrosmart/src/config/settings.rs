@@ -75,6 +75,9 @@ pub struct Settings {
     pub roles: BTreeMap<String, Vec<String>>,
     /// The deployment's name and words on the pages.
     pub branding: BrandingSection,
+    /// The scopes an app that registered itself may be granted at most,
+    /// when the deployment lets apps register themselves.
+    pub registration: Option<Vec<String>>,
     /// The User Access Brands Bundle, when the deployment publishes one.
     pub brand: Option<crate::brands::Brands>,
     /// Where every login and token is recorded.
@@ -203,6 +206,7 @@ impl Config {
             saml: service_provider(section)?,
             roles: roles(&section.role)?,
             branding: branding(&section.branding)?,
+            registration: registration(&section.registration)?,
             brand: section
                 .brand
                 .as_ref()
@@ -272,6 +276,42 @@ fn branding(section: &BrandingSection) -> Result<BrandingSection, Error> {
         return Err(Error::StyleUrl);
     }
     Ok(section.clone())
+}
+
+/// Returns the ceiling of an app that registers itself, when `section`
+/// opens the registration endpoint: scope tokens that are neither `user/` nor
+/// `system/`, since professional and backend apps are an administrator's to
+/// register (RFC 7591 §5 keeps an app's own metadata self-asserted).
+fn registration(
+    section: &crate::config::RegistrationSection,
+) -> Result<Option<Vec<String>>, Error> {
+    if !section.open {
+        return Ok(None);
+    }
+    let rule = |rule| Error::Registration { rule };
+    let scopes: Vec<String> = section
+        .scope
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    if scopes.is_empty() {
+        return Err(rule("an open registration names its `scope`"));
+    }
+    if scopes
+        .iter()
+        .any(|scope| !ferrohealth_smart::scope::is_scope_token(scope))
+    {
+        return Err(rule(
+            "`scope` holds a value outside the RFC 6749 §3.3 character set",
+        ));
+    }
+    if scopes
+        .iter()
+        .any(|scope| scope.starts_with("user/") || scope.starts_with("system/"))
+    {
+        return Err(rule("`scope` holds a `user/` or `system/` scope"));
+    }
+    Ok(Some(scopes))
 }
 
 /// The configuration keys of one ring's three files, for its errors.

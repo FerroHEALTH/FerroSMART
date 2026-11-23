@@ -699,3 +699,26 @@ fn the_purposes_of_use_belong_to_an_openehr_base_and_each_is_a_header_value() {
         );
     }
 }
+
+// NOTE: RFC 7591 §5, an app's own registration is held to patient-facing scopes:
+// an open registration names them, and never a user/ or system/ scope.
+#[test]
+fn an_open_registration_names_a_patient_facing_scope() {
+    let keys = Keys::new();
+    for (registration, admitted) in [
+        (
+            "open = true\nscope = \"openid patient/Observation.rs\"",
+            true,
+        ),
+        ("open = false\nscope = \"user/Observation.rs\"", true),
+        ("open = true", false),
+        ("open = true\nscope = \"openid user/Observation.rs\"", false),
+        ("open = true\nscope = \"system/Patient.rs\"", false),
+    ] {
+        let text = format!(
+            "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.registration]\n{registration}"
+        );
+        let resolved = config(&text, &keys).resolve();
+        assert_eq!(admitted, resolved.is_ok(), "{registration}: {resolved:?}");
+    }
+}

@@ -68,6 +68,7 @@ pub fn metadata(settings: &Settings, login: bool) -> ServerMetadata {
         response_types_supported: Some(Vec::new()),
         introspection_endpoint: Some(settings.endpoint(INTROSPECT_ROUTE)),
         revocation_endpoint: Some(settings.endpoint(REVOKE_ROUTE)),
+        registration_endpoint: Some(settings.endpoint(crate::admin::register::REGISTER_ROUTE)),
         ..ServerMetadata::default()
     };
     if login {
