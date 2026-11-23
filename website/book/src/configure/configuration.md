@@ -273,6 +273,19 @@ The policy: what each role may be granted. The clients live in the
 database, never in the configuration. [Clients, roles and consent](clients.md)
 describes both.
 
+## `[ferrosmart.registration]`
+
+Whether an app may register itself at `POST {issuer}/register` with no
+initial access token (RFC 7591 §3), and the most it may hold.
+
+| Key | What it is |
+|---|---|
+| `open` | `true` lets an app register itself; `false` by default, when only an administrator registers |
+| `scope` | The ceiling of an app that registered itself, space-separated; no `user/` or `system/` scope. Required when `open` |
+
+[The admin API](admin-api.md#apps-that-register-themselves) describes the
+registration.
+
 ## `[ferrosmart.branding]`
 
 The deployment's own words on the pages. Content, never code.

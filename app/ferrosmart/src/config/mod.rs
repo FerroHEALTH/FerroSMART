@@ -164,9 +164,25 @@ pub struct FerroSmartSection {
     pub brand: Option<crate::brands::BrandSection>,
     /// `[ferrosmart.audit]`: where every login and token is recorded.
     pub audit: AuditSection,
+    /// `[ferrosmart.registration]`: whether an app may register itself.
+    pub registration: RegistrationSection,
     /// `[ferrosmart.picker]`: what the patient picker keeps of a person's
     /// choices.
     pub picker: PickerSection,
+}
+
+/// `[ferrosmart.registration]`: an app's own registration at `POST
+/// {issuer}/register` without an initial access token (RFC 7591 §3).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RegistrationSection {
+    /// Whether the endpoint answers a request without an initial access
+    /// token; off by default.
+    pub open: bool,
+    /// The most an app that registered itself may be granted,
+    /// space-separated: patient-facing scopes, since professional apps are
+    /// registered by an administrator.
+    pub scope: String,
 }
 
 /// `[ferrosmart.picker]` (`docs/architecture.md` §13.6 item 4).
@@ -392,6 +408,7 @@ impl Default for FerroSmartSection {
             branding: BrandingSection::default(),
             brand: None,
             audit: AuditSection::default(),
+            registration: RegistrationSection::default(),
             picker: PickerSection::default(),
         }
     }

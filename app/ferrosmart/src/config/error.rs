@@ -79,6 +79,12 @@ pub enum Error {
     /// `[ferrosmart.brand]` breaks a rule.
     #[error(transparent)]
     Brand(#[from] crate::brands::BrandError),
+    /// `[ferrosmart.registration]` breaks a rule.
+    #[error("`ferrosmart.registration`: {rule}")]
+    Registration {
+        /// The rule broken.
+        rule: &'static str,
+    },
     /// A role table breaks a rule.
     #[error("`ferrosmart.role`: {rule}")]
     Role {

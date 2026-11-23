@@ -3278,12 +3278,14 @@ differently.
 | `POST /launch` | the EHR launch API | our own design (13.6) |
 | `GET /manage` | the apps holding the user's consent or live access, each with Disconnect (`management_endpoint`) | `smart conformance`, Metadata |
 | `GET /brands` | the deployment's User Access Brands Bundle, when `[ferrosmart.brand]` is set | `smart brands`, Conformance Overview |
-| `GET`, `POST /admin/clients`; `GET`, `PUT /admin/clients/{client_id}`; `POST .../disable`, `.../enable` | the registry over the store, behind a `ferrohealth-smart` guard with the `system/admin` scope, every change audited (13.27) | our own design |
+| `POST /register` | client registration (`registration_endpoint`): an administrator's token as the initial access token, or an app's own registration when `[ferrosmart.registration] open` (13.27) | `rfc7591 §3` |
+| `GET`, `PUT`, `DELETE /register/{client_id}` | the client's configuration endpoint, with its registration access token or an administrator's token (13.27) | `rfc7592 §2` |
+| `GET /admin/clients`; `POST /admin/clients/{client_id}/disable`, `.../enable` | the registry over the store, behind a `ferrohealth-smart` guard with the `system/admin` scope, every change audited (13.27) | our own design |
 | `GET /admin/keys` | the signing key ring's public keys with their states, behind the same guard | our own design |
 | `/healthz`, `/readyz` | `ferrohealth-health` | the family |
 
-`POST /register` (RFC 7591) and `POST /par` (RFC 9126) join after step 9;
-the metadata names them only once they exist.
+`POST /par` (RFC 9126) joins later; the metadata names it only once it
+exists.
 
 Each FHIR or openEHR server keeps serving its own
 `/.well-known/smart-configuration` at its base, as SMART requires of "FHIR
@@ -4742,12 +4744,35 @@ change audited.
   registered and enabled. Nothing is cached between requests, so a revoked
   token or a disabled admin client is refused on the next request at every
   replica.
-- **The routes.** `GET /admin/clients` lists every client, disabled ones
-  included; `GET /admin/clients/{client_id}` reads one; `POST
-  /admin/clients` registers one (`201` with `Location`); `PUT
-  /admin/clients/{client_id}` replaces one; `POST .../disable` and `POST
-  .../enable` disable and enable one. The document is RFC 7591 §2 client
-  metadata
+- **Registration (`rfc7591`, `rfc7592`).** `POST {issuer}/register` is
+  the registration endpoint SMART App Launch 2.2.0 recommends (Register App
+  with EHR), named `registration_endpoint` in the RFC 8414 metadata and the
+  OpenID Provider configuration. An administrator's FerroSMART access token
+  holding `system/admin` is the initial access token (`rfc7591 §3`), which
+  sets every member, `client_id` included. Without one, the endpoint
+  answers only when `[ferrosmart.registration] open` is set: the server
+  issues the `client_id`, the client is `registered_by` `self`, its `scope`
+  is held to `[ferrosmart.registration] scope` (all of it when it asks
+  none; patient-facing, since no `user/` or `system/` scope is taken there),
+  its `resources` are every configured resource server (our own design),
+  and `resources`, `launch_uri`, `upstreams` or `first_party` refuse it with
+  `invalid_client_metadata`. The answer is `201` with the metadata, the
+  issued secret once, and for an app that registered itself its
+  `registration_access_token`, kept as its SHA-256, with its
+  `registration_client_uri` and `client_id_issued_at` (`rfc7591 §3.2.1`).
+  A member the endpoint does not read is ignored (`rfc7591 §2`); an omitted
+  `token_endpoint_auth_method` is `client_secret_basic` and omitted
+  `grant_types` are `authorization_code`. `GET`, `PUT` and `DELETE
+  {issuer}/register/{client_id}` take the client's registration access token
+  or an administrator's token (`rfc7592 §2`): a `PUT` names the client and,
+  when it carries `client_secret`, the secret the client holds; an app that
+  registered itself keeps its ceiling; `DELETE` revokes everything the
+  client held and deletes it (`204`). An unknown client or a token that does
+  not hold is `401 invalid_token` (`rfc7592 §2.1`).
+- **The admin routes.** `GET /admin/clients` lists every client, disabled
+  ones included; `POST .../disable` and `POST .../enable` disable and
+  enable one, which RFC 7592 has no operation for.
+- **The document.** One document, RFC 7591 §2 client metadata
   (`client_name`, `token_endpoint_auth_method`, `scope`, `grant_types`,
   `jwks_uri` or `jwks`, `redirect_uris`, `default_acr_values` of OpenID
   Connect Dynamic Client Registration 1.0 §2, and the URLs of the app),
@@ -4759,8 +4784,9 @@ change audited.
   stored secret, and `ferrosmart client secret` issues a new one. A client
   authenticates only by its registered method.
 - **`ferrosmart client apply <file>...`.** Each file is one client
-  document, applied as `PUT` replaces a client, or as `POST` registers one
-  when no client has its `client_id`, with the same checks and records,
+  document, read strictly, with an unknown member refused, applied as an
+  administrator's `PUT` replaces a client, or as its registration when no
+  client has its `client_id`, with the same checks and records,
   naming `ferrosmart client apply` from the host as the requester. It
   migrates the store first and runs only when the operator runs it, so it
   creates the first administrator client, and a deployment that keeps its

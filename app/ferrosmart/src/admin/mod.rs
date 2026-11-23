@@ -13,6 +13,7 @@
 
 pub mod document;
 pub mod guard;
+pub mod register;
 
 use std::sync::Arc;
 
@@ -29,7 +30,7 @@ use http::{HeaderValue, StatusCode, header};
 use serde_json::{Value, json};
 
 use crate::audit::{self, Connected, Happening, RecordFailure};
-use crate::clients::{Client, ClientError};
+use crate::clients::{Client, ClientError, ClientMetadata, Material};
 use crate::server::AppState;
 use crate::store::admin::Registered;
 use crate::store::{StoreError, Transaction};
@@ -38,8 +39,6 @@ use document::{ClientDocument, ClientView};
 
 /// The registry.
 pub const CLIENTS_ROUTE: &str = "/admin/clients";
-/// One client.
-pub const CLIENT_ROUTE: &str = "/admin/clients/{client_id}";
 /// Disabling one client.
 pub const DISABLE_ROUTE: &str = "/admin/clients/{client_id}/disable";
 /// Enabling one disabled client.
@@ -50,8 +49,7 @@ pub const KEYS_ROUTE: &str = "/admin/keys";
 /// Returns the admin routes, each behind the guard.
 pub fn router(state: &Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
-        .route(CLIENTS_ROUTE, get(list).post(create))
-        .route(CLIENT_ROUTE, get(read).put(update))
+        .route(CLIENTS_ROUTE, get(list))
         .route(DISABLE_ROUTE, post(disable))
         .route(ENABLE_ROUTE, post(enable))
         .route(KEYS_ROUTE, get(keys))
@@ -164,24 +162,15 @@ impl IntoResponse for AdminError {
     }
 }
 
-/// A request on one client: the state, the client the path names, the
-/// admin caller the guard admitted and the address it came from.
-struct OnClient {
+/// A request on one client: the state, the client the path names and the
+/// address it came from.
+pub(super) struct OnClient {
     /// The state.
     state: Arc<AppState>,
     /// The client the path names.
     client_id: String,
     /// The address the request came from.
     from: std::net::IpAddr,
-    /// The admin caller.
-    access: Access,
-}
-
-impl OnClient {
-    /// Returns the change this request makes.
-    fn change(&self) -> Change<'_> {
-        Change::new(&self.state, &self.access, self.from)
-    }
 }
 
 impl FromRequestParts<Arc<AppState>> for OnClient {
@@ -197,14 +186,10 @@ impl FromRequestParts<Arc<AppState>> for OnClient {
         let Connected(from) = Connected::from_request_parts(parts, state)
             .await
             .map_err(IntoResponse::into_response)?;
-        let access = Access::from_request_parts(parts, state)
-            .await
-            .map_err(IntoResponse::into_response)?;
         Ok(Self {
             state: Arc::clone(state),
             client_id,
             from,
-            access,
         })
     }
 }
@@ -217,17 +202,23 @@ fn no_store(mut response: Response) -> Response {
     response
 }
 
-/// Returns the answer naming the client `applied` wrote, with the secret
-/// it issued, if any, and `client_secret_expires_at` 0 for a secret that
-/// does not expire (RFC 7591 §3.2.1).
-fn issued(status: StatusCode, applied: &Applied) -> Response {
+/// Returns the answer naming the client `applied` wrote with the members
+/// `extra` holds, and the secret it issued, if any, with
+/// `client_secret_expires_at` 0 for a secret that does not expire (RFC 7591
+/// §3.2.1).
+fn issued(status: StatusCode, applied: &Applied, extra: Value) -> Response {
     let mut body = json!(ClientView::from(&applied.registered));
-    if let (Some(secret), Some(members)) = (&applied.secret, body.as_object_mut()) {
-        members.insert(
-            String::from("client_secret"),
-            Value::from(secrecy::ExposeSecret::expose_secret(secret)),
-        );
-        members.insert(String::from("client_secret_expires_at"), Value::from(0));
+    if let Some(members) = body.as_object_mut() {
+        if let Some(secret) = &applied.secret {
+            members.insert(
+                String::from("client_secret"),
+                Value::from(secrecy::ExposeSecret::expose_secret(secret)),
+            );
+            members.insert(String::from("client_secret_expires_at"), Value::from(0));
+        }
+        if let Value::Object(extra) = extra {
+            members.extend(extra);
+        }
     }
     no_store((status, Json(body)).into_response())
 }
@@ -286,6 +277,17 @@ impl<'a> Change<'a> {
     /// holds it.
     async fn finish(&self, tx: Transaction, record: Record<'_>) -> Result<Registered, AdminError> {
         let client_id = record.client_id;
+        self.record(tx, record).await?;
+        self.state
+            .store()
+            .registered_client(client_id)
+            .await?
+            .ok_or_else(|| AdminError::NotFound(client_id.to_owned()))
+    }
+
+    /// Commits `tx` with `record`.
+    async fn record(&self, tx: Transaction, record: Record<'_>) -> Result<(), AdminError> {
+        let client_id = record.client_id;
         let endpoint = self
             .state
             .settings()
@@ -311,28 +313,33 @@ impl<'a> Change<'a> {
             target: "ferrosmart::audit",
             event = record.event.code(),
             client_id = %client_id,
-            "an administrator changed a client"
+            "a client was changed"
         );
-        self.state
-            .store()
-            .registered_client(client_id)
-            .await?
-            .ok_or_else(|| AdminError::NotFound(client_id.to_owned()))
+        Ok(())
     }
 
-    /// Registers the client `document` describes in `tx`.
+    /// Registers the client `section` and `material` describe in `tx`, as
+    /// one that registered itself when `itself`.
     async fn create(
         &self,
         mut tx: Transaction,
-        document: ClientDocument,
+        section: &ClientMetadata,
+        mut material: Material,
+        itself: bool,
+        registration_token: Option<&str>,
     ) -> Result<Applied, AdminError> {
-        let client_id = document.client_id().to_owned();
-        let (section, mut material) = document.registration(&client_id, None);
-        let secret = issue(&section, &mut material)?;
-        let client = crate::clients::resolve(&section, material)?;
+        let client_id = section.client_id.clone();
+        let secret = issue(section, &mut material)?;
+        let mut client = crate::clients::resolve(section, material)?;
+        if itself {
+            client.registration = crate::clients::Registration::Dynamic;
+        }
         check_names(self.state, &client)?;
         if !tx.create_client(&client).await? {
             return Err(AdminError::Exists(client_id));
+        }
+        if let Some(hash) = registration_token {
+            tx.set_registration_token(&client_id, hash).await?;
         }
         let record = Record {
             event: audit::Event::ClientCreated,
@@ -347,18 +354,22 @@ impl<'a> Change<'a> {
     }
 
     /// Replaces the client `stored`, its row locked in `tx`, with the one
-    /// `document` describes. Clearing its first-party mark revokes every
-    /// grant issued with no page on it, with its tokens.
+    /// `section` and `material` describe, registered by whoever registered
+    /// `stored`. Clearing its first-party mark revokes every grant issued
+    /// with no page on it, with its tokens.
     async fn replace(
         &self,
         mut tx: Transaction,
         stored: &Registered,
-        document: ClientDocument,
+        section: &ClientMetadata,
+        mut material: Material,
     ) -> Result<Applied, AdminError> {
         let client_id = stored.client.client_id.as_str();
-        let (section, mut material) = document.registration(client_id, Some(&stored.client));
-        let secret = issue(&section, &mut material)?;
-        let client = crate::clients::resolve(&section, material)?;
+        let secret = issue(section, &mut material)?;
+        let mut client = crate::clients::resolve(section, material)?;
+        if stored.client.registered_itself() {
+            client.registration = crate::clients::Registration::Dynamic;
+        }
         check_names(self.state, &client)?;
         let mut details = described(&client);
         if stored.client.first_party() && !client.first_party() {
@@ -383,8 +394,8 @@ impl<'a> Change<'a> {
 /// Issues a client secret into `material` when `section` authenticates
 /// with one and holds none yet, and returns it (RFC 7591 §3.2.1).
 fn issue(
-    section: &crate::clients::ClientMetadata,
-    material: &mut crate::clients::Material,
+    section: &ClientMetadata,
+    material: &mut Material,
 ) -> Result<Option<secrecy::SecretString>, AdminError> {
     let symmetric = section.auth_method.kind() == crate::clients::ClientKind::ConfidentialSymmetric;
     if !symmetric || material.secret_hash.is_some() {
@@ -420,10 +431,13 @@ pub async fn apply(state: &AppState, document: ClientDocument) -> Result<Applied
         from: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
     };
     let mut tx = state.store().begin().await?;
-    match tx.lock_client(document.client_id()).await? {
-        Some(stored) => change.replace(tx, &stored, document).await,
-        None => change.create(tx, document).await,
+    let client_id = document.client_id().to_owned();
+    if let Some(stored) = tx.lock_client(&client_id).await? {
+        let (section, material) = document.registration(&client_id, Some(&stored.client));
+        return change.replace(tx, &stored, &section, material).await;
     }
+    let (section, material) = document.registration(&client_id, None);
+    change.create(tx, &section, material, false, None).await
 }
 
 /// Issues the confidential symmetric client `client_id` a new secret, its
@@ -502,21 +516,10 @@ fn check_names(state: &AppState, client: &Client) -> Result<(), AdminError> {
     }
 }
 
-/// The largest client document the admin API reads, in bytes: room for a
+/// The largest client document the registration endpoint reads, in bytes: room for a
 /// JWK Set by value with a few keys. No specification governs the value:
 /// our own design.
 pub const DOCUMENT_LIMIT: usize = 64 * 1024;
-
-/// Returns the client document the request carried: an `application/json`
-/// body of at most [`DOCUMENT_LIMIT`] bytes into the closed
-/// [`ClientDocument`], whose unknown members refuse it, every value then
-/// checked by the registry's rules before anything is stored.
-fn document(
-    body: Result<Json<ClientDocument>, JsonRejection>,
-) -> Result<ClientDocument, AdminError> {
-    body.map(|Json(document)| document)
-        .map_err(AdminError::Unreadable)
-}
 
 /// `GET /admin/clients`: every registered client, disabled ones included.
 async fn list(State(state): State<Arc<AppState>>) -> Result<Response, AdminError> {
@@ -527,63 +530,11 @@ async fn list(State(state): State<Arc<AppState>>) -> Result<Response, AdminError
     ))
 }
 
-/// `GET /admin/clients/{client_id}`.
-async fn read(
-    State(state): State<Arc<AppState>>,
-    Path(client_id): Path<String>,
-) -> Result<Response, AdminError> {
-    let registered = state
-        .store()
-        .registered_client(&client_id)
-        .await?
-        .ok_or(AdminError::NotFound(client_id))?;
-    Ok(answer(StatusCode::OK, &registered))
-}
-
-/// `POST /admin/clients`: registers the client the body describes.
-async fn create(
-    State(state): State<Arc<AppState>>,
-    Connected(from): Connected,
-    access: Access,
-    body: Result<Json<ClientDocument>, JsonRejection>,
-) -> Result<Response, AdminError> {
-    let document = document(body)?;
-    let tx = state.store().begin().await?;
-    let applied = Change::new(&state, &access, from)
-        .create(tx, document)
-        .await?;
-    let registered = &applied.registered;
-    let mut response = issued(StatusCode::CREATED, &applied);
-    let location = state
-        .settings()
-        .endpoint(&format!("{CLIENTS_ROUTE}/{}", registered.client.client_id));
-    // NOTE: RFC 9110 §10.2.2, the issuer and the client id make a URI; one that
-    // is no header value leaves the Location off, the client created all the same.
-    if let Ok(location) = HeaderValue::from_str(&location) {
-        response.headers_mut().insert(header::LOCATION, location);
-    }
-    Ok(response)
-}
-
-/// `PUT /admin/clients/{client_id}`: replaces the client with the body's.
-async fn update(
-    on: OnClient,
-    body: Result<Json<ClientDocument>, JsonRejection>,
-) -> Result<Response, AdminError> {
-    let (change, client_id) = (on.change(), on.client_id.as_str());
-    let document = document(body)?;
-    if !document.client_id().is_empty() && document.client_id() != client_id {
-        return Err(AdminError::OtherClient);
-    }
-    let (tx, stored) = change.lock(client_id).await?;
-    let applied = change.replace(tx, &stored, document).await?;
-    Ok(issued(StatusCode::OK, &applied))
-}
-
 /// `POST /admin/clients/{client_id}/disable`: no request finds the client
 /// again, and every grant and token it holds is revoked.
-async fn disable(on: OnClient) -> Result<Response, AdminError> {
-    let (change, client_id) = (on.change(), on.client_id.as_str());
+async fn disable(on: OnClient, access: Access) -> Result<Response, AdminError> {
+    let change = Change::new(&on.state, &access, on.from);
+    let client_id = on.client_id.as_str();
     let (mut tx, stored) = change.lock(client_id).await?;
     if stored.disabled_at.is_some() {
         return Err(AdminError::Unchanged("the client is disabled already"));
@@ -604,8 +555,9 @@ async fn disable(on: OnClient) -> Result<Response, AdminError> {
 }
 
 /// `POST /admin/clients/{client_id}/enable`.
-async fn enable(on: OnClient) -> Result<Response, AdminError> {
-    let (change, client_id) = (on.change(), on.client_id.as_str());
+async fn enable(on: OnClient, access: Access) -> Result<Response, AdminError> {
+    let change = Change::new(&on.state, &access, on.from);
+    let client_id = on.client_id.as_str();
     let (mut tx, _stored) = change.lock(client_id).await?;
     if !tx.enable_client(client_id).await? {
         return Err(AdminError::Unchanged("the client is not disabled"));

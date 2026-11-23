@@ -21,6 +21,8 @@ CREATE TABLE client (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     secret_hash text,
+    -- RFC 7592 section 3, the registration access token, as its SHA-256.
+    registration_token_hash text,
     launch_uri text CONSTRAINT client_launch_uri_key UNIQUE,
     first_party boolean NOT NULL DEFAULT false,
     client_uri text,

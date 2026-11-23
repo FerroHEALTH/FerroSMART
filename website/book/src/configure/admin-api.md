@@ -3,12 +3,13 @@
 
 # The admin API
 
-The admin API changes the client registry while FerroSMART runs, so a new
-app, a changed redirect URI or a disabled client needs no restart. It
-writes the PostgreSQL store every replica reads, and every change takes
-effect on the next request at every replica. SMART App Launch 2.2.0 leaves
-registration to the server (Register App with EHR), so the API is
-FerroSMART's own design.
+The admin API and the registration endpoint change the client registry
+while FerroSMART runs, so a new app, a changed redirect URI or a disabled
+client needs no restart. They write the PostgreSQL store every replica
+reads, and every change takes effect on the next request at every replica.
+Clients are registered and managed through RFC 7591 and RFC 7592, the
+process SMART App Launch 2.2.0 recommends (Register App with EHR); the
+admin routes keep what RFC 7592 has no operation for.
 
 ## Access
 
@@ -49,10 +50,11 @@ invalid_token`, a token without `system/admin` `403 insufficient_scope`.
 
 | Request | What it does |
 |---|---|
+| `POST /register` | Registers a client (RFC 7591 §3), the admin token as the initial access token; answers `201` |
+| `GET /register/{client_id}` | Reads one client (RFC 7592 §2.1) |
+| `PUT /register/{client_id}` | Replaces a client with the document sent, which names its `client_id` (RFC 7592 §2.2) |
+| `DELETE /register/{client_id}` | Deletes a client and ends everything it held; answers `204` (RFC 7592 §2.3) |
 | `GET /admin/clients` | Lists every client, disabled ones included |
-| `GET /admin/clients/{client_id}` | Reads one client |
-| `POST /admin/clients` | Registers a client; answers `201` with its `Location` |
-| `PUT /admin/clients/{client_id}` | Replaces a client with the document sent |
 | `POST /admin/clients/{client_id}/disable` | Disables a client and ends everything it holds |
 | `POST /admin/clients/{client_id}/enable` | Enables a disabled client |
 | `GET /admin/keys` | Lists the token signing keys, each public key with its state |
@@ -61,8 +63,12 @@ Every answer is JSON with `Cache-Control: no-store`.
 
 ## The client document
 
-The API takes the document `ferrosmart client apply` reads
-([the client registry](clients.md#the-client-registry)). For a client that
+The registration endpoint takes the document `ferrosmart client apply`
+reads ([the client registry](clients.md#the-client-registry)) and ignores a
+member it does not read (RFC 7591 §2). An omitted
+`token_endpoint_auth_method` is `client_secret_basic` and omitted
+`grant_types` are `authorization_code`. An administrator's registration
+may name its `client_id`; without one FerroSMART issues it. For a client that
 authenticates with a secret, the answer that registers it carries the
 secret FerroSMART issued, once, as `client_secret` with
 `client_secret_expires_at` 0 (RFC 7591 §3.2.1); a `PUT` keeps the stored
@@ -102,6 +108,28 @@ disabled client.
 
 A refusal with a status below 500 carries an `error_description` that names
 the rule broken.
+
+## Apps that register themselves
+
+With `[ferrosmart.registration] open = true`, `POST /register` also
+answers a request with no token: the app registers itself. FerroSMART
+issues its `client_id`, holds its `scope` to `[ferrosmart.registration]
+scope` (all of it when the app asks none), lets its tokens name every
+configured resource server, and refuses `resources`, `launch_uri`,
+`upstreams` and `first_party` with `invalid_client_metadata`. The answer
+carries a `registration_access_token` and the `registration_client_uri`
+where the app reads, changes and deletes its own registration with it
+(RFC 7592). The person always sees the consent page for such an app
+([the consent rules](consent.md)).
+
+```toml
+[ferrosmart.registration]
+open = true
+scope = "openid fhirUser launch/patient patient/Observation.rs offline_access"
+```
+
+The scope takes no `user/` or `system/` scope: an administrator registers
+professional and backend apps.
 
 ## Clearing `first_party` and disabling
 
