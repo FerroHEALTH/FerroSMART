@@ -28,8 +28,8 @@ use crate::upstream::{Identity, LoginProvider};
 
 use super::consent::{Basis, FhirUser, approve, offer};
 use super::{
-    Back, CONSENT_ROUTE, COOKIE, Denial, MANAGE_ROUTE, cookie, forget, found, now, random,
-    registered, see_other, set_cookie,
+    Back, CONSENT_ROUTE, COOKIE, Denial, MANAGE_ROUTE, cookie, deny_unsigned, forget, found, now,
+    random, registered, see_other, set_cookie,
 };
 
 /// `GET {issuer}/callback`, where the upstream provider sends the browser
@@ -71,7 +71,6 @@ pub async fn callback(
         return pages::fault(&state, Fault::BadRequest);
     };
     let upstream = provider.upstream();
-    let back = Back::of(&state, &pending);
     let sign_in = PendingSignIn::from_parts(
         pending.upstream_state.clone(),
         pending.upstream_nonce.clone(),
@@ -95,16 +94,18 @@ pub async fn callback(
             }
             // NOTE: RFC 6749 §4.1.2.1, a person who declined at the provider is
             // access_denied; any other failure is the server's.
-            if answer.error.is_some() {
-                return back.deny(Denial {
+            let denial = if answer.error.is_some() {
+                Denial {
                     error: "access_denied",
                     description: "the login was declined",
-                });
-            }
-            return back.deny(Denial {
-                error: "server_error",
-                description: "the login could not be completed",
-            });
+                }
+            } else {
+                Denial {
+                    error: "server_error",
+                    description: "the login could not be completed",
+                }
+            };
+            return deny_unsigned(&state, &pending, denial).await;
         }
     };
     let identity = Identity::from_id_token(&signed_in.claims);
@@ -134,10 +135,11 @@ pub(super) async fn complete(
             }
             // NOTE: OpenID Connect Core 1.0 §3.1.2.6: the person could not be
             // authenticated within max_age, so the request needs a login.
-            return back.deny(Denial {
+            let denial = Denial {
                 error: "login_required",
                 description: "the login is older than max_age",
-            });
+            };
+            return deny_unsigned(state, pending, denial).await;
         }
     };
     let acr = upstream.assurance.level_of(identity.acr.as_deref());
@@ -149,7 +151,7 @@ pub(super) async fn complete(
         if pending.purpose == Purpose::Manage {
             return pages::fault(state, Fault::Assurance);
         }
-        return back.deny(short);
+        return deny_unsigned(state, pending, short).await;
     }
     let signed_in = SignedIn {
         upstream,
@@ -479,7 +481,7 @@ pub(crate) struct Asked<'a> {
 /// patient the professional opened the app for (`docs/architecture.md`
 /// §13.6 item 6).
 fn approved<'a>(asked: &Asked<'a>) -> Option<&'a Approval> {
-    let approval = asked.client.approval.as_ref()?;
+    let approval = asked.client.approval()?;
     if approval.first_party {
         return approval.covers(asked.offered).then_some(approval);
     }
@@ -518,8 +520,9 @@ pub(crate) async fn onward(
         return see_other(&state.settings().endpoint(CONSENT_ROUTE));
     }
     // NOTE: RFC 8252 §8.6, no request is processed automatically unless the client's
-    // identity is assured: a confidential client, or a public one's claimed https redirect.
-    if !asked.client.assured_by(&asked.pending.redirect_uri) {
+    // identity is assured: a confidential client, or a public one's claimed https redirect;
+    // RFC 7591 §5, an app that registered itself asserts its own, so it never is.
+    if asked.client.registered_itself() || !asked.client.assured_by(&asked.pending.redirect_uri) {
         return see_other(&state.settings().endpoint(CONSENT_ROUTE));
     }
     let basis = if let Some(approval) = approved(asked) {

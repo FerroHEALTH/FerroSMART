@@ -3451,6 +3451,25 @@ specification governs.
     9068 §4 has a resource server check `aud`, and SMART 2.2 leaves the
     rest to the server's own policy. Which clients reach which server is
     our own design.
+14. **A client that registered itself.** RFC 7591 §5 has the server "treat
+    all client metadata as self-asserted", so a client the app registered
+    itself (`source` `dynamic` in the `client` table, written by the
+    registration endpoint that joins after step 9) is its own type,
+    `Registration::Dynamic`, which carries no organisation approval and no
+    first-party mark; the store refuses a row of one that holds either.
+    The person always sees the consent page for it, with a notice that the
+    app registered itself and no remember box, and a remembered consent or
+    an assured redirect never skips the page (§5: the server "can also
+    present warning messages to end-users about dynamically registered
+    clients in all cases"). Of its `client_uri`, `logo_uri`, `policy_uri`
+    and `tos_uri`, the page shows only those with the scheme and host of
+    the request's redirect URI (§5, "SHOULD check"). An error found before
+    the person's login was accepted (a malformed request, a decline or
+    failure at the provider, a login older than `max_age` or below the
+    level of assurance) is a page and never a redirect to it: RFC 9700
+    §4.11.2 has the server authenticate the person before it redirects to
+    a URI an attacker could have registered. The configuration never
+    writes over its row, as with a client the admin API changed (13.27).
 
 ### 13.7 The crate layout
 
@@ -3529,7 +3548,7 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 
 | Table | Key | Holds |
 |---|---|---|
-| `client` | `client_id` | type (public, symmetric, asymmetric), secret hash, `jwks` or `jwks_uri`, redirect URIs, post-logout redirect URIs, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, registered origins, scope ceiling, grant types, offline access allowed, name and logo, the organisation approval, the source (`config` or `admin`, 13.27), disabled time |
+| `client` | `client_id` | type (public, symmetric, asymmetric), secret hash, `jwks` or `jwks_uri`, redirect URIs, post-logout redirect URIs, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, registered origins, scope ceiling, grant types, offline access allowed, name and logo, the organisation approval, the source (`config`, `admin` (13.27) or `dynamic` (13.6 item 14)), disabled time |
 | `signing_key` | `kid` | algorithm, public JWK, signer reference (file path or KMS key id), state (`next`, `active`, `retiring`), the times of each state |
 | `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
 | `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time |

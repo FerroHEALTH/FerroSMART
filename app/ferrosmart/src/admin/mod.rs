@@ -466,9 +466,8 @@ async fn update(
     check_names(&on.state, &client)?;
     let lapsed = stored
         .client
-        .approval
-        .as_ref()
-        .filter(|approval| client.approval.as_ref() != Some(*approval));
+        .approval()
+        .filter(|approval| client.approval() != Some(*approval));
     let withdrawn = match lapsed {
         Some(approval) => Some((
             approval,
@@ -531,9 +530,13 @@ async fn enable(on: OnClient) -> Result<Response, AdminError> {
 async fn withdraw(on: OnClient) -> Result<Response, AdminError> {
     let (change, client_id) = (on.change(), on.client_id.as_str());
     let (mut tx, stored) = change.lock(client_id).await?;
-    let approval = stored.client.approval.ok_or(AdminError::Unchanged(
-        "the client holds no organisation approval",
-    ))?;
+    let approval = stored
+        .client
+        .approval()
+        .cloned()
+        .ok_or(AdminError::Unchanged(
+            "the client holds no organisation approval",
+        ))?;
     let revoked = tx
         .withdraw_approval(client_id, approval.approved_at)
         .await?;

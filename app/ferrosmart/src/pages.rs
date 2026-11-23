@@ -64,6 +64,9 @@ pub enum Fault {
     /// The person's login does not reach the eIDAS level of assurance the
     /// provider or the deployment holds it to.
     Assurance,
+    /// An app that registered itself sent a request this server refuses
+    /// before the person signed in, so the browser is not sent back to it.
+    Refused,
     /// The server failed.
     Server,
 }
@@ -95,6 +98,12 @@ impl Fault {
                 StatusCode::BAD_REQUEST,
                 "fault-bad-request",
                 "fault-bad-request-body",
+            ),
+            Self::Refused => (
+                Status::BadRequest,
+                StatusCode::BAD_REQUEST,
+                "fault-refused",
+                "fault-refused-body",
             ),
             Self::NoOwnRecord => (
                 Status::Forbidden,
@@ -233,7 +242,16 @@ pub fn consent(
         |name| with("consent-signed-in", &[("name", Arg::from(name))]),
     );
     let client_name = Arg::from(client.name.as_str());
-    let form = consent_form(state, &locale, &client_name, pending, &chosen, remembered);
+    let shown = client.shown_about(&pending.redirect_uri);
+    let form = consent_form(
+        state,
+        &locale,
+        &client_name,
+        pending,
+        &chosen,
+        remembered,
+        client.registered_itself(),
+    );
     let deployment = &state.settings().branding;
     let own_words = if deployment.consent_text.is_empty() {
         Html::empty()
@@ -242,7 +260,8 @@ pub fn consent(
     };
     let body = Html::join([
         Html::raw(format!("<p>{}</p>", Html::text(signed_in))),
-        about(&client.about, &locale, &client_name),
+        registered_itself(client, &locale, &client_name),
+        about(&shown, &locale, &client_name),
         Html::raw(format!(
             "<p>{}</p>",
             Html::text(with("consent-intro", &[("client", client_name.clone())]))
@@ -276,8 +295,7 @@ pub fn consent(
         .filter(|origin| origin != "null");
     // NOTE: CSP Level 3 §6.1.8 img-src, the app's logo is loaded from its own
     // origin, which the policy names on this page alone.
-    let logo_origin = client
-        .about
+    let logo_origin = shown
         .logo
         .as_ref()
         .map(|url| url.origin().ascii_serialization());
@@ -294,9 +312,26 @@ pub fn consent(
     )
 }
 
+/// Returns the notice that the app registered itself, for such an app.
+fn registered_itself(client: &Client, locale: &Locale, client_name: &Arg) -> Html {
+    if !client.registered_itself() {
+        return Html::empty();
+    }
+    // NOTE: RFC 7591 §5, the server can warn end users about a dynamically
+    // registered client in all cases, since its metadata is self-asserted.
+    Html::raw(format!(
+        "<p><strong>{}</strong></p>",
+        Html::text(locale.lookup_with(
+            &*CATALOG,
+            "consent-registered-itself",
+            &[("client", client_name.clone())]
+        ))
+    ))
+}
+
 /// Returns the consent page's form for `pending`: a box per resource scope
-/// of `chosen`, the remember box, ticked when `remembered`, and the two
-/// decisions.
+/// of `chosen`, the remember box, ticked when `remembered`, unless the app
+/// `registered_itself`, and the two decisions.
 fn consent_form(
     state: &AppState,
     locale: &Locale,
@@ -304,6 +339,7 @@ fn consent_form(
     pending: &Pending,
     chosen: &[&str],
     remembered: bool,
+    registered_itself: bool,
 ) -> Html {
     let words = |id: &str| locale.lookup(&*CATALOG, id);
     let with = |id: &str, args: &[(&'static str, Arg)]| locale.lookup_with(&*CATALOG, id, args);
@@ -316,15 +352,19 @@ fn consent_form(
         check(&id, *scope, checkbox)
     }));
     let action = state.settings().endpoint(CONSENT_ROUTE);
-    let remember = check_field(
-        "remember",
-        with("consent-remember", &[("client", client_name.clone())]),
-        with("consent-remember-help", &[("client", client_name.clone())]),
-        Html::raw(format!(
-            "<input type=\"checkbox\" id=\"remember\" name=\"remember\" value=\"yes\" aria-describedby=\"remember-help\"{}>",
-            if remembered { " checked" } else { "" }
-        )),
-    );
+    let remember = if registered_itself {
+        Html::empty()
+    } else {
+        check_field(
+            "remember",
+            with("consent-remember", &[("client", client_name.clone())]),
+            with("consent-remember-help", &[("client", client_name.clone())]),
+            Html::raw(format!(
+                "<input type=\"checkbox\" id=\"remember\" name=\"remember\" value=\"yes\" aria-describedby=\"remember-help\"{}>",
+                if remembered { " checked" } else { "" }
+            )),
+        )
+    };
     Html::raw(format!(
         "<form method=\"post\" action=\"{action}\" class=\"fui-stack\">\
          <input type=\"hidden\" name=\"form_token\" value=\"{token}\">{fields}{remember}\
