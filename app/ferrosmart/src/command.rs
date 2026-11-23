@@ -229,7 +229,7 @@ async fn listen_and_serve(settings: Settings) -> Result<ExitCode, Failure> {
         let running = tokio::spawn(Arc::clone(&forwarder).run());
         (forwarder, running)
     });
-    let sweeper = tokio::spawn(sweep(store.clone()));
+    let sweeper = tokio::spawn(sweep(store.clone(), settings.recent_retention));
     let providers = Providers::connect(
         &settings.upstreams,
         &settings.endpoint_url(crate::authorize::CALLBACK_ROUTE),
@@ -287,14 +287,18 @@ pub const FEED_IDLE: Duration = Duration::from_secs(5);
 /// No specification governs the value: our own design.
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Deletes the expired rows every [`SWEEP_INTERVAL`]; a failed sweep is
-/// logged and the next one tries again.
-async fn sweep(store: Store) {
+/// Deletes the expired rows, and the recent patients older than
+/// `retention`, every [`SWEEP_INTERVAL`]; a failed sweep is logged and the
+/// next one tries again.
+async fn sweep(store: Store, retention: Duration) {
     let mut interval = tokio::time::interval(SWEEP_INTERVAL);
     loop {
         interval.tick().await;
         if let Err(error) = store.sweep().await {
             tracing::warn!(error = %chain(&error), "the expired rows were not swept");
+        }
+        if let Err(error) = store.sweep_recent(retention).await {
+            tracing::warn!(error = %chain(&error), "the lapsed recent patients were not swept");
         }
     }
 }

@@ -16,6 +16,7 @@ pub mod consent;
 pub mod grant;
 pub mod launch;
 pub mod logout;
+pub mod recent;
 
 use std::collections::BTreeMap;
 use std::time::Duration;

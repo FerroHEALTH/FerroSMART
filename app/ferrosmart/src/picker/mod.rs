@@ -64,6 +64,7 @@ pub mod fhir_user;
 pub mod openehr;
 mod paired;
 pub mod purpose;
+pub mod shortcuts;
 
 /// The route of the picker under the issuer.
 pub const PICKER_ROUTE: &str = "/picker";
@@ -279,6 +280,9 @@ pub enum PickerError {
     /// No id could be drawn.
     #[error("no token id could be drawn")]
     Random(#[source] aws_lc_rs::error::Unspecified),
+    /// The store could not read or keep the person's recent patients.
+    #[error("the recent patients could not be read or kept")]
+    Store(#[source] crate::store::StoreError),
 }
 
 /// `GET {issuer}/picker?name=&identifier=`: the picker page, with the
@@ -315,7 +319,16 @@ pub async fn picker_get(
         return encounter::list(&state, &headers, &pending, from, patient).await;
     }
     if name.is_none() && identifier.is_none() {
-        return pages::picker(&state, &headers, &pending, None, None, None);
+        return match shortcuts::fhir(&state, &pending, from, base).await {
+            Ok(offered) => pages::picker(
+                &state,
+                &headers,
+                &pending,
+                None,
+                pages::Listed::Offered(&offered, None),
+            ),
+            Err(error) => pages::server_error(&state, &error),
+        };
     }
     let mut url = match patient_url(base, None) {
         Ok(url) => url,
@@ -339,8 +352,7 @@ pub async fn picker_get(
                 &headers,
                 &pending,
                 Some((name, identifier)),
-                Some(&found),
-                None,
+                pages::Listed::Found(&found),
             )
         }
         Ok(_) => pages::server_error(&state, &PickerError::Unreadable),
@@ -375,6 +387,10 @@ pub async fn picker_post(
             Ok(context) => context,
             Err(response) => return *response,
         };
+        let subject_id = form.get("subject_id").unwrap_or_default();
+        if let Err(error) = shortcuts::remember(&state, &pending, subject_id).await {
+            return pages::server_error(&state, &error);
+        }
         return enter(&state, &pending, &context, from).await;
     }
     if form.get("step") == Some(encounter::STEP) {
@@ -385,6 +401,9 @@ pub async fn picker_post(
     };
     if let Err(response) = read_patient(&state, &pending, from, &pending.audience, id).await {
         return *response;
+    }
+    if let Err(error) = shortcuts::remember(&state, &pending, id).await {
+        return pages::server_error(&state, &error);
     }
     if encounter::wanted(&state, &pending) {
         return see_other(&format!(
