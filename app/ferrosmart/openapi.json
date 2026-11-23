@@ -378,7 +378,7 @@
     "/audit": {
       "get": {
         "operationId": "searchAudit",
-        "summary": "FerroSMART's audit records, newest first.",
+        "summary": "FerroSMART's audit records, newest first, a page at a time.",
         "security": [
           {
             "admin": [
@@ -394,6 +394,36 @@
               "type": "string"
             },
             "description": "The person's subject."
+          },
+          {
+            "name": "client",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The client the record names; for an administrator's change, the admin client."
+          },
+          {
+            "name": "event",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The event, such as `token`, `login` or `grant-revoked`."
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "4",
+                "8",
+                "12"
+              ]
+            },
+            "description": "The AuditEvent.outcome code."
           },
           {
             "name": "since",
@@ -420,6 +450,14 @@
               "maximum": 1000,
               "default": 100
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Where the page starts, as a `next` link names it."
           }
         ],
         "responses": {
@@ -752,6 +790,61 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/admin/clients/{client_id}/secret": {
+      "parameters": [
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The client's `client_id`."
+        }
+      ],
+      "post": {
+        "operationId": "issueClientSecret",
+        "summary": "Issues a confidential symmetric client a new secret, answered once (RFC 7591 §3.2.1); the old secret no longer authenticates.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The client with its new secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientRegistration"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The client authenticates with no secret.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -1390,6 +1483,7 @@
         "required": [
           "resourceType",
           "type",
+          "link",
           "entry"
         ],
         "properties": {
@@ -1417,6 +1511,30 @@
                       "const": "AuditEvent"
                     }
                   }
+                }
+              }
+            }
+          },
+          "link": {
+            "type": "array",
+            "description": "The `self` link and, while more records match, the `next` link (FHIR R4 Bundle.link).",
+            "items": {
+              "type": "object",
+              "required": [
+                "relation",
+                "url"
+              ],
+              "properties": {
+                "relation": {
+                  "type": "string",
+                  "enum": [
+                    "self",
+                    "next"
+                  ]
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
                 }
               }
             }
