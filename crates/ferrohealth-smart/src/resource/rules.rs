@@ -4,13 +4,10 @@
 //! The rules an issuer's settings are held to beside its keys, shared by the
 //! JWT and the introspection settings.
 
-use std::collections::BTreeSet;
-
 use crate::assurance::AssuranceSection;
 use crate::federation::FederationSection;
 use crate::federation::person::AttributesSection;
 use crate::kind::IssuerKind;
-use crate::kind::standing::StandingSource;
 use crate::profile::Profile;
 use crate::resource::ResourceError;
 use crate::sender::SenderConstraint;
@@ -24,7 +21,6 @@ pub(super) fn check_issuer_rules(
     assurance: Option<&AssuranceSection>,
     federation: Option<&FederationSection>,
     sender_constraint: SenderConstraint,
-    scopeless_subjects: &BTreeSet<String>,
     role_claims: &[String],
 ) -> Result<(), ResourceError> {
     profile.validate(kind)?;
@@ -54,16 +50,6 @@ pub(super) fn check_issuer_rules(
     if let Some(assurance) = assurance {
         assurance.validate()?;
     }
-    // NOTE: no specification governs the allowlist: our own design; a patient
-    // or another party is never granted system-wide access.
-    if !scopeless_subjects.is_empty()
-        && matches!(kind, IssuerKind::Patients | IssuerKind::Federation)
-    {
-        return Err(ResourceError::Kind {
-            key: "scopeless_subjects",
-            kind,
-        });
-    }
     // NOTE: no specification governs this: our own design; another party's
     // issuer asserts no role of this deployment.
     if !role_claims.is_empty() && kind == IssuerKind::Federation {
@@ -89,19 +75,5 @@ pub(super) fn check_attributes(
         }),
         (_, Some(section)) => Ok(section.validate_for(kind)?),
         (_, None) => Ok(()),
-    }
-}
-
-/// Refuses a list of `profile` or a `scopeless_subjects` entry beside a
-/// product's `standing`, so no list is ever read in two places (no
-/// specification governs the standing: our own design).
-pub(super) fn check_standing(
-    standing: &StandingSource,
-    profile: &Profile,
-    scopeless_subjects: &BTreeSet<String>,
-) -> Result<(), ResourceError> {
-    match standing.listed_beside(profile, scopeless_subjects) {
-        Some(key) => Err(ResourceError::ListedBesideStanding { key }),
-        None => Ok(()),
     }
 }

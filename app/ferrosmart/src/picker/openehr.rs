@@ -72,7 +72,10 @@ pub(super) async fn look_up(
         .map(str::trim)
         .filter(|text| !text.is_empty())
     else {
-        return pages::ehr_picker(state, headers, pending, None);
+        return match super::shortcuts::openehr(state, pending, from, namespace).await {
+            Ok(recent) => pages::ehr_picker(state, headers, pending, None, &recent),
+            Err(error) => pages::server_error(state, &error),
+        };
     };
     if subject_id.len() > MAX_ID {
         return pages::fault(state, Fault::BadRequest);
@@ -82,7 +85,13 @@ pub(super) async fn look_up(
         Err(response) => return *response,
     };
     match by_subject(state, &kept, from, namespace, (subject_id, declared)).await {
-        Ok(found) => pages::ehr_picker(state, headers, &kept, Some((subject_id, found.as_ref()))),
+        Ok(found) => pages::ehr_picker(
+            state,
+            headers,
+            &kept,
+            Some((subject_id, found.as_ref())),
+            &[],
+        ),
         Err(error) => pages::server_error(state, &error),
     }
 }

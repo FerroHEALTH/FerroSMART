@@ -259,7 +259,6 @@ impl Issuer {
 /// context's patient, as an authorization server does.
 pub(crate) fn persons(issuer: impl Into<String>, audience: impl Into<String>) -> Settings {
     let mut settings = Settings::new(issuer, audience, IssuerKind::Persons);
-    settings.profile.first_party_clients = vec![String::from(CLIENT)];
     settings.profile.patient_context = true;
     settings
 }

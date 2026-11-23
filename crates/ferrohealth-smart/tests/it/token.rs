@@ -721,42 +721,18 @@ async fn the_scp_array_is_read_only_where_the_profile_names_it() -> Result<(), B
 }
 
 #[tokio::test]
-async fn a_scopeless_subject_on_the_allowlist_reaches_everything() -> Result<(), Box<dyn StdError>>
+async fn a_system_token_without_a_clinical_scope_reaches_nothing() -> Result<(), Box<dyn StdError>>
 {
     let key = ec_key("k1", Algorithm::ES256);
     let issuer = Issuer::start(&[&key]).await;
-    let mut settings = issuer.settings();
-    settings.scopeless_subjects.insert(String::from(CLIENT));
-    let server = server(settings).await;
+    let server = server(issuer.settings()).await;
     // NOTE: RFC 9068 §5, a client credentials token whose `sub` is its
-    // `client_id` is app-only, the one kind the allowlist admits.
+    // `client_id` is app-only.
     let mut claims = issuer.claims("openid");
     claims["sub"] = serde_json::json!(CLIENT);
     let caller = server.authenticate(&mint(&key, &claims)).await?;
     assert_eq!(&CallerKind::System, caller.kind());
-    assert_eq!(
-        Some(Compartment::Any),
-        caller.reach(Permission::Delete, "Condition")
-    );
-    let mut person = issuer.claims("openid");
-    person["sub"] = serde_json::json!(CLIENT);
-    person["client_id"] = serde_json::json!("another-client");
-    let mut settings = issuer.settings();
-    settings.scopeless_subjects.insert(String::from(CLIENT));
-    settings
-        .profile
-        .first_party_clients
-        .push(String::from("another-client"));
-    let caller = crate::support::server(settings)
-        .await
-        .authenticate(&mint(&key, &person))
-        .await?;
-    assert_eq!(&CallerKind::Person, caller.kind());
-    assert_eq!(
-        None,
-        caller.reach(Permission::Delete, "Condition"),
-        "a person on the allowlist is never scopeless"
-    );
+    assert_eq!(None, caller.reach(Permission::Delete, "Condition"));
     Ok(())
 }
 

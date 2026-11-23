@@ -17,6 +17,7 @@ pub mod grant;
 pub mod launch;
 pub mod logout;
 pub mod pushed;
+pub mod recent;
 pub mod signing;
 
 use std::collections::BTreeMap;

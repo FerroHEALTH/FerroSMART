@@ -42,7 +42,6 @@ impl Default for IssuerEntry {
             timeout: Duration::from_secs(10),
             mode: AuthMode::Jwt,
             introspection: None,
-            scopeless_subjects: Vec::new(),
             federation: None,
             attributes: None,
             party: None,

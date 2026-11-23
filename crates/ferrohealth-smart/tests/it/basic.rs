@@ -201,7 +201,6 @@ fn a_basic_caller_is_granted_no_system_scope() {
         Some(String::from("svc")),
         "",
         None,
-        false,
         CallerKind::System,
     )
     .with_granted_scope(["system/Condition.r"]);

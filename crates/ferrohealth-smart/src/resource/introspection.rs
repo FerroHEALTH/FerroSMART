@@ -19,7 +19,6 @@
 //! and a held one is classified again on every request it answers.
 
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
@@ -38,7 +37,6 @@ use crate::client::OAuthError;
 use crate::client::TokenError;
 use crate::client::cache::TokenSource;
 use crate::kind::IssuerKind;
-use crate::kind::standing::StandingSource;
 use crate::metadata::DiscoveryError;
 use crate::metadata::Http;
 use crate::metadata::ServerMetadata;
@@ -105,12 +103,6 @@ pub struct IntrospectionSettings {
     pub cache_capacity: usize,
     /// How long one call to the authorization server may take.
     pub timeout: Duration,
-    /// The subjects granted system-wide access without a clinical scope;
-    /// refused beside a product's [`StandingSource::Product`].
-    pub scopeless_subjects: BTreeSet<String>,
-    /// Who answers the standing questions of the classification
-    /// ([`crate::kind::standing`]).
-    pub standing: StandingSource,
     /// The members of a response the caller's roles are read from, each a
     /// dotted path (RFC 9068 §2.2.3.1; [`crate::roles`]).
     pub role_claims: Vec<String>,
@@ -137,8 +129,8 @@ impl IntrospectionSettings {
     ///
     /// The introspection endpoint is the one the issuer's metadata names,
     /// the clock skew is 60 seconds, an active response is held for at most
-    /// 60 seconds and at most 10 000 of them at once, a call may take 10
-    /// seconds, and no subject is granted scopeless access.
+    /// 60 seconds and at most 10 000 of them at once, and a call may take
+    /// 10 seconds.
     #[must_use]
     pub fn new(
         issuer: impl Into<String>,
@@ -155,8 +147,6 @@ impl IntrospectionSettings {
             cache_max_age: Duration::from_secs(60),
             cache_capacity: 10_000,
             timeout: Duration::from_secs(10),
-            scopeless_subjects: BTreeSet::new(),
-            standing: StandingSource::Lists,
             // NOTE: no specification governs this: our own design; another party's
             // issuer asserts no role of this deployment.
             role_claims: if kind == IssuerKind::Federation {
@@ -199,12 +189,8 @@ impl IntrospectionSettings {
             self.assurance.as_ref(),
             self.federation.as_ref(),
             self.sender_constraint,
-            &self.scopeless_subjects,
             &self.role_claims,
         )
-        .and_then(|()| {
-            super::rules::check_standing(&self.standing, &self.profile, &self.scopeless_subjects)
-        })
         .and_then(|()| super::rules::check_attributes(self.kind, self.attributes.as_ref()))
         .map_err(|source| IntrospectionError::Rules {
             source: Box::new(source),
@@ -521,14 +507,14 @@ impl Introspector {
         if let Some(held) = self.cached(&key) {
             // NOTE: no specification governs this: our own design; a held response is
             // classified again, so the issuer's standing answers every request.
-            let (caller, _) = self.admit(held.claims().clone()).await?;
+            let (caller, _) = self.admit(held.claims().clone())?;
             return Ok(caller.with_cached(true));
         }
         let claims = self
             .introspect(token)
             .await
             .map_err(|error| Rejection::upstream(UPSTREAM, error))?;
-        let (caller, exp) = self.admit(claims).await?;
+        let (caller, exp) = self.admit(claims)?;
         self.hold(key, &caller, exp);
         Ok(caller)
     }
@@ -626,7 +612,7 @@ impl Introspector {
 
     /// Returns the caller an introspection response describes, and its
     /// `exp`.
-    async fn admit(&self, claims: Map<String, Value>) -> Result<(Caller, i64), Rejection> {
+    fn admit(&self, claims: Map<String, Value>) -> Result<(Caller, i64), Rejection> {
         // NOTE: RFC 7662 §2.2, `active` is REQUIRED and only `true` names an
         // active token; anything else refuses it.
         if claims.get("active") != Some(&Value::Bool(true)) {
@@ -689,14 +675,11 @@ impl Introspector {
                 attributes: self.settings.attributes.as_ref(),
                 audiences: &self.settings.audience,
                 clock_skew: self.settings.clock_skew,
-                scopeless_subjects: &self.settings.scopeless_subjects,
-                standing: &self.settings.standing,
                 role_claims: &self.settings.role_claims,
                 resource_types: self.resource_types.as_ref(),
                 extensions: &self.extensions,
             },
-        )
-        .await?;
+        )?;
         Ok((caller, exp))
     }
 

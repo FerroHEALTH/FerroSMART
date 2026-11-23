@@ -710,16 +710,10 @@ mod tests {
             (Unclassified::PatientActor, "patient-actor-refused"),
             (Unclassified::NotAppOnly, "not-app-only"),
             (Unclassified::NoClient, "client-missing"),
-            (Unclassified::UnlistedClient, "delegate-not-granted"),
-            (Unclassified::UnlistedActor, "actor-not-granted"),
             (Unclassified::ActorChain, "actor-chain-refused"),
             (
                 Unclassified::RepresentationWithAct,
                 "representation-with-act",
-            ),
-            (
-                Unclassified::RepresentationThroughDelegate,
-                "representation-through-delegate",
             ),
             (
                 Unclassified::ExternalIncomplete { missing: vec![] },
@@ -866,11 +860,11 @@ mod tests {
             expired.challenge(Some("ferro"))
         );
         let delegate = Denied::from(&Rejection::Unclassified {
-            reason: Unclassified::UnlistedClient,
+            reason: Unclassified::ActorChain,
         });
         assert_eq!(
             Some(String::from(
-                "Bearer error=\"invalid_token\", error_description=\"delegate-not-granted\""
+                "Bearer error=\"invalid_token\", error_description=\"actor-chain-refused\""
             )),
             delegate.challenge(None)
         );
@@ -1004,7 +998,6 @@ mod tests {
                 None,
                 "",
                 None,
-                false,
                 crate::kind::CallerKind::Person,
             )
             .with_claims(claims)
