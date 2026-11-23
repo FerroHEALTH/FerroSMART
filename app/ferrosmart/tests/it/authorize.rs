@@ -2523,6 +2523,7 @@ mod providers;
 mod public_redirect;
 mod saml;
 mod secret_basic;
+mod token_exchange;
 
 /// The capabilities FerroSMART supports with a FHIR resource server and a
 /// SMART style document configured, each with the case that exercises it
@@ -2619,7 +2620,12 @@ async fn with_a_login_every_listed_grant_is_served_and_every_served_one_listed()
         .await;
     let listed = read(metadata);
     assert_eq!(
-        vec!["authorization_code", "client_credentials", "refresh_token"],
+        vec![
+            "authorization_code",
+            "client_credentials",
+            "refresh_token",
+            "urn:ietf:params:oauth:grant-type:token-exchange"
+        ],
         listed
     );
     let (_, _, openid) = smart.get("/.well-known/openid-configuration", None).await;

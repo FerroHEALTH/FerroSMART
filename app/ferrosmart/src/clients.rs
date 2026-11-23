@@ -55,6 +55,9 @@ pub enum GrantType {
     ClientCredentials,
     /// The refresh token grant (RFC 6749 §6).
     RefreshToken,
+    /// The token exchange of a patient's own token for their openEHR base
+    /// (RFC 8693 §2.1; `docs/architecture.md` §13.29).
+    TokenExchange,
 }
 
 impl GrantType {
@@ -65,6 +68,7 @@ impl GrantType {
             Self::AuthorizationCode => "authorization_code",
             Self::ClientCredentials => "client_credentials",
             Self::RefreshToken => "refresh_token",
+            Self::TokenExchange => crate::token::exchange::TOKEN_EXCHANGE,
         }
     }
 }
@@ -605,6 +609,10 @@ pub fn resolve_with(section: &ClientSection, material: Material) -> Result<Clien
             // credentials grant authenticates with an asymmetric key.
             if grant_types.contains(&GrantType::ClientCredentials) {
                 return Err(rule("a public client cannot use `client_credentials`"));
+            }
+            // NOTE: RFC 8693 §2.1, the exchanging client authenticates.
+            if grant_types.contains(&GrantType::TokenExchange) {
+                return Err(rule("a public client cannot use `token_exchange`"));
             }
             (None, None)
         }

@@ -193,6 +193,7 @@ pub(crate) fn mint(state: &AppState, client: &Client, grant: Grant<'_>) -> Resul
             scope: grant.scope.to_owned(),
             id_token,
             refresh_token: None,
+            issued_token_type: None,
             context: grant.context.clone(),
         },
         client_id: client.client_id.clone(),

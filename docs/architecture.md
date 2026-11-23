@@ -1402,7 +1402,10 @@ in one `persons` table, which also reads a client credentials token as
 SMART app acts for the signed-in person, so a product lists the apps it
 admits in `delegates` and reads their callers as `Delegated`. The preset
 lists none, because the apps belong to each deployment. FerroSMART grants
-no token exchange, so the onward grants stay with another issuer. FerroSMART's own tests read the
+one token exchange, of a patient's own token for the openEHR base paired
+with its FHIR base (13.29); the issued token names the exchanging client
+as `client_id` and no `act`, so a product that lists that client in
+`delegates` reads it as the patient. FerroSMART's own tests read the
 tokens it issues under the preset.
 
 **A national binding as a profile file.** The products ship no country
@@ -3653,6 +3656,13 @@ jwks_uri = "https://export.example.org/jwks.json"   # or jwks_file, a JWK Set by
 scopes = ["system/Patient.rs", "system/Observation.rs"]   # the client's ceiling
 grant_types = ["client_credentials"]
 
+# [[ferrosmart.client]]                       # a product that reads a patient's own EHR as them (13.29)
+# client_id = "bridge"
+# kind = "confidential_symmetric"             # or "confidential_asymmetric"; never public
+# resources = ["https://ehr.example.org/fhir", "https://ehr.example.org/openehr/v1"]   # the FHIR base it serves and the paired openEHR base
+# scopes = ["patient/composition-*.r"]
+# grant_types = ["token_exchange"]
+
 [[ferrosmart.client]]                         # a confidential symmetric app (SMART 2.2, Client Authentication: Symmetric)
 client_id = "portal"
 kind = "confidential_symmetric"
@@ -5103,3 +5113,57 @@ FerroHEALTH/FerroEHR#6419, #784).
 
 The tests are `app/ferrosmart/tests/it/authorize/assurance.rs` and the SAML
 case `a_class_is_held_to_its_eidas_level_and_the_client_s_minimum`.
+
+### 13.29 The token exchange of a patient's own token
+
+A product that serves a person at a FHIR base, such as FerroBRIDGE's
+patient summary, reads the person's own EHR at the openEHR base paired
+with it. With its own credential the CDR would see a system caller, so it
+could not apply the person's own-access rules (EHDS Article 3) or name the
+person in its access record. FerroSMART therefore grants RFC 8693 token
+exchange for this one case (owner decision on FerroHEALTH/FerroEHR#6419,
+#785); no other subject is exchanged. Where the specification leaves the
+choice to the server, the rules below are our own design.
+
+- **The client.** A confidential client whose `grant_types` lists
+  `token_exchange` (`urn:ietf:params:oauth:grant-type:token-exchange`,
+  `rfc8693 §2.1`), authenticated as at every grant; a public client is
+  refused the grant at load and at the endpoint (`unauthorized_client`).
+  Its `resources` lists the FHIR base it serves and the paired openEHR
+  base, so the exchange admits only the product of that FHIR base.
+- **The request.** `subject_token` with `subject_token_type`
+  `urn:ietf:params:oauth:token-type:access_token`; no `actor_token`, since
+  the product acts for the person and an actor would make the exchange a
+  delegation (`rfc8693 §1.1`); a `requested_token_type`, when named, of an
+  access token; `resource` or `audience`, when named, the paired openEHR
+  base, any other `invalid_target`; `scope` within `patient/composition-*.r`
+  and the client's ceiling, `invalid_scope` beyond it, and
+  `patient/composition-*.r` when named none.
+- **The subject token.** An access token FerroSMART issued, its signature
+  verified with its own keys, its record active (unexpired, neither it nor
+  its grant revoked), under a grant that is the person's own access
+  (3.13): `fhirUser` naming `Patient/<x>` at the token's FHIR base,
+  `patient` naming `<x>`, `patient/` scopes alone with a read among them.
+  Any other subject, a professional's or a machine's among them, is
+  `invalid_request` (`rfc8693 §2.2.2`). Every request, refused or answered,
+  is the token endpoint's `IHE.IUA.71` record (13.2).
+- **The patient's EHR.** The openEHR base is the one whose `fhir_base`
+  pairs it with the subject token's audience (13.6 item 4). The patient is
+  read at the FHIR base and their EHR looked up by the identifier
+  `subject_system` names, each as the person with a token for that lookup
+  alone and its access record, as the paired picker does; a patient with
+  no EHR there is `invalid_target`.
+- **The issued token.** An RFC 9068 access token with the subject token's
+  `sub`, `aud` the openEHR base, `client_id` the exchanging client and no
+  `act`, `fhirUser` as the absolute URL of the patient at the FHIR base,
+  `patient` and `ehrId`, the subject's `acr` and `auth_time` (13.28) and
+  its roles, the scope granted, and a lifetime of at most five minutes,
+  never past the subject token's `exp`. It is recorded under the subject
+  token's grant, so revoking the grant revokes it. The response names
+  `issued_token_type` as an access token (`rfc8693 §2.2.1`), and an audit
+  line names the client and both tokens' `jti`, never a value.
+- **What a product reads.** Under the `ferrosmart` preset with the
+  exchanging client among the `delegates`, the issued token reads as
+  `CallerKind::Patient` and `is_the_person` (3.13, 3.14).
+
+The tests are `app/ferrosmart/tests/it/authorize/token_exchange.rs`.

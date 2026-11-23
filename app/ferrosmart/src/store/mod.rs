@@ -496,6 +496,7 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
             "authorization_code" => Ok(GrantType::AuthorizationCode),
             "client_credentials" => Ok(GrantType::ClientCredentials),
             "refresh_token" => Ok(GrantType::RefreshToken),
+            crate::token::exchange::TOKEN_EXCHANGE => Ok(GrantType::TokenExchange),
             _ => Err(corrupt()),
         })
         .collect::<Result<Vec<_>, _>>()?;

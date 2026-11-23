@@ -193,6 +193,31 @@ pub(crate) async fn own_record(
     enter(state, pending, &context, from).await
 }
 
+/// Returns the openEHR base paired with the FHIR base `fhir_base`, with the
+/// id of the EHR of its patient `id` read as `person`; none when no base is
+/// paired with it or the patient has no EHR the person may see there.
+///
+/// # Errors
+/// Returns the [`PickerError`] of a read or lookup that failed.
+pub(crate) async fn paired_ehr(
+    state: &AppState,
+    person: &Person<'_>,
+    from: IpAddr,
+    fhir_base: &str,
+    id: &str,
+) -> Result<Option<(String, String)>, PickerError> {
+    let Some((base, pairing)) = state
+        .settings()
+        .pairings
+        .iter()
+        .find(|(_, pairing)| pairing.fhir_base == fhir_base)
+    else {
+        return Ok(None);
+    };
+    let ehr = paired::ehr_of(state, person, from, (base, pairing), id).await?;
+    Ok(ehr.map(|ehr| (base.clone(), ehr)))
+}
+
 /// Returns the subject namespace of `audience` when it is an openEHR
 /// resource server the picker looks EHRs up at.
 fn openehr_namespace<'a>(state: &'a AppState, audience: &str) -> Option<&'a str> {
@@ -611,6 +636,35 @@ fn entries<'a>(bundle: &'a Value, kind: &'a str) -> impl Iterator<Item = &'a Val
         .filter(move |resource| resource.get("resourceType").and_then(Value::as_str) == Some(kind))
 }
 
+/// The person a lookup is sent as: who logged in, for which client, at
+/// which resource server.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Person<'a> {
+    /// Their FerroSMART `sub`.
+    pub(crate) subject: &'a str,
+    /// Their `fhirUser`, when they have one.
+    pub(crate) fhir_user: Option<&'a str>,
+    /// Their mapped roles.
+    pub(crate) roles: &'a [String],
+    /// The client the lookup serves.
+    pub(crate) client_id: Option<&'a str>,
+    /// The name the record gives them.
+    pub(crate) display_name: Option<&'a str>,
+}
+
+impl<'a> Person<'a> {
+    /// Returns the person signed in for `pending`, none before the login.
+    fn of(pending: &'a Pending) -> Option<Self> {
+        Some(Self {
+            subject: pending.subject.as_deref()?,
+            fhir_user: pending.fhir_user.as_deref(),
+            roles: &pending.roles,
+            client_id: pending.client_id.as_deref(),
+            display_name: pending.display_name.as_deref(),
+        })
+    }
+}
+
 /// Sends `ask` as the signed-in person of `pending` with a token issued for
 /// this request alone, records the access, revokes the token and returns
 /// the answer.
@@ -620,9 +674,18 @@ async fn as_person(
     from: IpAddr,
     ask: &Ask<'_>,
 ) -> Result<Value, PickerError> {
-    let Some(subject) = pending.subject.as_deref() else {
-        return Err(PickerError::Unreadable);
-    };
+    let person = Person::of(pending).ok_or(PickerError::Unreadable)?;
+    as_the(state, &person, from, ask).await
+}
+
+/// Sends `ask` as `person`, as [`as_person`] does.
+async fn as_the(
+    state: &AppState,
+    person: &Person<'_>,
+    from: IpAddr,
+    ask: &Ask<'_>,
+) -> Result<Value, PickerError> {
+    let subject = person.subject;
     let settings = state.settings();
     let jti = crate::authorize::random().map_err(PickerError::Random)?;
     let issued_at = jiff::Timestamp::now().as_second();
@@ -636,8 +699,8 @@ async fn as_person(
         jti: &jti,
         client_id: &settings.issuer,
         scope: ask.scope,
-        fhir_user: pending.fhir_user.as_deref(),
-        roles: &pending.roles,
+        fhir_user: person.fhir_user,
+        roles: person.roles,
     };
     // NOTE: RFC 9068 §2.1, typ at+jwt.
     let token = settings
@@ -649,7 +712,7 @@ async fn as_person(
     let happening = |event, details| Happening {
         event,
         issuer: &settings.issuer,
-        client_id: pending.client_id.as_deref(),
+        client_id: person.client_id,
         subject: Some(subject),
         from,
         endpoint: &endpoint,
@@ -683,8 +746,7 @@ async fn as_person(
         .map_err(PickerError::Record)?;
     let fetched = fetch(state, ask, &token).await;
     let asker = Asker {
-        pending,
-        subject,
+        person,
         from,
         audience: ask.audience,
         purpose: ask.purpose,
@@ -739,10 +801,8 @@ async fn revoke(state: &AppState, jti: &str, happening: Happening<'_>) -> Result
 
 /// Who sent one request of the picker, from where and to which server.
 struct Asker<'a> {
-    /// The browser's request.
-    pending: &'a Pending,
-    /// The signed-in person.
-    subject: &'a str,
+    /// The person.
+    person: &'a Person<'a>,
     /// The browser's address.
     from: IpAddr,
     /// The base of the resource server asked.
@@ -759,8 +819,7 @@ async fn record_access(
     access: Access,
 ) -> Result<(), PickerError> {
     let Asker {
-        pending,
-        subject,
+        person,
         from,
         audience,
         ..
@@ -813,12 +872,7 @@ async fn record_access(
     let exchange = ehds_logging::balp::exchange(&record, &endpoint);
     let row = state
         .audit()
-        .row(
-            &exchange,
-            "access",
-            Some(subject),
-            pending.client_id.as_deref(),
-        )
+        .row(&exchange, "access", Some(person.subject), person.client_id)
         .map_err(PickerError::Record)?;
     state
         .audit()
@@ -830,15 +884,15 @@ async fn record_access(
 /// Returns the person of `asker` under FerroSMART's `issuer`, as the
 /// access record names the accessor.
 fn accessor(issuer: &str, asker: &Asker<'_>) -> Accessor {
-    let pending = asker.pending;
+    let person = asker.person;
     Accessor {
         issuer: Some(issuer.to_owned()),
-        subject: asker.subject.to_owned(),
-        client_id: pending.client_id.clone(),
+        subject: person.subject.to_owned(),
+        client_id: person.client_id.map(str::to_owned),
         audience: Some(asker.audience.to_owned()),
         provider: None,
         acting: None,
-        roles: pending
+        roles: person
             .roles
             .iter()
             .map(|role| Coded {
@@ -849,7 +903,7 @@ fn accessor(issuer: &str, asker: &Asker<'_>) -> Accessor {
         token_id: None,
         assurance: None,
         professional: Professional {
-            name: pending.display_name.clone(),
+            name: person.display_name.map(str::to_owned),
             ..Professional::default()
         },
         alt_id: None,
