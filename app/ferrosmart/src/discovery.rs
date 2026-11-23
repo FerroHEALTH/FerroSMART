@@ -236,6 +236,22 @@ pub fn add_acr_values(document: &mut Value, settings: &Settings) {
     }
 }
 
+/// Adds the pushed authorization request endpoint and whether every
+/// authorization request must arrive through it to `document` (RFC 9126
+/// §5), which describes the login.
+pub fn add_pushed_requests(document: &mut Value, settings: &Settings) {
+    if let Some(members) = document.as_object_mut() {
+        members.insert(
+            String::from("pushed_authorization_request_endpoint"),
+            json!(settings.endpoint(crate::authorize::par::PAR_ROUTE)),
+        );
+        members.insert(
+            String::from("require_pushed_authorization_requests"),
+            json!(settings.require_pushed_authorization_requests),
+        );
+    }
+}
+
 /// Adds `end_session_endpoint` (`{issuer}/logout`) to `document` when
 /// `metadata` describes the login, which alone gives a person a session to
 /// end (OpenID Connect RP-Initiated Logout 1.0 §2.1; the member is

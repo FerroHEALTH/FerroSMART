@@ -160,6 +160,9 @@ pub struct Fields {
     pub tos_uri: String,
     /// Whether the app is the controller's own or acts for it.
     pub first_party: bool,
+    /// Whether the client starts an authorization request only by pushing
+    /// it (RFC 9126 §6).
+    pub require_pushed_authorization_requests: bool,
 }
 
 impl Default for Fields {
@@ -185,13 +188,14 @@ impl Default for Fields {
             policy_uri: String::new(),
             tos_uri: String::new(),
             first_party: false,
+            require_pushed_authorization_requests: false,
         }
     }
 }
 
 /// The members a [`ClientDocument`] reads; a registration request's other
 /// members are ignored (RFC 7591 §2).
-const MEMBERS: [&str; 19] = [
+const MEMBERS: [&str; 20] = [
     "client_id",
     "client_name",
     "token_endpoint_auth_method",
@@ -210,6 +214,7 @@ const MEMBERS: [&str; 19] = [
     "policy_uri",
     "tos_uri",
     "first_party",
+    "require_pushed_authorization_requests",
     "client_secret",
 ];
 
@@ -253,6 +258,7 @@ impl Fields {
             policy_uri: self.policy_uri,
             tos_uri: self.tos_uri,
             first_party: self.first_party,
+            require_pushed_authorization_requests: self.require_pushed_authorization_requests,
         };
         let material = Material {
             jwks: self.jwks,
@@ -309,6 +315,8 @@ pub struct ClientView<'a> {
     tos_uri: Option<&'a str>,
     /// Whether the app is the controller's own or acts for it.
     first_party: bool,
+    /// Whether it starts an authorization request only by pushing it.
+    require_pushed_authorization_requests: bool,
     /// `admin`, or `self` for an app that registered itself (RFC 7591 §5).
     registered_by: &'static str,
     /// When it was disabled, an RFC 3339 instant; absent while enabled.
@@ -354,6 +362,7 @@ impl<'a> From<&'a Registered> for ClientView<'a> {
             policy_uri: client.about.policy.as_ref().map(Url::as_str),
             tos_uri: client.about.terms.as_ref().map(Url::as_str),
             first_party: client.first_party(),
+            require_pushed_authorization_requests: client.require_pushed_authorization_requests,
             registered_by: registered.by.as_str(),
             disabled_at: registered.disabled_at.map(instant),
         }

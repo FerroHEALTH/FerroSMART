@@ -73,6 +73,8 @@ pub struct Settings {
     pub saml: Option<Arc<crate::upstream::saml::ServiceProviderSettings>>,
     /// The scopes each role may be granted.
     pub roles: BTreeMap<String, Vec<String>>,
+    /// Whether every authorization request arrives pushed (RFC 9126 §4).
+    pub require_pushed_authorization_requests: bool,
     /// The deployment's name.
     pub name: String,
     /// The deployment's words on the pages.
@@ -207,6 +209,7 @@ impl Config {
             upstreams: upstreams(&section.upstream, &keys, section.assurance_minimum)?,
             saml: service_provider(section)?,
             roles: roles(&section.role)?,
+            require_pushed_authorization_requests: section.require_pushed_authorization_requests,
             name: section.name.clone(),
             branding: branding(&section.branding)?,
             registration: registration(&section.registration)?,

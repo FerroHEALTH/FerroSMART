@@ -53,6 +53,7 @@ registers itself sends too. `resources`, `launch_uri`, `upstreams` and
 | `resources` | The `[[ferrosmart.resource]]` bases its tokens may name in `aud`; a request for any other base is refused `invalid_target`, and a client that lists none reaches no resource server |
 | `upstreams` | The identity providers its people log in at; every provider when absent |
 | `default_acr_values` | The eIDAS level-of-assurance URIs a request without `acr_values` asks for (OpenID Connect Dynamic Client Registration 1.0 §2) |
+| `require_pushed_authorization_requests` | `true` when the app may start an authorization request only by pushing it to `POST {issuer}/par` (RFC 9126 §6); `false` by default |
 | `launch_uri` | Optional: the app's launch URL, absolute `https`, by which an EHR's [launch registration](../integrate/ehr-launch.md) may name the app (`app_launch_uri`), as a SMART Task does; compared after RFC 3986 normalization, one client per URL |
 | `client_uri` | Optional: the app's home page, absolute `https`, linked from the consent page |
 | `logo_uri` | Optional: the app's logo, absolute `https`, drawn on the consent page; the page's CSP admits that origin for images alone |

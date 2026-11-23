@@ -16,6 +16,7 @@ pub mod choose;
 pub mod consent;
 pub mod manage;
 mod oidc;
+pub mod par;
 pub mod request;
 pub mod saml;
 

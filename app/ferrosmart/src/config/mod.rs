@@ -141,6 +141,10 @@ pub struct FerroSmartSection {
     /// The eIDAS level every person's login reaches; `substantial` by
     /// default (`docs/architecture.md` §13.28).
     pub assurance_minimum: crate::assurance::Floor,
+    /// Whether every authorization request arrives pushed (RFC 9126 §4,
+    /// §5); `false` by default, when a client's own
+    /// `require_pushed_authorization_requests` still holds it to PAR.
+    pub require_pushed_authorization_requests: bool,
     /// `[ferrosmart.keys]`: the keys that sign every token, in rotation.
     pub keys: SigningKeysSection,
     /// `[ferrosmart.database]`: the PostgreSQL database of the state.
@@ -356,6 +360,7 @@ impl Default for FerroSmartSection {
             refresh_idle: Span::from_days(30),
             online_idle: Span::from_hours(8),
             assurance_minimum: crate::assurance::Floor::Substantial,
+            require_pushed_authorization_requests: false,
             keys: SigningKeysSection::default(),
             database: DatabaseSection::default(),
             resource: Vec::new(),

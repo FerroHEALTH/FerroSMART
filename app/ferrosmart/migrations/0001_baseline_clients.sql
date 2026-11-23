@@ -34,6 +34,7 @@ CREATE TABLE client (
     disabled_at timestamptz,
     resources text[] NOT NULL DEFAULT '{}',
     default_acr_values text[] NOT NULL DEFAULT '{}',
+    require_pushed_authorization_requests boolean NOT NULL DEFAULT false,
     -- A private_key_jwt client has a JWK Set by URL or by value; no other has one.
     CONSTRAINT client_keys_check
         CHECK ((token_endpoint_auth_method = 'private_key_jwt')
