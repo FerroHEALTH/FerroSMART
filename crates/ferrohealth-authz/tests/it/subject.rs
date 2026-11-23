@@ -10,6 +10,7 @@ use ferrohealth_authz::request::Subject;
 use ferrohealth_smart::federation::Attribute;
 use ferrohealth_smart::federation::External;
 use ferrohealth_smart::federation::Field;
+use ferrohealth_smart::kind::Actor;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::resource::Caller;
 use serde_json::json;
@@ -22,7 +23,6 @@ fn caller(kind: CallerKind) -> Caller {
         Some(String::from("synthetic-client")),
         "user/Observation.rs",
         None,
-        false,
         kind,
     )
     .with_roles(vec![String::from("clinician")])
@@ -37,7 +37,7 @@ fn a_subject_is_read_from_a_caller_of_every_kind() {
         CallerKind::Person,
         CallerKind::System,
         CallerKind::Patient,
-        CallerKind::Delegated { actor: None },
+        CallerKind::Delegated { actor: actor() },
         CallerKind::Representative {
             represented: String::from("synthetic-represented"),
             ground: None,
@@ -87,7 +87,7 @@ fn a_patient_subject_carries_its_kind() {
 
 #[test]
 fn a_delegated_subject_carries_its_kind() {
-    carries(&CallerKind::Delegated { actor: None }, "delegated");
+    carries(&CallerKind::Delegated { actor: actor() }, "delegated");
 }
 
 #[test]
@@ -151,4 +151,12 @@ fn an_external_organisation_subject_carries_its_kind() {
         &CallerKind::ExternalOrganisation(Box::new(external())),
         "external_organisation",
     );
+}
+
+/// The RFC 8693 §4.1 actor of a delegated caller.
+fn actor() -> Actor {
+    Actor {
+        issuer: String::from("https://as.example.org"),
+        sub: String::from("actor-1"),
+    }
 }

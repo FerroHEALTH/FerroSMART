@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! The table forms a [`Marker`] and a [`Delegate`] are written in, the
-//! conversions that hold each table to exactly one form, the test a marker
+//! The table form a [`Marker`] is written in, the conversions that hold
+//! each table to exactly one form, the test a marker
 //! runs, and the helpers a profile overlay sets its keys with.
 
 use serde::Deserialize;
@@ -10,7 +10,6 @@ use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
 
-use crate::profile::Delegate;
 use crate::profile::Marker;
 
 /// The table form of a [`Marker`].
@@ -113,60 +112,6 @@ impl From<Marker> for MarkerTable {
             },
             Marker::DiffersFromIssuer { claim } => Self {
                 differs_from_iss: Some(claim),
-                ..Self::default()
-            },
-        }
-    }
-}
-
-/// The table form of a [`Delegate`].
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
-pub(super) struct DelegateTable {
-    /// The actor's issuer.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    issuer: Option<String>,
-    /// The actor's `sub`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sub: Option<String>,
-    /// The client.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    client: Option<String>,
-}
-
-impl TryFrom<DelegateTable> for Delegate {
-    type Error = String;
-
-    fn try_from(table: DelegateTable) -> Result<Self, Self::Error> {
-        match table {
-            DelegateTable {
-                issuer,
-                sub: Some(sub),
-                client: None,
-            } => Ok(Self::Actor { issuer, sub }),
-            DelegateTable {
-                issuer: None,
-                sub: None,
-                client: Some(client),
-            } => Ok(Self::Client(client)),
-            _ => Err(String::from(
-                "a delegate is { sub } with an optional issuer, or { client }",
-            )),
-        }
-    }
-}
-
-impl From<Delegate> for DelegateTable {
-    fn from(delegate: Delegate) -> Self {
-        match delegate {
-            Delegate::Actor { issuer, sub } => Self {
-                issuer,
-                sub: Some(sub),
-                client: None,
-            },
-            Delegate::Client(client) => Self {
-                client: Some(client),
                 ..Self::default()
             },
         }

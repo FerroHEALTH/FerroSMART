@@ -189,7 +189,6 @@ mod tests {
             None,
             "",
             None,
-            false,
             CallerKind::Person,
         )
         .with_claims(claims)

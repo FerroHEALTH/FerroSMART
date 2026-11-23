@@ -20,12 +20,7 @@ use ferrohealth_smart::config::ConfigError;
 use ferrohealth_smart::config::IntrospectionSection;
 use ferrohealth_smart::config::IssuerEntry;
 use ferrohealth_smart::config::credentials::OauthSection;
-use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
-use ferrohealth_smart::kind::Unclassified;
-use ferrohealth_smart::kind::standing::ClientStanding;
-use ferrohealth_smart::kind::standing::Standing;
-use ferrohealth_smart::kind::standing::StandingSource;
 use ferrohealth_smart::refusal::Reason;
 use ferrohealth_smart::resource::Rejection;
 use ferrohealth_smart::resource::introspection::IntrospectionAuth;
@@ -41,7 +36,6 @@ use wiremock::matchers::header;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
-use crate::standing::Product;
 use crate::support::AUDIENCE;
 use crate::support::CLIENT;
 use crate::support::Issuer;
@@ -77,7 +71,6 @@ fn settings(issuer: &Issuer) -> IntrospectionSettings {
 fn persons(issuer: &Issuer, auth: IntrospectionAuth) -> IntrospectionSettings {
     let mut settings =
         IntrospectionSettings::new(issuer.uri(), AUDIENCE, auth, IssuerKind::Persons);
-    settings.profile.first_party_clients = vec![String::from(CLIENT)];
     settings.profile.patient_context = true;
     settings
 }
@@ -157,37 +150,6 @@ async fn an_active_response_is_held_and_read_from_the_cache() -> Result<(), Box<
     let again = introspector.authenticate(TOKEN).await?;
     assert!(again.cached(), "the second answer is the held one");
     assert_eq!("synthetic-sub", again.subject());
-    Ok(())
-}
-
-#[tokio::test]
-async fn a_held_response_asks_the_products_standing_again() -> Result<(), Box<dyn StdError>> {
-    let issuer = issuer().await;
-    answer(&issuer, json(&active(&issuer, 300)), 1).await;
-    let product = Arc::new(Product::default());
-    product
-        .held()
-        .clients
-        .insert(String::from(CLIENT), ClientStanding::FirstParty);
-    let mut settings =
-        IntrospectionSettings::new(issuer.uri(), AUDIENCE, client(&issuer), IssuerKind::Persons);
-    let standing: Arc<dyn Standing> = product.clone();
-    settings.standing = StandingSource::Product(standing);
-    let introspector = Introspector::discover(settings).await?;
-    let caller = introspector.authenticate(TOKEN).await?;
-    assert_eq!(&CallerKind::Person, caller.kind());
-    product.held().clients.clear();
-    let held = introspector.authenticate(TOKEN).await;
-    assert!(
-        matches!(
-            held,
-            Err(Rejection::Unclassified {
-                reason: Unclassified::UnlistedClient
-            })
-        ),
-        "the held response is classified under the product's answer now: {held:?}"
-    );
-    assert_eq!(2, product.held().asked.len());
     Ok(())
 }
 
@@ -659,7 +621,6 @@ fn the_introspection_table_reads_from_toml() -> Result<(), Box<dyn StdError>> {
 #[test]
 fn introspection_mode_reads_the_entries_of_its_issuer() -> Result<(), Box<dyn StdError>> {
     let mut auth = section("https://as.example.org");
-    table(&mut auth).scopeless_subjects = vec![String::from("batch")];
     table(&mut auth).role_claims = Some(vec![String::from("realm_access.roles")]);
     let settings = auth
         .resolve(&[])?
@@ -667,10 +628,6 @@ fn introspection_mode_reads_the_entries_of_its_issuer() -> Result<(), Box<dyn St
         .into_iter()
         .next()
         .ok_or("the introspection settings")?;
-    assert_eq!(
-        std::collections::BTreeSet::from([String::from("batch")]),
-        settings.scopeless_subjects
-    );
     assert_eq!(
         vec![String::from("realm_access.roles")],
         settings.role_claims
