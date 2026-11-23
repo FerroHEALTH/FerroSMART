@@ -65,7 +65,7 @@ async fn platform() -> Platform {
     );
     let smart = Smart::start_over(
         &grants,
-        "[\"patient/composition-*.r\"]",
+        "[\"patient/composition-*.r\", \"patient/aql-*.s\"]",
         "[\"user/Observation.rs\"]",
         &format!(
             "[[ferrosmart.resource]]\nbase = {fhir_base:?}\n\
@@ -161,7 +161,10 @@ async fn a_patient_s_own_token_is_exchanged_for_their_ehr_at_the_paired_base() {
     // NOTE: RFC 8693 §2.2.1, issued_token_type names the token issued.
     assert_eq!(json!(ACCESS_TOKEN), body["issued_token_type"]);
     assert_eq!(json!("Bearer"), body["token_type"]);
-    assert_eq!(json!("patient/composition-*.r"), body["scope"]);
+    assert_eq!(
+        json!("patient/composition-*.r patient/aql-*.s"),
+        body["scope"]
+    );
     let issued = jwt_claims(&body, "access_token");
     let original = jwt_claims(&subject, "access_token");
     assert_eq!(original["sub"], issued["sub"]);
@@ -326,6 +329,7 @@ async fn a_wider_scope_another_target_an_actor_or_a_public_client_is_refused() {
             "invalid_scope",
         ),
         (vec![("scope", "user/composition-*.r")], "invalid_scope"),
+        (vec![("scope", "patient/aql-*.rs")], "invalid_scope"),
         (
             vec![("resource", platform.fhir_base.as_str())],
             "invalid_target",
