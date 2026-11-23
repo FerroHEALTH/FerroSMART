@@ -281,7 +281,8 @@ done
 # ---- 3e. the cache-only and copy-free sources ------------------------------
 for tree in "okta:Okta OpenID Connect and OAuth 2.0 API" \
   "microsoft-graph:Microsoft Graph documentation" \
-  "sogis-acm:SOG-IS Agreed Cryptographic Mechanisms"; do
+  "sogis-acm:SOG-IS Agreed Cryptographic Mechanisms" \
+  "etsi-eudi:ETSI EUDI wallet specifications"; do
   dir="docs/specs/${tree%%:*}"
   item="${tree#*:}"
   if [ -f "$dir/PROVENANCE.md" ]; then
@@ -301,6 +302,7 @@ tracked="$(git ls-files .vendor-cache | head -n1)"
 
 # ---- 3f. the corpora pinned file by file by sha256 --------------------------
 for tree in "ehdsi-specifications:eHDSI specifications" "eu-law:EU legal acts" \
+  "openid4vc:OpenID for Verifiable Credentials texts" \
   "ihe-balp-pages:IHE BALP narrative pages" \
   "oasis-saml:OASIS SAML V2.0 standard" \
   "w3c-xmlsec:W3C XML security Recommendations" \
