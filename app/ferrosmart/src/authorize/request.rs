@@ -129,12 +129,9 @@ async fn pushed_request(state: &AppState, sent: &Params) -> Result<Params, Box<R
         .store()
         .take_pushed(&super::sha256(request_uri), client_id)
         .await;
-    match taken {
-        Ok(Some(parameters)) => Params::parse(parameters.as_bytes(), &[])
-            .map_err(|_repeated| Box::new(pages::fault(state, Fault::BadRequest))),
-        Ok(None) => Err(Box::new(pages::fault(state, Fault::Lapsed))),
-        Err(error) => Err(Box::new(pages::server_error(state, &error))),
-    }
+    let parameters = super::found(state, taken)?;
+    Params::parse(parameters.as_bytes(), &[])
+        .map_err(|_repeated| Box::new(pages::fault(state, Fault::BadRequest)))
 }
 
 /// Returns the resource server the request names for `client`.

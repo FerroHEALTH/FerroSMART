@@ -73,7 +73,7 @@ async fn revoked(
         .await
         .map_err(|error| server_error("the token cannot be revoked", &error))?;
     let (event, subject, details) = match find(state, token).await? {
-        Some(Found::Access { jti, record }) => {
+        Some(Found::Access { jti, record, .. }) => {
             if record.client_id != client.client_id {
                 return Err(not_its_own);
             }

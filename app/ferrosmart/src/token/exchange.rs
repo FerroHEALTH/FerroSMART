@@ -23,6 +23,7 @@ use crate::form::Params;
 use crate::server::AppState;
 use crate::store::grant::GrantRecord;
 
+use super::grants::{may_use, unauthorized_client};
 use super::mint::{Authentication, Grant, mint};
 use super::{Issued, Refusal, server_error};
 
@@ -51,18 +52,16 @@ pub(super) async fn token_exchange(
     headers: &http::HeaderMap,
     form: &Params,
     from: IpAddr,
+    presented: &super::sender::Presented,
 ) -> Result<Issued, Refusal> {
     let client = super::grants::identify(state, headers, form).await?;
+    let confirmation = presented.bind(&client)?;
     // NOTE: RFC 8693 §2.1, the client authenticates as RFC 6749 §3.2.1 has it, so a
     // public client, which cannot, is refused.
-    if client.kind() == ClientKind::Public
-        || !client.grant_types.contains(&GrantType::TokenExchange)
-    {
-        return Err(Refusal {
-            error: "unauthorized_client",
-            description: "the client may not use this grant",
-        });
+    if client.kind() == ClientKind::Public {
+        return Err(unauthorized_client());
     }
+    may_use(&client, GrantType::TokenExchange)?;
     let subject_token = read_request(form)?;
     let (jti, record) = patient_token(state, subject_token).await?;
     let grant = record
@@ -119,6 +118,7 @@ pub(super) async fn token_exchange(
             identity: None,
             under: Some(&grant.id),
             context: &context,
+            confirmation: &confirmation,
         },
     )?;
     tracing::info!(
@@ -309,6 +309,7 @@ mod tests {
             roles: Vec::new(),
             auth_time: None,
             acr: None,
+            dpop_jkt: None,
         }
     }
 

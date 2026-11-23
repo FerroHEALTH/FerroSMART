@@ -447,3 +447,28 @@ async fn a_product_verifier_refuses_a_dpop_request_by_default() {
         .await;
     assert_refused(&outcome, Check::Unsupported, "a plain verifier");
 }
+
+#[tokio::test]
+async fn a_proof_at_the_token_endpoint_carries_no_token_hash() -> Result<(), Box<dyn StdError>> {
+    // NOTE: RFC 9449 §4.2 and §5, a proof sent to the token endpoint presents no
+    // access token, so it carries no `ath`; the other checks of §4.3 hold.
+    let key = dpop_key();
+    let url = format!("{EXTERNAL}/token");
+    let mut claims = proof_claims("POST", &url, "unused");
+    if let Some(members) = claims.as_object_mut() {
+        members.remove("ath");
+    }
+    let check = check();
+    let admitted =
+        check.check_token_request(&Method::POST, "/token", &proofs(&[&proof(&key, &claims)]))?;
+    assert_eq!(key.jkt, admitted.key().jkt());
+    claims["htu"] = json!(format!("{EXTERNAL}/elsewhere"));
+    claims["jti"] = json!("another-jti");
+    assert!(
+        check
+            .check_token_request(&Method::POST, "/token", &proofs(&[&proof(&key, &claims)]))
+            .is_err(),
+        "§4.3 check 9, the htu names this endpoint"
+    );
+    Ok(())
+}

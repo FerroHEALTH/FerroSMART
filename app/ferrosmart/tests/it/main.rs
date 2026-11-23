@@ -27,6 +27,7 @@ mod resources;
 mod revocation;
 mod saml;
 mod screenshots;
+mod sender;
 mod signing;
 mod store;
 mod support;

@@ -451,6 +451,7 @@ async fn paired() -> (Server, String) {
             basis: None,
             roles: &[],
             acr: None,
+            dpop_jkt: None,
         })
         .await
         .expect("recorded");

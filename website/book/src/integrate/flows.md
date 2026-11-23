@@ -118,6 +118,21 @@ lapsed. A deployment that sets `require_pushed_authorization_requests`, or
 a client registered with it, refuses a request that was not pushed with
 `invalid_request`.
 
+### Sender-constrained tokens
+
+A token request that carries a `DPoP` proof of `POST {issuer}/token` gets a
+token of type `DPoP` whose `cnf.jkt` is the thumbprint of the proof's key
+(RFC 9449 §5, §6.1); a proof that does not hold, or one used before, is
+refused with `invalid_dpop_proof`. A public client's refresh token is bound
+to that key too, and refreshing it takes a proof of the same key. A client
+registered with `tls_client_certificate_bound_access_tokens` gets a token
+whose `cnf` carries the `x5t#S256` of the certificate its mutual-TLS
+connection presented (RFC 8705 §3.1), and is refused without one.
+Introspection answers the token's `cnf`. The metadata names
+`dpop_signing_alg_values_supported`, and
+`tls_client_certificate_bound_access_tokens` is `true` when `[server.tls]`
+asks clients for a certificate.
+
 ## The EHR launch
 
 The EHR first gives FerroSMART the context and gets a `launch` value back,

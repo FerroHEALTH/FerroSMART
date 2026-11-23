@@ -68,6 +68,9 @@ pub struct NewGrant<'a> {
     pub roles: &'a [String],
     /// The eIDAS level the person's login reached.
     pub acr: Option<AssuranceLevel>,
+    /// The `DPoP` key a public client's refresh tokens are bound to (RFC
+    /// 9449 §5).
+    pub dpop_jkt: Option<&'a str>,
 }
 
 /// What introspection reads of a grant.
@@ -95,6 +98,8 @@ pub struct GrantRecord {
     pub auth_time: Option<i64>,
     /// The eIDAS level their login reached.
     pub acr: Option<AssuranceLevel>,
+    /// The `DPoP` key its refresh tokens are bound to (RFC 9449 §5).
+    pub dpop_jkt: Option<String>,
 }
 
 /// The outcome of redeeming a refresh token.
@@ -187,7 +192,8 @@ pub struct RefreshRecord {
 /// The grant columns a joined query reads, prefixed `g_`.
 const GRANT_COLUMNS: &str = "g.id AS g_id, g.client_id AS g_client_id, g.subject AS g_subject, \
     g.fhir_user AS g_fhir_user, g.audience AS g_audience, g.scope AS g_scope, g.context AS g_context, \
-    g.access AS g_access, g.roles AS g_roles, g.auth_time AS g_auth_time, g.acr AS g_acr";
+    g.access AS g_access, g.roles AS g_roles, g.auth_time AS g_auth_time, g.acr AS g_acr, \
+    g.dpop_jkt AS g_dpop_jkt";
 
 impl Store {
     /// Records the grant `grant`.
@@ -197,8 +203,8 @@ impl Store {
     pub async fn create_grant(&self, grant: &NewGrant<'_>) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO authorization_grant (id, client_id, subject, fhir_user, audience, scope, \
-             context, auth_time, access, upstream_session, roles, basis, acr) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+             context, auth_time, access, upstream_session, roles, basis, acr, dpop_jkt) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         )
         .bind(grant.id)
         .bind(grant.client_id)
@@ -213,6 +219,7 @@ impl Store {
         .bind(grant.roles)
         .bind(grant.basis)
         .bind(grant.acr.map(AssuranceLevel::as_str))
+        .bind(grant.dpop_jkt)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -372,6 +379,7 @@ fn read_grant(row: &sqlx::postgres::PgRow) -> Result<GrantRecord, StoreError> {
         acr: crate::store::read_level(row, "g_acr", &|| StoreError::Corrupt {
             client_id: id.clone(),
         })?,
+        dpop_jkt: row.try_get("g_dpop_jkt")?,
         id,
     })
 }
