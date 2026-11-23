@@ -3,11 +3,10 @@
 
 //! The admin API through the whole stack against a real PostgreSQL
 //! (`docs/architecture.md` §13.8): the guard, the registry's reads and
-//! writes with their typed refusals, the record of every change, the
-//! configuration as the seed, and a withdrawal or a disable that every
+//! writes with their typed refusals, the record of every change,
+//! `ferrosmart client apply`, and a withdrawal or a disable that every
 //! replica honours on its next request.
 
-use ferrosmart::approvals::{Origin, withdraw_lapsed};
 use ferrosmart::store::grant::{Access, NewGrant};
 use http::{Method, StatusCode, header};
 use serde_json::{Value, json};
@@ -31,11 +30,11 @@ async fn admin_token(server: &Server) -> String {
 fn staff_app(approved: bool) -> Value {
     let mut document = json!({
         "client_id": "staff-app",
-        "name": "Staff app",
-        "kind": "public",
+        "client_name": "Staff app",
+        "token_endpoint_auth_method": "none",
         "redirect_uris": ["https://staff.example.org/callback"],
         "resources": [RESOURCE],
-        "scopes": ["openid", "fhirUser", "launch", "user/Observation.rs", "offline_access"],
+        "scope": "openid fhirUser launch user/Observation.rs offline_access",
         "grant_types": ["authorization_code", "refresh_token"],
     });
     if approved && let Some(members) = document.as_object_mut() {
@@ -185,8 +184,11 @@ async fn the_registry_is_listed_read_created_and_updated() {
         .call(Method::GET, "/admin/clients/vault", None, Some(&token))
         .await;
     assert_eq!(StatusCode::OK, status);
-    assert_eq!(json!("config"), vault["source"]);
-    assert_eq!(json!("confidential_symmetric"), vault["kind"]);
+    assert_eq!(json!("admin"), vault["registered_by"]);
+    assert_eq!(
+        json!("client_secret_basic"),
+        vault["token_endpoint_auth_method"]
+    );
     assert!(
         vault.get("secret_hash").is_none(),
         "the answer never carries the secret hash"
@@ -206,8 +208,8 @@ async fn the_registry_is_listed_read_created_and_updated() {
             .get(header::LOCATION)
             .and_then(|value| value.to_str().ok())
     );
-    assert_eq!(json!("admin"), created["source"]);
-    assert_eq!(json!("Staff app"), created["name"]);
+    assert_eq!(json!("admin"), created["registered_by"]);
+    assert_eq!(json!("Staff app"), created["client_name"]);
     let client = server
         .store
         .client("staff-app")
@@ -228,7 +230,7 @@ async fn the_registry_is_listed_read_created_and_updated() {
         .await;
     assert_eq!("client_exists", refused(&answer, StatusCode::CONFLICT));
     let mut renamed = staff_app(false);
-    renamed["name"] = json!("Staff app 2");
+    renamed["client_name"] = json!("Staff app 2");
     let (status, _, updated) = server
         .call(
             Method::PUT,
@@ -238,7 +240,7 @@ async fn the_registry_is_listed_read_created_and_updated() {
         )
         .await;
     assert_eq!(StatusCode::OK, status, "{updated}");
-    assert_eq!(json!("Staff app 2"), updated["name"]);
+    assert_eq!(json!("Staff app 2"), updated["client_name"]);
     server.stop().await;
 }
 
@@ -348,7 +350,7 @@ async fn a_body_that_is_no_bounded_json_client_document_is_refused_unread() {
     assert_eq!(StatusCode::UNSUPPORTED_MEDIA_TYPE, status, "{body}");
     assert_eq!(json!("invalid_request"), body["error"]);
     let mut huge = staff_app(false);
-    huge["name"] = json!("x".repeat(ferrosmart::admin::DOCUMENT_LIMIT));
+    huge["client_name"] = json!("x".repeat(ferrosmart::admin::DOCUMENT_LIMIT));
     let (status, _, body) = server
         .call(Method::POST, "/admin/clients", Some(&huge), Some(&token))
         .await;
@@ -387,51 +389,67 @@ async fn a_body_that_is_no_bounded_json_client_document_is_refused_unread() {
     server.stop().await;
 }
 
+// NOTE: RFC 7591 §3.2.1, the server issues client_secret, answers it once with
+// client_secret_expires_at, and the document never carries a hash.
 #[tokio::test]
-async fn a_symmetric_client_keeps_its_secret_hash_unless_the_update_names_one() {
+async fn a_symmetric_client_is_issued_its_secret_once_and_keeps_its_hash() {
     let server = Server::start().await;
     let token = admin_token(&server).await;
-    let stored = server
-        .store
-        .client("vault")
-        .await
-        .expect("reads")
-        .expect("registered");
-    let document = json!({
-        "kind": "confidential_symmetric",
-        "name": "Vault",
-        "redirect_uris": ["https://vault.example.org/callback"],
-        "grant_types": ["authorization_code", "refresh_token"],
+    let mut document = json!({
+        "client_id": "ledger",
+        "token_endpoint_auth_method": "client_secret_basic",
+        "client_name": "Ledger",
+        "redirect_uris": ["https://ledger.example.org/callback"],
+        "grant_types": ["authorization_code"],
     });
-    let (status, _, body) = server
+    let (status, _, created) = server
         .call(
-            Method::PUT,
-            "/admin/clients/vault",
+            Method::POST,
+            "/admin/clients",
             Some(&document),
             Some(&token),
         )
         .await;
-    assert_eq!(StatusCode::OK, status, "{body}");
+    assert_eq!(StatusCode::CREATED, status, "{created}");
+    assert!(created["client_secret"].is_string(), "{created}");
+    assert_eq!(json!(0), created["client_secret_expires_at"]);
+    let stored = server
+        .store
+        .client("ledger")
+        .await
+        .expect("reads")
+        .expect("registered");
+    document["client_name"] = json!("Ledger, renamed");
+    let (status, _, updated) = server
+        .call(
+            Method::PUT,
+            "/admin/clients/ledger",
+            Some(&document),
+            Some(&token),
+        )
+        .await;
+    assert_eq!(StatusCode::OK, status, "{updated}");
+    assert!(updated.get("client_secret").is_none(), "issued once");
     let kept = server
         .store
-        .client("vault")
+        .client("ledger")
         .await
         .expect("reads")
         .expect("registered");
     assert_eq!(stored.secret_hash, kept.secret_hash);
-    let mut weak = document.clone();
-    weak["secret_hash"] = json!("$argon2id$v=19$m=8,t=1,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNo");
+    let mut hashed = document.clone();
+    hashed["secret_hash"] = json!("$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNo");
     let answer = server
         .call(
             Method::PUT,
-            "/admin/clients/vault",
-            Some(&weak),
+            "/admin/clients/ledger",
+            Some(&hashed),
             Some(&token),
         )
         .await;
     assert_eq!(
-        "invalid_client_metadata",
-        refused(&answer, StatusCode::BAD_REQUEST)
+        "invalid_request",
+        refused(&answer, StatusCode::UNPROCESSABLE_ENTITY)
     );
     server.stop().await;
 }
@@ -537,7 +555,7 @@ async fn disabling_a_client_revokes_its_grants_and_tokens_at_once_at_every_repli
         .call(Method::GET, "/admin/clients/export", None, Some(&token))
         .await;
     assert!(listed["disabled_at"].is_string(), "{listed}");
-    assert_eq!(json!("admin"), listed["source"]);
+    assert_eq!(json!("admin"), listed["registered_by"]);
     let (status, _, _) = replica
         .call(
             Method::POST,
@@ -649,72 +667,67 @@ async fn withdrawing_an_approval_revokes_what_was_issued_on_it_at_every_replica(
 }
 
 #[tokio::test]
-async fn the_configuration_seeds_the_registry_and_leaves_a_client_the_api_changed() {
+async fn client_apply_creates_then_replaces_a_client_and_records_the_command() {
     let server = Server::start().await;
-    let token = admin_token(&server).await;
-    let portal = json!({
-        "kind": "public",
-        "name": "Portal, changed",
-        "redirect_uris": ["https://portal.example.org/callback"],
-        "grant_types": ["authorization_code"],
-        "scopes": ["openid"],
-        "organisation_approval": {
-            "scopes": ["openid"],
-            "approved_by": "Synthetic Administrator",
-        },
-    });
-    let (status, _, body) = server
-        .call(
-            Method::PUT,
-            "/admin/clients/portal",
-            Some(&portal),
-            Some(&token),
-        )
-        .await;
-    assert_eq!(StatusCode::OK, status, "{body}");
-    assert_eq!(json!("admin"), body["source"]);
-    assert!(
-        body["organisation_approval"]["approved_at"].is_string(),
-        "{body}"
-    );
     let settings = server.settings();
-    let issuer = settings.endpoint_url("");
-    let origin = Origin {
-        issuer: &settings.issuer,
-        endpoint: &issuer,
-        host: std::net::Ipv4Addr::LOCALHOST.into(),
+    let state =
+        ferrosmart::server::AppState::new(settings.clone(), server.store.clone(), audit(settings));
+    let mut kiosk = json!({
+        "client_id": "kiosk",
+        "token_endpoint_auth_method": "none",
+        "client_name": "Kiosk",
+        "redirect_uris": ["https://kiosk.example.org/callback"],
+        "grant_types": ["authorization_code"],
+        "scope": "openid",
+    });
+    let apply = |document: &Value| {
+        let document = serde_json::from_value(document.clone()).expect("a client document");
+        ferrosmart::admin::apply(&state, document)
     };
-    let withdrawn = withdraw_lapsed(&server.store, &audit(settings), &settings.clients, origin)
-        .await
-        .expect("withdraws");
-    assert!(
-        withdrawn.is_empty(),
-        "the API's approval is not the configuration's to withdraw"
-    );
-    let managed = server
-        .store
-        .register(&settings.clients)
-        .await
-        .expect("registered");
-    assert_eq!(vec![String::from("portal")], managed);
-    let kept = server
-        .store
-        .client("portal")
-        .await
-        .expect("reads")
-        .expect("registered");
-    assert_eq!(
-        "Portal, changed", kept.name,
-        "a restart leaves the API's change"
-    );
-    assert!(kept.approval().is_some());
-    let (_, _, app) = server
-        .call(Method::GET, "/admin/clients/app", None, Some(&token))
+    let applied = apply(&kiosk).await.expect("applies");
+    assert!(applied.created, "a new client is created");
+    kiosk["client_name"] = json!("Kiosk, changed");
+    let applied = apply(&kiosk).await.expect("applies again");
+    assert!(!applied.created, "the client with the id is replaced");
+    assert_eq!("Kiosk, changed", applied.registered.client.name);
+    let token = admin_token(&server).await;
+    let (_, _, read) = server
+        .call(Method::GET, "/admin/clients/kiosk", None, Some(&token))
         .await;
+    assert_eq!(json!("admin"), read["registered_by"]);
+    let kept = crate::support::all_records(&server.store).await;
+    let applied: Vec<&Value> = kept
+        .iter()
+        .filter(|record| record.to_string().contains("kiosk"))
+        .collect();
     assert_eq!(
-        json!("config"),
-        app["source"],
-        "an unchanged client stays the configuration's"
+        vec![
+            vec![String::from("client-created")],
+            vec![String::from("client-updated")]
+        ],
+        applied
+            .iter()
+            .map(|record| events(std::slice::from_ref(*record)))
+            .collect::<Vec<_>>()
+    );
+    for record in applied {
+        assert_eq!(
+            json!(ferrosmart::admin::APPLY_REQUESTER),
+            record["agent"][0]["who"]["display"],
+            "{record}"
+        );
+    }
+    let mut other = kiosk.clone();
+    other["client_id"] = json!("kiosk-2");
+    other["launch_uri"] = json!("https://kiosk.example.org/launch");
+    kiosk["launch_uri"] = json!("https://kiosk.example.org/launch");
+    apply(&kiosk).await.expect("the launch URL is the kiosk's");
+    assert!(
+        matches!(
+            apply(&other).await,
+            Err(ferrosmart::admin::AdminError::LaunchUriTaken)
+        ),
+        "a launch URL names one client"
     );
     server.stop().await;
 }

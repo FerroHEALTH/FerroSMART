@@ -171,6 +171,6 @@ fn claims_of(
 /// asymmetric client whose ceiling lists [`LAUNCH_SCOPE`].
 #[must_use]
 pub fn may_launch(client: &Client) -> bool {
-    client.kind == ClientKind::ConfidentialAsymmetric
+    client.kind() == ClientKind::ConfidentialAsymmetric
         && client.scopes.iter().any(|scope| scope == LAUNCH_SCOPE)
 }

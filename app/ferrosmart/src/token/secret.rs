@@ -12,7 +12,7 @@ use base64::Engine as _;
 use ferrohealth_smart::basic::PasswordStore;
 use http::{HeaderMap, header};
 
-use crate::clients::{Client, ClientKind};
+use crate::clients::{AuthMethod, Client};
 use crate::form::Params;
 use crate::server::AppState;
 
@@ -28,6 +28,8 @@ pub(crate) struct Presented {
     client_id: String,
     /// The secret.
     secret: secrecy::SecretString,
+    /// How it was sent.
+    method: AuthMethod,
 }
 
 /// Returns the client secret `headers` or `form` present, if any.
@@ -71,6 +73,7 @@ pub(crate) fn presented(headers: &HeaderMap, form: &Params) -> Result<Option<Pre
         return Ok(Some(Presented {
             client_id: id,
             secret: secrecy::SecretString::from(secret),
+            method: AuthMethod::ClientSecretBasic,
         }));
     }
     let Some(secret) = posted else {
@@ -82,6 +85,7 @@ pub(crate) fn presented(headers: &HeaderMap, form: &Params) -> Result<Option<Pre
     Ok(Some(Presented {
         client_id: client_id.to_owned(),
         secret: secrecy::SecretString::from(secret.to_owned()),
+        method: AuthMethod::ClientSecretPost,
     }))
 }
 
@@ -94,9 +98,10 @@ fn decode(value: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// Authenticates the confidential symmetric client of `presented`.
+/// Authenticates the confidential symmetric client of `presented`, by the
+/// method it registered (RFC 7591 §2 `token_endpoint_auth_method`).
 ///
-/// An unknown client, a client of another kind and a wrong secret all
+/// An unknown client, a client of another method and a wrong secret all
 /// answer one `invalid_client`, and the key derivation runs for each, so the
 /// answer tells no client from another (`ferrohealth_smart::basic`, after
 /// the OWASP Password Storage Cheat Sheet: our own design).
@@ -112,7 +117,7 @@ pub(crate) async fn authenticate(
         .client(&presented.client_id)
         .await
         .map_err(|error| server_error("the client registry cannot be read", &error))?;
-    let symmetric = client.filter(|client| client.kind == ClientKind::ConfidentialSymmetric);
+    let symmetric = client.filter(|client| client.auth_method == presented.method);
     let mut store = PasswordStore::new();
     if let Some(hash) = symmetric
         .as_ref()

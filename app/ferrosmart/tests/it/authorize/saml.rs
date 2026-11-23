@@ -152,9 +152,9 @@ impl Saml {
              [ferrosmart.upstream.assurance]\nlevels = {{ {strong:?} = {level:?} }}\n\
              {beside}\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = [\"user/Observation.rs\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"app\"\nclient_name = \"Synthetic App\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n{client}",
+             scope = [\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n{client}",
             database = secrecy::ExposeSecret::expose_secret(&database.url),
             sp_entity = kit::SP,
             sp_key = written(dir, "sp-key.pem", &sp.key),
@@ -172,10 +172,11 @@ impl Saml {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let providers = crate::support::providers(&settings).await;
         let audit = audit(&settings);
         let state = AppState::new(settings.clone(), store.clone(), audit).with_login(providers);
+        let clients = crate::support::clients(&crate::support::reach_every_base(&text));
+        crate::support::apply(&state, &clients).await;
         Self {
             smart: Smart {
                 app: router(Arc::new(state)),
@@ -184,6 +185,7 @@ impl Saml {
                 database,
                 _keys: keys,
                 settings,
+                clients,
             },
             idp: signing_key(&idp),
             ars,
@@ -528,14 +530,15 @@ async fn a_class_below_the_minimum_is_refused_by_name() {
     saml.stop().await;
 }
 
-// NOTE: docs/architecture.md §13.28, the class's eIDAS level against the client's minimum.
+// NOTE: docs/architecture.md §13.28, the class's eIDAS level against the level the
+// client's default_acr_values ask for (OpenID Connect Dynamic Client Registration 1.0 §2).
 #[tokio::test]
-async fn a_class_is_held_to_its_eidas_level_and_the_client_s_minimum() {
+async fn a_class_is_held_to_its_eidas_level_and_the_client_s_default_acr_values() {
     for (level, minimum, error) in [
         ("high", "", None),
         (
             "substantial",
-            "assurance_minimum = \"high\"",
+            "default_acr_values = [\"http://eidas.europa.eu/LoA/high\"]",
             Some("unmet_authentication_requirements"),
         ),
     ] {

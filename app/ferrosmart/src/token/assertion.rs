@@ -74,7 +74,7 @@ pub(crate) async fn authenticate(state: &AppState, form: &Params) -> Result<Clie
             "the client_id is not the client_assertion's iss",
         ));
     }
-    if client.kind != ClientKind::ConfidentialAsymmetric {
+    if client.kind() != ClientKind::ConfidentialAsymmetric {
         return Err(Refusal::client("the client authenticates with no key"));
     }
     if let Some(jku) = header.jku.as_deref() {

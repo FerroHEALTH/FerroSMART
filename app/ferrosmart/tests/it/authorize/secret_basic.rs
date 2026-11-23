@@ -22,8 +22,8 @@ fn with_secret(issuer: &str, keys: &Keys) -> String {
          [ferrosmart.upstream.oidc]\nissuer = {issuer:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
          [ferrosmart.upstream.oidc.client_secret_basic]\nsecret_file = {:?}\n\
          {ASSURANCE}\
-         [[ferrosmart.client]]\nclient_id = \"app\"\nkind = \"public\"\n\
-         redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\nscopes = [\"openid\"]\n\
+         [[client]]\nclient_id = \"app\"\ntoken_endpoint_auth_method = \"none\"\n\
+         redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\nscope = [\"openid\"]\n\
          resources = [{RESOURCE:?}]",
         file.display().to_string()
     )
@@ -139,17 +139,16 @@ fn both_methods_none_or_a_secret_without_its_value_is_refused_at_load() {
     let keys = Keys::new();
     let base = with_secret("https://idp.example.org", &keys);
     let both = base.replace(
-        "[[ferrosmart.client]]",
+        "[[client]]",
         &format!(
-            "{}[[ferrosmart.client]]",
+            "{}[[client]]",
             crate::support::upstream_assertion(keys.dir.path())
         ),
     );
     let neither = base.replace(
         base.get(
             base.find("[ferrosmart.upstream.oidc.client_secret_basic]")
-                .expect("the table")
-                ..base.find("[[ferrosmart.client]]").expect("the client"),
+                .expect("the table")..base.find("[[client]]").expect("the client"),
         )
         .expect("the table"),
         "",
@@ -157,7 +156,7 @@ fn both_methods_none_or_a_secret_without_its_value_is_refused_at_load() {
     let empty = base.replace(
         base.get(
             base.find("secret_file = ").expect("the key")
-                ..base.find("[[ferrosmart.client]]").expect("the client"),
+                ..base.find("[[client]]").expect("the client"),
         )
         .expect("the key"),
         "",
@@ -181,10 +180,7 @@ fn both_methods_none_or_a_secret_without_its_value_is_refused_at_load() {
         "[ferrosmart.upstream.oidc.private_key_jwt]\nsecret = \"synthetic\"\n\
          [ferrosmart.upstream.oidc.private_key_jwt.keys]\n",
     );
-    let misplaced = neither.replace(
-        "[[ferrosmart.client]]",
-        &format!("{misplaced}[[ferrosmart.client]]"),
-    );
+    let misplaced = neither.replace("[[client]]", &format!("{misplaced}[[client]]"));
     assert!(
         ferrosmart::config::Config::from_sources(
             Some(&misplaced),

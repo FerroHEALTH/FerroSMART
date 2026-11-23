@@ -81,6 +81,9 @@ for _ in $(seq 1 90); do
   sleep 2
 done
 [ "$ready" = true ] || fail "FerroSMART did not serve its SMART configuration ($LANE_DIR/compose.log)"
+# NOTE: compose.keycloak.yaml, CLIENTS, the example app is applied once the database is up.
+"${compose[@]}" run --rm ferrosmart client apply /etc/ferrosmart-example/example-app.json \
+  > "$LANE_DIR/apply.log" 2>&1 || fail "the example app was not applied ($LANE_DIR/apply.log)"
 
 fhir_user="http://localhost:8090/fhir/Practitioner/example"
 answer=$(LAUNCH_USER=clinician LAUNCH_PASSWORD=$(cat "$root/secrets/keycloak_user_password") \

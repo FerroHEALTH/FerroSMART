@@ -43,24 +43,6 @@ pub enum Error {
         #[source]
         source: ferrohealth_smart::metadata::DiscoveryError,
     },
-    /// A client names a provider no `[[ferrosmart.upstream]]` entry is.
-    #[error(
-        "the client `{client_id}` names the upstream provider `{name}`, which is not configured"
-    )]
-    UnknownUpstream {
-        /// The client.
-        client_id: String,
-        /// The name.
-        name: String,
-    },
-    /// A client names a base no `[[ferrosmart.resource]]` table is.
-    #[error("the client `{client_id}` names the resource `{base}`, which is not configured")]
-    UnknownResource {
-        /// The client.
-        client_id: String,
-        /// The base.
-        base: String,
-    },
     /// An upstream provider's table breaks a rule.
     #[error("`ferrosmart.upstream`: {rule}")]
     Upstream {
@@ -135,9 +117,6 @@ pub enum Error {
     /// A secret is set twice, or its `_file` sibling cannot be read.
     #[error(transparent)]
     Secret(#[from] ferrohealth_secret::file::SecretError),
-    /// A client table breaks a rule of the registry.
-    #[error(transparent)]
-    Client(#[from] crate::clients::ClientError),
     /// `[ferrosmart.audit.feed]` describes no client that can be built.
     #[error("`ferrosmart.audit.feed` describes no usable endpoint")]
     AuditFeed {

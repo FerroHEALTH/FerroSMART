@@ -30,7 +30,7 @@ async fn execute(smart: &Smart, statement: &'static str) -> Result<u64, sqlx::Er
 async fn registers_itself(smart: &Smart) {
     let marked = execute(
         smart,
-        "UPDATE client SET source = 'dynamic' WHERE client_id = 'app'",
+        "UPDATE client SET registered_by = 'self' WHERE client_id = 'app'",
     )
     .await
     .expect("the row is marked");
@@ -184,23 +184,5 @@ async fn the_row_of_an_app_that_registered_itself_holds_no_approval() {
         marked.is_err(),
         "the store refuses the first-party mark on it"
     );
-
-    let kept = smart
-        .store
-        .register(&smart.settings.clients)
-        .await
-        .expect("registers");
-    assert_eq!(
-        vec![String::from("app")],
-        kept,
-        "the configuration never writes it"
-    );
-    let client = smart
-        .store
-        .client("app")
-        .await
-        .expect("reads")
-        .expect("registered");
-    assert!(client.registered_itself());
     smart.stop().await;
 }

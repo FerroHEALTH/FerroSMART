@@ -94,8 +94,8 @@ product's own base URL unless the table names another:
 issuer = "https://smart.example.org"
 ```
 
-An app is registered once, at FerroSMART. Give each client the bases its
-tokens may name in `resources`
+An app is registered once, at FerroSMART. Give each client document the
+bases its tokens may name in `resources`
 ([clients](../configure/clients.md#the-client-registry)); FerroSMART then
 refuses a token for any other base with `invalid_target`. A token that names
 the product in `aud` was issued for it (RFC 9068 §4, RFC 8707), so the

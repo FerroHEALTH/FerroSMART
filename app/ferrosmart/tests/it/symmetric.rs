@@ -7,10 +7,11 @@
 //! client secret sent by HTTP Basic or in the form (RFC 6749 §2.3.1).
 
 use base64::Engine as _;
-use ferrosmart::clients::{ClientKind, ClientSection, GrantType, resolve};
+use ferrosmart::clients::{AuthMethod, ClientMetadata, GrantType, Material, SecretHash, resolve};
 use ferrosmart::store::grant::Access;
 use http::{StatusCode, header};
 use serde_json::{Value, json};
+use sqlx::Connection as _;
 
 use crate::introspection::{Answer, GATEWAY_SECRET, Server, VAULT_SECRET, inactive, phc};
 use crate::support::RESOURCE;
@@ -66,14 +67,35 @@ async fn a_symmetric_client_authenticates_by_http_basic() {
     server.stop().await;
 }
 
+// NOTE: RFC 7591 §2, the client authenticates by the token_endpoint_auth_method
+// it registered: `vault` registered client_secret_basic.
 #[tokio::test]
-async fn a_symmetric_client_authenticates_in_the_form() {
+async fn a_symmetric_client_authenticates_in_the_form_only_when_registered_so() {
     let (server, token) = vault().await;
     let mut form = refresh(&token);
     form.push((String::from("client_id"), String::from("vault")));
     form.push((String::from("client_secret"), String::from(VAULT_SECRET)));
+    let refused = server.post("/token", &form, None).await;
+    assert_eq!(json!("invalid_client"), error(&refused), "{:?}", refused.2);
+    let mut connection = sqlx::PgConnection::connect(&server.database_url())
+        .await
+        .expect("connects");
+    sqlx::query(
+        "UPDATE client SET token_endpoint_auth_method = 'client_secret_post' WHERE client_id = 'vault'",
+    )
+    .execute(&mut connection)
+    .await
+    .expect("registered for the form");
     let answer = server.post("/token", &form, None).await;
     assert_eq!(StatusCode::OK, answer.0, "{:?}", answer.2);
+    let basic = server
+        .post_authorized(
+            "/token",
+            &refresh(&token),
+            Some(basic("vault", VAULT_SECRET)),
+        )
+        .await;
+    assert_eq!(json!("invalid_client"), error(&basic), "{:?}", basic.2);
     server.stop().await;
 }
 
@@ -144,44 +166,52 @@ async fn a_symmetric_client_revokes_its_refresh_token() {
 // "SHALL NOT be used" for Backend Services.
 #[test]
 fn a_symmetric_client_is_refused_the_client_credentials_grant_and_a_jwk_set() {
-    let dir = tempfile::tempdir().expect("a directory");
-    let file = dir.path().join("secret.phc");
-    std::fs::write(&file, phc(VAULT_SECRET)).expect("written");
-    let section = |grants: Vec<GrantType>, jwks_uri: &str| ClientSection {
+    let hash = phc(VAULT_SECRET);
+    let admit = |section: &ClientMetadata, hash: &str| {
+        resolve(
+            section,
+            Material {
+                jwks: None,
+                secret_hash: Some(SecretHash::from(hash.to_owned())),
+            },
+        )
+    };
+    let section = |grants: Vec<GrantType>, jwks_uri: &str| ClientMetadata {
         client_id: String::from("vault"),
-        kind: ClientKind::ConfidentialSymmetric,
-        secret_hash_file: Some(file.clone()),
+        auth_method: AuthMethod::ClientSecretBasic,
         jwks_uri: jwks_uri.to_owned(),
         redirect_uris: vec![String::from("https://vault.example.org/callback")],
         grant_types: grants,
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     };
-    assert!(resolve(&[section(vec![GrantType::AuthorizationCode], "")]).is_ok());
-    assert!(resolve(&[section(vec![GrantType::ClientCredentials], "")]).is_err());
+    assert!(admit(&section(vec![GrantType::AuthorizationCode], ""), &hash).is_ok());
+    assert!(admit(&section(vec![GrantType::ClientCredentials], ""), &hash).is_err());
     assert!(
-        resolve(&[section(
-            vec![GrantType::AuthorizationCode],
-            "https://vault.example.org/jwks"
-        )])
+        admit(
+            &section(
+                vec![GrantType::AuthorizationCode],
+                "https://vault.example.org/jwks"
+            ),
+            &hash
+        )
         .is_err()
     );
-    let weak = dir.path().join("weak.phc");
-    std::fs::write(
-        &weak,
-        "$argon2id$v=19$m=1024,t=1,p=1$c3ludGhldGljLXNhbHQtMTY$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    )
-    .expect("written");
-    let mut below_floor = section(vec![GrantType::AuthorizationCode], "");
-    below_floor.secret_hash_file = Some(weak);
-    assert!(resolve(&[below_floor]).is_err(), "a hash below the floor");
+    let weak = "$argon2id$v=19$m=1024,t=1,p=1$c3ludGhldGljLXNhbHQtMTY$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    assert!(
+        admit(&section(vec![GrantType::AuthorizationCode], ""), weak).is_err(),
+        "a hash below the floor"
+    );
     let mut public = section(vec![GrantType::AuthorizationCode], "");
-    public.kind = ClientKind::Public;
-    assert!(resolve(&[public]).is_err(), "a secret on a public client");
+    public.auth_method = AuthMethod::None;
+    assert!(
+        admit(&public, &hash).is_err(),
+        "a secret on a public client"
+    );
 }
 
 // NOTE: OWASP Password Storage Cheat Sheet, Argon2id at m=19456, t=2, p=1.
 #[test]
-fn the_hash_secret_command_makes_a_hash_at_the_floor_with_a_fresh_salt() {
+fn an_issued_secret_is_hashed_at_the_floor_with_a_fresh_salt() {
     let one = phc(VAULT_SECRET);
     let other = phc(VAULT_SECRET);
     assert!(one.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"), "{one}");
@@ -220,9 +250,10 @@ async fn a_symmetric_client_with_the_right_introspects_by_its_secret() {
     let mut form = introspect(&target);
     form.push((String::from("client_id"), String::from("gateway")));
     form.push((String::from("client_secret"), String::from(GATEWAY_SECRET)));
+    // NOTE: RFC 7591 §2, `gateway` registered client_secret_basic, so the form is
+    // not its method.
     let answer = server.post("/introspect", &form, None).await;
-    assert_eq!(StatusCode::OK, answer.0, "{:?}", answer.2);
-    assert_eq!(json!(true), answer.2["active"]);
+    assert_eq!(json!("invalid_client"), answer.2["error"], "{:?}", answer.2);
     server.stop().await;
 }
 

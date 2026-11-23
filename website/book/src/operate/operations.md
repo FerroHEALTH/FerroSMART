@@ -14,7 +14,8 @@ running a database well.
 | `ferrosmart serve` | Runs the server; the image's default command |
 | `ferrosmart config check` | Reads the configuration, prints it with every secret masked, and exits non-zero naming the first key FerroSMART cannot run with |
 | `ferrosmart healthcheck` | Asks the server on loopback for `GET /health/readiness` and exits 0 only on `200`; the image's `HEALTHCHECK` |
-| `ferrosmart client hash-secret` | Reads a client secret from standard input and prints the Argon2id hash a confidential symmetric client's `secret_hash_file` holds |
+| `ferrosmart client apply <file>...` | Writes each file's client document to the registry, creating the client or replacing the one with its `client_id`, each change with its audit record ([the client registry](../configure/clients.md#the-client-registry)) |
+| `ferrosmart client secret <client_id>` | Issues a confidential client that authenticates with a secret a new one, stores its Argon2id hash, records the change and prints the secret once (RFC 7591 §3.2.1) |
 | `ferrosmart subject --upstream <name> --sub <sub>` | Prints the FerroSMART `sub` of the person whose subject at the provider `<name>` is `<sub>`: the identifier a resource server binds the person by |
 | `ferrosmart upstream registration <name>` | Prints what the provider `<name>` must be configured with: the redirect and logout URIs, the client authentication with its JWK Set URL, the scopes, the claims and the roles |
 

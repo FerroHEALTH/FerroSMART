@@ -13,16 +13,19 @@ FerroSMART's own design.
 ## Access
 
 Register a Backend Services client for your administration tool, with
-`system/admin` in its ceiling:
+`system/admin` in its ceiling. The first one has no API to go through, so
+apply its document with `ferrosmart client apply registry-admin.json`
+([the client registry](clients.md#the-client-registry)):
 
-```toml
-[[ferrosmart.client]]
-client_id = "registry-admin"
-name = "Registry administration"
-kind = "confidential_asymmetric"
-jwks_uri = "https://admin.example.org/jwks.json"
-scopes = ["system/admin"]
-grant_types = ["client_credentials"]
+```json
+{
+  "client_id": "registry-admin",
+  "client_name": "Registry administration",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "jwks_uri": "https://admin.example.org/jwks.json",
+  "scope": "system/admin",
+  "grant_types": ["client_credentials"]
+}
 ```
 
 The tool asks the token endpoint for `system/admin` with FerroSMART's own
@@ -59,26 +62,21 @@ Every answer is JSON with `Cache-Control: no-store`.
 
 ## The client document
 
-The document carries the keys of a `[[ferrosmart.client]]` table
-([the client registry](clients.md#the-client-registry)), with two keys by
-value in place of the files:
-
-- `jwks`: a confidential asymmetric client's JWK Set, in place of
-  `jwks_file`;
-- `secret_hash`: the Argon2id hash of a confidential symmetric client's
-  secret (`ferrosmart client hash-secret` makes it), in place of
-  `secret_hash_file`. FerroSMART never stores or returns the secret, and an
-  answer never carries the hash. A `PUT` of a symmetric client without
-  `secret_hash` keeps the stored one.
+The API takes the document `ferrosmart client apply` reads
+([the client registry](clients.md#the-client-registry)). For a client that
+authenticates with a secret, the answer that registers it carries the
+secret FerroSMART issued, once, as `client_secret` with
+`client_secret_expires_at` 0 (RFC 7591 §3.2.1); a `PUT` keeps the stored
+secret, and no answer repeats it.
 
 ```json
 {
   "client_id": "growth-chart",
-  "name": "Growth chart",
-  "kind": "public",
+  "client_name": "Growth chart",
+  "token_endpoint_auth_method": "none",
   "redirect_uris": ["https://growth-chart.example.org/callback"],
   "resources": ["https://ehr.example.org/fhir"],
-  "scopes": ["openid", "fhirUser", "launch", "user/Observation.rs"],
+  "scope": "openid fhirUser launch user/Observation.rs",
   "grant_types": ["authorization_code"],
   "organisation_approval": {
     "scopes": ["openid", "launch", "user/Observation.rs"],
@@ -89,9 +87,9 @@ value in place of the files:
 
 An approval without `approved_at` keeps the stored approval's time when its
 scopes, approver and `first_party` mark are unchanged, and takes the time of
-the request otherwise. FerroSMART checks every document by the rules it
-checks a table by at start. An answer adds `source`, `config` or `admin`,
-and `disabled_at` for a disabled client.
+the request otherwise. An answer adds `registered_by`, `admin` or `self`
+for an app that registered itself (RFC 7591 §5), and `disabled_at` for a
+disabled client.
 
 ## Refusals
 
@@ -129,19 +127,11 @@ A resource server that checks each JWT itself, without introspection,
 still accepts a revoked access token until it expires, at most
 `access_token_lifetime` later (five minutes by default).
 
-## The configuration as the seed
-
-At every start a `[[ferrosmart.client]]` table writes its client, and a
-client the configuration wrote and no longer lists is removed. Once the API
-creates or changes a client (an update, a disable, an enable, a
-withdrawal), the store is its source: its table is no longer written, and
-FerroSMART logs a warning at start naming it. A client you disable or
-withdraw through the API stays so after a restart.
-
 ## Records
 
 Every change commits with an audit record that names the administration
-client as the requester and the client changed: `client-created`,
+client, or `ferrosmart client apply`, as the requester and the client
+changed: `client-created`,
 `client-updated`, `client-disabled` with how many grants, access tokens
 and consents it ended, `client-enabled`, and
 `organisation-approval-withdrawn` with how many grants it revoked

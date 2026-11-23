@@ -98,6 +98,7 @@ of the tokens issued for it. At least one is required, and no base twice.
 | `fhir_user_lookup` | FHIR only, a list of tables: how to find a person's `fhirUser` when the identity provider sends none (below) |
 | `purpose` | openEHR only, a list of tables: the purposes of use the server accepts, one of which a professional chooses on the patient picker (below). Empty, a lookup declares none |
 | `purpose_header` | openEHR only, with `purpose`: the header a picker lookup declares the purpose in. Default `x-purpose-of-use`, FerroEHR's default `[audit] purpose_header` |
+| `assigned` | FHIR only: the search the patient picker lists a professional's assigned patients by, `care_team` (their active care teams) or `encounter` (their encounters in progress), each by the FHIR R4 `participant` search parameter and the person's `fhirUser`. Unset, the picker lists none |
 
 When the identity provider sends no `fhirUser` claim, FerroSMART can find
 the person at a FHIR server by an identifier. Each
@@ -266,10 +267,11 @@ FerroSMART as one SAML 2.0 service provider, which every `protocol =
 | `[[ferrosmart.saml.decryption]]` | `key_file` and `certificate_file` of an RSA key a provider encrypts assertions, identifiers and attributes for |
 | `[ferrosmart.saml.tls]` | `client_identity_file`, the certificate and key artifact resolution presents, and `trust_roots_file`, roots beside the platform's for every call to a provider |
 
-## `[[ferrosmart.role]]` and `[[ferrosmart.client]]`
+## `[[ferrosmart.role]]`
 
-The policy: what each role may be granted and which clients exist.
-[Clients, roles and consent](clients.md) describes both tables.
+The policy: what each role may be granted. The clients live in the
+database, never in the configuration. [Clients, roles and consent](clients.md)
+describes both.
 
 ## `[ferrosmart.branding]`
 
@@ -334,6 +336,12 @@ fhir_version = ["4.0.1"]
 contact = ["https://developer.example.org"]
 ```
 
+## `[ferrosmart.picker]`
+
+| Key | Default | What it is |
+|---|---|---|
+| `recent_retention` | `30d` | How long a patient a person chose stays on their recent list, which the picker offers again; `0s` keeps no list. FerroSMART keeps a person's ten latest choices at each server, and the person forgets them on the management page |
+
 ## `[ferrosmart.audit]`
 
 How FerroSMART names itself in its [audit records](../operate/audit.md), and
@@ -375,15 +383,6 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 [[ferrosmart.role]]
 name = "clinician"
 scopes = ["user/Patient.rs", "user/Observation.rs"]
-
-[[ferrosmart.client]]
-client_id = "growth-chart"
-name = "Growth chart"
-kind = "public"
-resources = ["https://ehr.example.org/fhir"]
-redirect_uris = ["https://growth-chart.example.org/callback"]
-scopes = ["openid", "fhirUser", "launch", "launch/patient", "patient/Observation.rs"]
-grant_types = ["authorization_code"]
 
 [ferrosmart.branding]
 name = "Example Hospital"

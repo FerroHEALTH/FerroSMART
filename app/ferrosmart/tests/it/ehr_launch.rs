@@ -107,8 +107,7 @@ impl Smart {
         let pem = std::fs::read(ec_key(keys.dir.path(), "ehr.pem")).expect("the key reads");
         let ehr = AssertionKey::from_pem(&pem, Some(Algorithm::ES384), Some(String::from("ehr-1")))
             .expect("a key");
-        let set = keys.dir.path().join("ehr-jwks.json");
-        std::fs::write(&set, json!({"keys": [ehr.public_jwk()]}).to_string()).expect("written");
+        let set = crate::support::inline(&json!({"keys": [ehr.public_jwk()]}));
         let database = Database::create().await;
         let assertion = crate::support::upstream_assertion(keys.dir.path());
         let text = format!(
@@ -116,14 +115,14 @@ impl Smart {
              [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = {uri:?}\nclient_id = {UPSTREAM_CLIENT:?}\nfhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [ferrosmart.branding]\nsmart_style_url = {STYLE:?}\n\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = [\"user/Observation.rs\", \"patient/Observation.rs\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"ehr\"\nkind = \"confidential_asymmetric\"\n\
-             jwks_file = {:?}\nscopes = [\"system/launch.c\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"ehr\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\n\
+             jwks = {}\nscope = [\"system/launch.c\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"app\"\nclient_name = \"Synthetic App\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"patient/Observation.rs\", \"user/Observation.rs\"]\n\
+             scope = [\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"patient/Observation.rs\", \"user/Observation.rs\"]\n\
              {approval}",
             secrecy::ExposeSecret::expose_secret(&database.url),
-            set.display().to_string(),
+            set,
         );
         let settings = config(&crate::support::reach_every_base(&text), &keys)
             .resolve()
@@ -132,10 +131,14 @@ impl Smart {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let providers = crate::support::providers(&settings).await;
         let audit = audit(&settings);
         let state = AppState::new(settings, store.clone(), audit).with_login(providers);
+        crate::support::apply(
+            &state,
+            &crate::support::clients(&crate::support::reach_every_base(&text)),
+        )
+        .await;
         Self {
             app: router(Arc::new(state)),
             provider,
@@ -554,7 +557,7 @@ async fn both_documents_name_the_launch_registration_endpoint() {
 #[tokio::test]
 async fn an_approved_app_s_ehr_launch_by_a_professional_skips_the_consent_page() {
     let smart = Smart::start_approved(
-        "[ferrosmart.client.organisation_approval]\n\
+        "[client.organisation_approval]\n\
          scopes = [\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"user/Observation.rs\"]\n\
          approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"",
     )
@@ -616,7 +619,7 @@ async fn a_first_party_app_s_ehr_launch_by_a_patient_skips_the_consent_page() {
             "[\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"user/Observation.rs\"]"
         };
         let smart = Smart::start_approved(&format!(
-            "[ferrosmart.client.organisation_approval]\nscopes = {scopes}\n\
+            "[client.organisation_approval]\nscopes = {scopes}\n\
              approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"\n\
              first_party = {first_party}"
         ))
@@ -690,7 +693,7 @@ async fn launched_as(smart: &Smart, scope: &str, fhir_user: &str) -> Url {
 #[tokio::test]
 async fn an_approved_app_s_ehr_launch_covers_a_professional_s_patient_scopes() {
     let smart = Smart::start_approved(
-        "[ferrosmart.client.organisation_approval]\n\
+        "[client.organisation_approval]\n\
          scopes = [\"openid\", \"fhirUser\", \"launch\", \"launch/patient\", \"patient/Observation.rs\"]\n\
          approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"",
     )
