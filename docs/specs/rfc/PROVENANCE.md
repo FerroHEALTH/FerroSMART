@@ -7,10 +7,10 @@ Vendored verbatim by `scripts/vendor/rfcs.sh` from the RFC Editor
 (<https://www.rfc-editor.org/rfc/>), the text form of each, as published. Never edit a file here:
 change the pin in docs/VERSIONS.md and re-run the script.
 
-- Fetched: 2026-11-17
-- Files: 36
+- Fetched: 2026-11-23
+- Files: 37
 - Tree digest (sha256 over the sorted per-file `sha256  path` listing,
-  `PROVENANCE.md` excluded): `6986b3605eb7a03d40793d44967da493f1d7b3c41792625b85bdf633f86c3a58`
+  `PROVENANCE.md` excluded): `e6eed274a1f1e922c30890cee686ec6bfe5af5c2035de0c2a503b67ea8302554`
 - Upstream licence: each RFC but RFC 3986 is "Copyright (c) <year> IETF Trust and the
   persons identified as the document authors. All rights reserved." and is
   "subject to BCP 78 and the IETF Trust's Legal Provisions Relating to IETF
@@ -57,6 +57,7 @@ change the pin in docs/VERSIONS.md and re-run the script.
 | RFC 8707 | Resource Indicators for OAuth 2.0 | February 2020 | PROPOSED STANDARD | none | `3b89844a938b9219571931b664ed4a7b380555a4dda1df4e9445a2f72188e76b` |
 | RFC 7638 | JSON Web Key (JWK) Thumbprint | September 2015 | PROPOSED STANDARD | none | `98b29ab9652070e6a5fec748d43e221bbedc66b6b22e05903fb5366c04ef3110` |
 | RFC 9449 | OAuth 2.0 Demonstrating Proof of Possession (DPoP) | September 2023 | PROPOSED STANDARD | none | `3842c58e1f6043389416023b9bb8d765048266024982fbbd90640e05943f4e13` |
+| RFC 9901 | Selective Disclosure for JSON Web Tokens | November 2025 | PROPOSED STANDARD | none | `fd4cb79184162fa7ef95f4f63abab8ee6d03c9a04c19b8f83758946464b284eb` |
 | RFC 8705 | OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens | February 2020 | PROPOSED STANDARD | none | `6e45a1ee94c6a6a177a4cb077fe67d74bd70c1218c9362f2db2f153239612414` |
 | RFC 9470 | OAuth 2.0 Step Up Authentication Challenge Protocol | September 2023 | PROPOSED STANDARD | none | `02d742f49cc0a03fb09197563c436b6f38928a71b0d8e41cde9cfe0362363e56` |
 | RFC 8259 | The JavaScript Object Notation (JSON) Data Interchange Format | December 2017 | INTERNET STANDARD | none | `61a5378f4255c720beb2a4b4a63b29540147c140f36988bf086291989b4cd2d7` |
