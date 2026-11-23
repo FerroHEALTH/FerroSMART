@@ -180,13 +180,19 @@ pub async fn consent_post(
     if !constant_eq(sent.as_bytes(), pending.form_token.as_bytes()) {
         return pages::fault(&state, Fault::BadRequest);
     }
+    let client = match registered(&state, &pending).await {
+        Ok(client) => client,
+        Err(response) => return *response,
+    };
     let pending = match found(&state, state.store().finish(&pending.id).await) {
         Ok(pending) => pending,
         Err(response) => return *response,
     };
     let back = Back::of(&state, &pending);
     let mut response = if form.get("decision") == Some("approve") {
-        let remember = form.get("remember") == Some("yes");
+        // NOTE: RFC 7591 §5, an app that registered itself is shown the page every
+        // time, so no consent to it is remembered.
+        let remember = form.get("remember") == Some("yes") && !client.registered_itself();
         let basis = Basis::Person { remember };
         approve(&state, &pending, &form.all("scope"), basis, &back, from).await
     } else {

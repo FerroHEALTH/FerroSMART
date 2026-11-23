@@ -39,7 +39,7 @@ psql "$LANE_PG/postgres" -qc 'CREATE DATABASE ferrosmart_keycloak'
 
 "$root/target/debug/ferrosmart" --config "$example/ferrosmart.toml" \
   --set server.listen=127.0.0.1:8080 \
-  --set "ferrosmart.keys.private_key_file=$LANE_DIR/signing.pem" \
+  --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem" \
   --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem" \
   --set "ferrosmart.database.url=$LANE_PG/ferrosmart_keycloak" \
   serve > "$LANE_DIR/ferrosmart-keycloak.log" 2>&1 &

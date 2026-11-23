@@ -221,7 +221,7 @@ async fn listen_and_serve(settings: Settings) -> Result<ExitCode, Failure> {
     for client_id in managed {
         tracing::warn!(
             %client_id,
-            "the client's [[ferrosmart.client]] table is not written: the admin API changed the client, so the store is its source"
+            "the client's [[ferrosmart.client]] table is not written: the admin API changed the client or the app registered itself, so the store is its source"
         );
     }
     let forwarder = settings.audit.feed.clone().map(|feed| {
@@ -229,6 +229,12 @@ async fn listen_and_serve(settings: Settings) -> Result<ExitCode, Failure> {
         let running = tokio::spawn(Arc::clone(&forwarder).run());
         (forwarder, running)
     });
+    settings
+        .keys
+        .refresh(&store, jiff::Timestamp::now().as_second())
+        .await
+        .map_err(|error| Failure::not_up(error).with_context("cannot read the signing keys"))?;
+    let rotation = tokio::spawn(Arc::clone(&settings.keys).run(store.clone()));
     let sweeper = tokio::spawn(sweep(store.clone(), settings.recent_retention));
     let providers = Providers::connect(
         &settings.upstreams,
@@ -261,6 +267,7 @@ async fn listen_and_serve(settings: Settings) -> Result<ExitCode, Failure> {
     let stop = ferrohealth_server::serve::shutdown_signal();
     let served = ferrohealth_server::serve::run(listener, app, &section, lifecycle, stop).await;
     sweeper.abort();
+    rotation.abort();
     // NOTE: ITI TF-2 §3.20.4.1.1, a record not yet delivered stays in the store
     // and the next start sends it.
     if let Some((forwarder, running)) = forwarder {

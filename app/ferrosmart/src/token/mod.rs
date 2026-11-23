@@ -440,7 +440,7 @@ pub(crate) fn own_jwt(
         return None;
     }
     let kid = header.kid?;
-    let published = settings.keys.published();
+    let published = settings.keys.ring().published();
     let jwk = published
         .get("keys")
         .and_then(Value::as_array)?

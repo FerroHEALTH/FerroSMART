@@ -41,7 +41,7 @@ pub struct Ended {
 /// The query of every registered client's row.
 fn select(filter: &str) -> String {
     format!(
-        "SELECT {CLIENT_COLUMNS}, source, extract(epoch FROM disabled_at)::bigint AS disabled_at \
+        "SELECT {CLIENT_COLUMNS}, extract(epoch FROM disabled_at)::bigint AS disabled_at \
          FROM client {filter}"
     )
 }
@@ -49,14 +49,10 @@ fn select(filter: &str) -> String {
 /// Reads a `client` row with its source and disabled time.
 fn read_registered(row: &sqlx::postgres::PgRow) -> Result<Registered, StoreError> {
     let client = read_client(row)?;
-    let source = match row.try_get::<String, _>("source")?.as_str() {
-        "config" => Source::Config,
-        "admin" => Source::Admin,
-        _ => {
-            return Err(StoreError::Corrupt {
-                client_id: client.client_id,
-            });
-        }
+    let Some(source) = Source::parse(&row.try_get::<String, _>("source")?) else {
+        return Err(StoreError::Corrupt {
+            client_id: client.client_id,
+        });
     };
     Ok(Registered {
         disabled_at: row.try_get("disabled_at")?,
@@ -152,7 +148,7 @@ impl Transaction {
     /// Returns [`StoreError::Database`] when a statement fails.
     pub async fn disable_client(&mut self, client_id: &str) -> Result<Ended, StoreError> {
         sqlx::query(
-            "UPDATE client SET disabled_at = now(), source = 'admin', updated_at = now() \
+            "UPDATE client SET disabled_at = now(), source = CASE WHEN source = 'config' THEN 'admin' ELSE source END, updated_at = now() \
              WHERE client_id = $1 AND disabled_at IS NULL",
         )
         .bind(client_id)
@@ -208,7 +204,7 @@ impl Transaction {
     /// Returns [`StoreError::Database`] when the statement fails.
     pub async fn enable_client(&mut self, client_id: &str) -> Result<bool, StoreError> {
         let enabled = sqlx::query(
-            "UPDATE client SET disabled_at = NULL, source = 'admin', updated_at = now() \
+            "UPDATE client SET disabled_at = NULL, source = CASE WHEN source = 'config' THEN 'admin' ELSE source END, updated_at = now() \
              WHERE client_id = $1 AND disabled_at IS NOT NULL",
         )
         .bind(client_id)
@@ -225,7 +221,7 @@ impl Transaction {
     pub async fn clear_approval(&mut self, client_id: &str) -> Result<(), StoreError> {
         sqlx::query(
             "UPDATE client SET approved_scope = NULL, approved_by = NULL, approved_at = NULL, \
-             first_party = false, source = 'admin', updated_at = now() WHERE client_id = $1",
+             first_party = false, source = CASE WHEN source = 'config' THEN 'admin' ELSE source END, updated_at = now() WHERE client_id = $1",
         )
         .bind(client_id)
         .execute(&mut *self.tx)

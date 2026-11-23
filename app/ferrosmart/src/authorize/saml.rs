@@ -33,7 +33,7 @@ use crate::upstream::LoginProvider;
 use crate::upstream::saml::{ResolveError, SamlLogin};
 
 use super::choose::{SAML_COOKIE, saml_cookie};
-use super::{Back, Denial, cookie, forget, found};
+use super::{Denial, cookie, forget, found};
 
 /// The media type of SAML metadata (saml-metadata-2.0-os §4.1.1).
 const METADATA_TYPE: &str = "application/samlmetadata+xml";
@@ -232,17 +232,18 @@ async fn refused(
     if pending.purpose == Purpose::Manage {
         return pages::fault(state, Fault::Lapsed);
     }
-    let back = Back::of(state, pending);
     // NOTE: saml-core-2.0-os §3.2.2.2, a status other than success is the provider's
     // answer, as an OpenID Provider's error is: the login was declined.
-    if matches!(failure, Failure::Refused(Refusal::Status(_))) {
-        return back.deny(Denial {
+    let denial = if matches!(failure, Failure::Refused(Refusal::Status(_))) {
+        Denial {
             error: "access_denied",
             description: "the login was declined",
-        });
-    }
-    back.deny(Denial {
-        error: "server_error",
-        description: "the login could not be completed",
-    })
+        }
+    } else {
+        Denial {
+            error: "server_error",
+            description: "the login could not be completed",
+        }
+    };
+    super::deny_unsigned(state, pending, denial).await
 }

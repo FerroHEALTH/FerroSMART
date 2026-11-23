@@ -128,7 +128,7 @@ pub(crate) fn config(text: &str, keys: &Keys) -> Config {
     }
     if !text.contains("[ferrosmart.keys]") {
         environment.insert(
-            String::from("FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILE"),
+            String::from("FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILES"),
             keys.current.display().to_string(),
         );
     }

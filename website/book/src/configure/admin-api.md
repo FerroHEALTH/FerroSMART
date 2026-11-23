@@ -150,8 +150,8 @@ and consents it ended, `client-enabled`, and
 
 ## The keys
 
-`GET /admin/keys` lists the token signing ring: the public JWK of each key
-with its state, `active` (signs), `next` (published ahead of a rotation)
-and `retiring` (the previous key, with whether it is still published). The
-private keys stay in the files `[ferrosmart.keys]` names; a rotation
-changes those files ([keys and rotation](../operate/keys.md)).
+`GET /admin/keys` lists the token signing ring the replica publishes: the
+public JWK of each key with its state, `active` (signs), `next` (published
+ahead of the rotation that makes it sign) and `retiring` (published until
+the tokens it signed have expired). The private keys stay in the files
+`[ferrosmart.keys]` names ([keys and rotation](../operate/keys.md)).

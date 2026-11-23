@@ -43,9 +43,8 @@ client_id = "00001111-aaaa-2222-bbbb-3333cccc4444"
 [ferrosmart.upstream.oidc.private_key_jwt]
 certificate_file = "/run/secrets/upstream-assertion.crt"
 
-# The assertion ring, read as [ferrosmart.keys] is; a rotation uploads the
-# next key's certificate to the registration before the ring makes it
-# current.
+# The assertion ring; a rotation uploads the next key's certificate to the
+# registration before the ring makes it current.
 [ferrosmart.upstream.oidc.private_key_jwt.keys]
 private_key_file = "/run/secrets/upstream-assertion.pem"
 

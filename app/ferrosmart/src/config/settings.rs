@@ -27,7 +27,9 @@ use crate::upstream::{
 };
 
 use crate::config::error::Error;
-use crate::config::{AuditSection, BrandingSection, Config, KeysSection};
+use crate::config::{AuditSection, BrandingSection, Config, KeysSection, SigningKeysSection};
+use crate::signing::SigningKeys;
+use crate::store::signing::Schedule;
 
 /// The settings the server runs on.
 #[derive(Debug, Clone)]
@@ -46,8 +48,8 @@ pub struct Settings {
     pub refresh_idle: Duration,
     /// How long an `online_access` refresh token lasts unused.
     pub online_idle: Duration,
-    /// The keys that sign every token.
-    pub keys: Arc<KeyRing>,
+    /// The keys that sign every token, in rotation.
+    pub keys: Arc<SigningKeys>,
     /// The connection URL of the database.
     pub database_url: SecretString,
     /// The most connections one replica holds.
@@ -181,7 +183,10 @@ impl Config {
                 .map(ferrohealth_secret::secret::Secret::to_secret_string),
             section.database.url_file.as_deref(),
         )?;
-        let keys = Arc::new(key_ring(&section.keys, &TOKEN_KEYS, Algorithm::RS256)?);
+        let keys = Arc::new(signing_keys(
+            &section.keys,
+            section.access_token_lifetime.get(),
+        )?);
         Ok(Settings {
             server: self.server.clone(),
             issuer: section.issuer.clone(),
@@ -291,13 +296,6 @@ struct RingNames {
     next: &'static str,
 }
 
-/// The names of `[ferrosmart.keys]`, the ring that signs tokens.
-const TOKEN_KEYS: RingNames = RingNames {
-    current: "ferrosmart.keys.private_key_file",
-    previous: "ferrosmart.keys.previous_private_key_file",
-    next: "ferrosmart.keys.next_private_key_file",
-};
-
 /// The names of `[ferrosmart.upstream.oidc.private_key_jwt.keys]`, the ring that
 /// signs client assertions to the upstream provider.
 const ASSERTION_KEYS: RingNames = RingNames {
@@ -305,6 +303,38 @@ const ASSERTION_KEYS: RingNames = RingNames {
     previous: "ferrosmart.upstream.oidc.private_key_jwt.keys.previous_private_key_file",
     next: "ferrosmart.upstream.oidc.private_key_jwt.keys.next_private_key_file",
 };
+
+/// Returns the signing keys `section` names, rotating so a key is published
+/// a JWK Set cache lifetime before it signs and stays published for the
+/// longest token it signed after that (`docs/architecture.md` §13.11).
+fn signing_keys(
+    section: &SigningKeysSection,
+    access_token_lifetime: Duration,
+) -> Result<SigningKeys, Error> {
+    const KEY: &str = "ferrosmart.keys.private_key_files";
+    let mut pool: Vec<AssertionKey> = Vec::with_capacity(section.private_key_files.len());
+    for path in &section.private_key_files {
+        let key = read_key(KEY, path, None, Algorithm::RS256)?;
+        if pool.iter().any(|other| other.kid() == key.kid()) {
+            return Err(Error::RepeatedKey {
+                kid: key.kid().to_owned(),
+            });
+        }
+        pool.push(key);
+    }
+    let lead = crate::server::JWKS_MAX_AGE.saturating_add(crate::signing::REFRESH_INTERVAL);
+    let schedule = Schedule {
+        period: section.rotation_period.get(),
+        lead,
+        retirement: lead.saturating_add(access_token_lifetime),
+    };
+    if schedule.period < schedule.retirement {
+        return Err(Error::RotationPeriod {
+            shortest: schedule.retirement,
+        });
+    }
+    SigningKeys::new(pool, schedule).map_err(|_empty| Error::Missing { key: KEY })
+}
 
 /// Returns the ring `keys` names: the current key, the previous one for its
 /// overlap and the next one, each read to sign with `algorithm`.
@@ -634,7 +664,7 @@ fn clients_of(
 /// provider's assurance against the deployment's `floor`.
 fn upstreams(
     sections: &[UpstreamSection],
-    keys: &KeyRing,
+    keys: &SigningKeys,
     floor: crate::assurance::Floor,
 ) -> Result<Vec<Upstream>, Error> {
     let mut resolved: Vec<Upstream> = Vec::with_capacity(sections.len());
@@ -661,7 +691,7 @@ fn upstreams(
 /// Returns the provider `section` names.
 fn upstream(
     section: &UpstreamSection,
-    keys: &KeyRing,
+    keys: &SigningKeys,
     floor: crate::assurance::Floor,
 ) -> Result<Upstream, Error> {
     let named = !section.name.is_empty()
@@ -761,7 +791,7 @@ fn service_provider(
 fn oidc_upstream(
     section: &OidcSection,
     effective: &Effective,
-    keys: &KeyRing,
+    keys: &SigningKeys,
 ) -> Result<OidcUpstream, Error> {
     if section.issuer.is_empty() || section.client_id.is_empty() {
         return Err(Error::Upstream {
@@ -805,7 +835,7 @@ fn oidc_upstream(
 fn assertion_keys(
     section: &PrivateKeyJwtSection,
     algorithm: &str,
-    tokens: &KeyRing,
+    tokens: &SigningKeys,
 ) -> Result<AssertionKeys, Error> {
     const KEY: &str = "ferrosmart.upstream.oidc.private_key_jwt";
     let algorithm = algorithm
@@ -816,7 +846,11 @@ fn assertion_keys(
     let ring = key_ring(&section.keys, &ASSERTION_KEYS, algorithm)?;
     // NOTE: RFC 8725 §3.12: a key that signs client assertions never signs a
     // token, so the two rings share no key.
-    if shares_key(&ring.published(), &tokens.published()) {
+    let pool: Vec<&AssertionKey> = tokens.pool().iter().collect();
+    if shares_key(
+        &ring.published(),
+        &ferrohealth_smart::client::assertion::jwk_set(&pool),
+    ) {
         return Err(Error::Upstream {
             rule: "the assertion keys share no key with `[ferrosmart.keys]`",
         });

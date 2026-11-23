@@ -466,9 +466,8 @@ async fn update(
     check_names(&on.state, &client)?;
     let lapsed = stored
         .client
-        .approval
-        .as_ref()
-        .filter(|approval| client.approval.as_ref() != Some(*approval));
+        .approval()
+        .filter(|approval| client.approval() != Some(*approval));
     let withdrawn = match lapsed {
         Some(approval) => Some((
             approval,
@@ -531,9 +530,13 @@ async fn enable(on: OnClient) -> Result<Response, AdminError> {
 async fn withdraw(on: OnClient) -> Result<Response, AdminError> {
     let (change, client_id) = (on.change(), on.client_id.as_str());
     let (mut tx, stored) = change.lock(client_id).await?;
-    let approval = stored.client.approval.ok_or(AdminError::Unchanged(
-        "the client holds no organisation approval",
-    ))?;
+    let approval = stored
+        .client
+        .approval()
+        .cloned()
+        .ok_or(AdminError::Unchanged(
+            "the client holds no organisation approval",
+        ))?;
     let revoked = tx
         .withdraw_approval(client_id, approval.approved_at)
         .await?;
@@ -547,25 +550,18 @@ async fn withdraw(on: OnClient) -> Result<Response, AdminError> {
     change.finish(tx, record, StatusCode::OK).await
 }
 
-/// `GET /admin/keys`: the signing key ring, each public key with its
-/// state: `active` signs, `next` is published ahead of a rotation, and
-/// `retiring` is the previous key, published while its overlap lasts
-/// (`docs/architecture.md` §13.11). The private keys stay in the files
-/// the configuration names; the API never carries one.
+/// `GET /admin/keys`: the signing key ring this replica signs with, each
+/// public key with its state: `active` signs, `next` is published ahead of
+/// the rotation that makes it sign, and `retiring` stays published until
+/// the tokens it signed have expired (`docs/architecture.md` §13.11). The
+/// private keys stay in the files the configuration names; the API never
+/// carries one.
 async fn keys(State(state): State<Arc<AppState>>) -> Response {
-    let ring = &state.settings().keys;
-    let now = std::time::Instant::now();
-    let mut keys: Vec<Value> =
-        vec![json!({ "state": "active", "jwk": ring.current().public_jwk() })];
-    if let Some(retiring) = ring.retiring() {
-        keys.push(json!({
-            "state": "retiring",
-            "published": ring.previous_at(now).is_some(),
-            "jwk": retiring.public_jwk(),
-        }));
-    }
-    if let Some(next) = ring.next() {
-        keys.push(json!({ "state": "next", "jwk": next.public_jwk() }));
-    }
+    let ring = state.settings().keys.ring();
+    let keys: Vec<Value> = std::iter::once(("active", ring.current()))
+        .chain(ring.retiring().map(|key| ("retiring", key)))
+        .chain(ring.next().map(|key| ("next", key)))
+        .map(|(state, key)| json!({ "state": state, "jwk": key.public_jwk() }))
+        .collect();
     no_store(Json(json!({ "keys": keys })).into_response())
 }

@@ -76,17 +76,24 @@ async fn authorize(state: &AppState, encoded: &[u8], from: IpAddr) -> Response {
         state: params.get("state").map(str::to_owned),
         issuer: state.settings().issuer.clone(),
     };
-    match begin(state, &client, &params, redirect_uri, from).await {
-        Ok(response) => response,
-        Err(Stop::Deny(denial)) => back.deny(denial),
+    let (denial, fault) = match begin(state, &client, &params, redirect_uri, from).await {
+        Ok(response) => return response,
+        Err(Stop::Deny(denial)) => (denial, Fault::Refused),
         Err(Stop::Fail(error)) => {
             tracing::error!(error = %ferrohealth_server::run::chain(&*error), "the authorization request failed");
-            back.deny(Denial {
+            let denial = Denial {
                 error: "server_error",
                 description: "the authorization server failed",
-            })
+            };
+            (denial, Fault::Server)
         }
+    };
+    // NOTE: RFC 9700 §4.11.2, the server authenticates the person before it redirects;
+    // no administrator vouched for the redirect URI of an app that registered itself.
+    if client.registered_itself() {
+        return pages::fault(state, fault);
     }
+    back.deny(denial)
 }
 
 /// Returns the resource server the request names for `client`.

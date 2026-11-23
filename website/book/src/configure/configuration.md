@@ -75,16 +75,13 @@ one. Migrations ship in the binary and run at start.
 
 ## `[ferrosmart.keys]`
 
-The RSA keys that sign every access token and ID Token under `RS256`
-([keys and rotation](../operate/keys.md)).
+The RSA keys that sign every access token and ID Token under `RS256`, each
+in turn ([keys and rotation](../operate/keys.md)).
 
 | Key | Default | What it is |
 |---|---|---|
-| `private_key_file` | required | The PEM file of the key that signs |
-| `kid` | its RFC 7638 thumbprint | The `kid` the key is published under |
-| `next_private_key_file` | none | The key a rotation makes current, published ahead and never signing |
-| `previous_private_key_file` | none | The key that signed before a rotation, published and never signing |
-| `previous_key_overlap` | `0s` | How long the previous key stays published; `"0s"` for as long as it is configured |
+| `private_key_files` | required | The PEM files of the keys, in the order they take over; each is published under its RFC 7638 thumbprint |
+| `rotation_period` | `90d` | How long a key signs before the next one takes over; at least `access_token_lifetime` plus an hour and a minute |
 
 ## `[[ferrosmart.resource]]`
 
@@ -232,7 +229,7 @@ The `private_key_jwt` table:
 |---|---|
 | `algorithm` | The JWS algorithm the provider's registration names; the preset's, else `RS256` |
 | `certificate_file` | The X.509 certificate of the current assertion key, for a provider that knows the key by its certificate; each assertion then names it by `x5t#S256` |
-| `[ferrosmart.upstream.oidc.private_key_jwt.keys]` | The assertion ring, with the same keys as `[ferrosmart.keys]`; it may share no key with the token ring. Its `kid` is the id the provider knows the key by, such as ZITADEL's key id |
+| `[ferrosmart.upstream.oidc.private_key_jwt.keys]` | The assertion ring: `private_key_file` (the key that signs), `kid` (the id the provider knows it by, such as ZITADEL's key id; its RFC 7638 thumbprint when empty), `next_private_key_file`, `previous_private_key_file` and `previous_key_overlap` (`0s` keeps the previous key published while it is configured). It may share no key with the token keys |
 
 `[ferrosmart.upstream.saml]`, for a SAML 2.0 identity provider
 ([SAML 2.0 providers](../install/upstream.md#saml-20)):
@@ -365,7 +362,7 @@ issuer = "https://smart.example.org"
 url_file = "/run/secrets/ferrosmart-db-url"
 
 [ferrosmart.keys]
-private_key_file = "/run/secrets/rs256.pem"
+private_key_files = ["/run/secrets/rs256-1.pem", "/run/secrets/rs256-2.pem"]
 
 [[ferrosmart.resource]]
 base = "https://ehr.example.org/fhir"

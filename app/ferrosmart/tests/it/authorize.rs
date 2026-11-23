@@ -2524,6 +2524,7 @@ mod providers;
 mod public_redirect;
 mod saml;
 mod secret_basic;
+mod self_registered;
 mod token_exchange;
 
 /// The capabilities FerroSMART supports with a FHIR resource server and a

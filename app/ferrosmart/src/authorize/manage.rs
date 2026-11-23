@@ -233,10 +233,12 @@ async fn manage_page(state: &AppState, headers: &HeaderMap, pending: &Pending) -
     let mut named = Vec::with_capacity(apps.len());
     for (client_id, (scope, access, organisation)) in apps {
         let (name, first_party) = match state.store().client(&client_id).await {
-            Ok(Some(client)) => (
-                client.name,
-                client.approval.is_some_and(|approval| approval.first_party),
-            ),
+            Ok(Some(client)) => {
+                let first_party = client
+                    .approval()
+                    .is_some_and(|approval| approval.first_party);
+                (client.name, first_party)
+            }
             Ok(None) => (client_id.clone(), false),
             Err(error) => return pages::server_error(state, &error),
         };

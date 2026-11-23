@@ -239,14 +239,67 @@ pub struct Client {
     pub grant_types: Vec<GrantType>,
     /// Its launch URL, normalized by [`normalized_launch_uri`].
     pub launch_uri: Option<String>,
-    /// Its approval for the whole organisation, when an administrator
-    /// gave one.
-    pub approval: Option<Approval>,
+    /// Who registered it, which decides what its metadata may claim.
+    pub registration: Registration,
     /// What the consent page shows about the app.
     pub about: About,
 }
 
+/// Who registered a client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Registration {
+    /// An administrator, in the configuration or through the admin API,
+    /// with the approval for the whole organisation they gave, if any.
+    Administered(Option<Approval>),
+    /// The app itself (RFC 7591). RFC 7591 §5 has its metadata treated as
+    /// self-asserted, so it carries no approval and is never first party.
+    Dynamic,
+}
+
 impl Client {
+    /// Returns its approval for the whole organisation, when an
+    /// administrator gave one.
+    #[must_use]
+    pub const fn approval(&self) -> Option<&Approval> {
+        match &self.registration {
+            Registration::Administered(approval) => approval.as_ref(),
+            Registration::Dynamic => None,
+        }
+    }
+
+    /// Returns whether the app registered itself (RFC 7591).
+    #[must_use]
+    pub const fn registered_itself(&self) -> bool {
+        matches!(self.registration, Registration::Dynamic)
+    }
+
+    /// Returns what the consent page may show about the app for a request
+    /// that redirects to `redirect_uri`.
+    ///
+    /// RFC 7591 §5 has the server check that the URLs of a registration
+    /// share the scheme and host of its redirect URIs, so an app that
+    /// registered itself shows only those that share `redirect_uri`'s.
+    #[must_use]
+    pub fn shown_about(&self, redirect_uri: &str) -> About {
+        if !self.registered_itself() {
+            return self.about.clone();
+        }
+        let redirect = Url::parse(redirect_uri).ok();
+        let same_site = |url: &Option<Url>| {
+            url.clone().filter(|url| {
+                redirect.as_ref().is_some_and(|redirect| {
+                    redirect.scheme() == url.scheme() && redirect.host() == url.host()
+                })
+            })
+        };
+        About {
+            home: same_site(&self.about.home),
+            logo: same_site(&self.about.logo),
+            policy: same_site(&self.about.policy),
+            terms: same_site(&self.about.terms),
+        }
+    }
+
     /// Returns whether a redirect to `redirect_uri` assures this client's
     /// identity.
     ///
@@ -297,10 +350,7 @@ pub fn unassured_first_party(clients: &[Client]) -> Vec<String> {
         .iter()
         .filter(|client| {
             client.kind == ClientKind::Public
-                && client
-                    .approval
-                    .as_ref()
-                    .is_some_and(|approval| approval.first_party)
+                && client.approval().is_some_and(|approval| approval.first_party)
                 && !client.redirect_uris.iter().any(|uri| claimed_https(uri))
         })
         .map(|client| {
@@ -682,7 +732,7 @@ pub fn resolve_with(section: &ClientSection, material: Material) -> Result<Clien
         scopes: section.scopes.clone(),
         grant_types,
         launch_uri,
-        approval,
+        registration: Registration::Administered(approval),
         about,
     })
 }
