@@ -29,7 +29,7 @@ const TWO: &str = "https://two.example.org";
 fn entry(issuer: &str, roles: &[&str]) -> IssuerEntry {
     IssuerEntry {
         issuer: ferrohealth_secret::secret_url::SecretUrl::new(issuer),
-        kind: Some(IssuerKind::Persons),
+        kind: Some(IssuerKind::Smart),
         audience: vec![String::from(AUDIENCE)],
         role_claims: Some(roles.iter().map(|&role| role.to_owned()).collect()),
         ..IssuerEntry::default()
@@ -72,7 +72,7 @@ fn each_issuer_receives_only_its_own_entries() -> Result<(), Box<dyn StdError>> 
 fn a_section_level_role_claims_is_refused_at_load() {
     let read = toml::from_str::<AuthSection>(&format!(
         "role_claims = [\"https://one.example.org#roles\"]\n\
-         [issuer.i2]\nissuer = \"{ONE}\"\nkind = \"persons\"\naudience = [\"a\"]\n"
+         [issuer.i2]\nissuer = \"{ONE}\"\naudience = [\"a\"]\n"
     ));
     assert!(read.is_err(), "role_claims is no key of the section");
 }
@@ -80,7 +80,7 @@ fn a_section_level_role_claims_is_refused_at_load() {
 #[test]
 fn scopeless_subjects_is_an_unknown_key() {
     let read = toml::from_str::<AuthSection>(&format!(
-        "[issuer.one]\nissuer = \"{ONE}\"\nkind = \"persons\"\naudience = [\"a\"]\n\
+        "[issuer.one]\nissuer = \"{ONE}\"\naudience = [\"a\"]\n\
          scopeless_subjects = [\"svc\"]\n"
     ));
     assert!(

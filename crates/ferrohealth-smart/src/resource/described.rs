@@ -13,17 +13,11 @@
 //! rule for every product.
 //!
 //! - **Named:** `[auth] described_issuer`, when set, is described, once it
-//!   is a trusted issuer with metadata. A `machines` issuer is described for
-//!   Backend Services only, and only while no issuer is eligible for app
-//!   launch, so naming it never hides the launch issuer from SMART apps.
-//! - **App launch:** otherwise, when the deployment trusts an issuer of a
-//!   kind that signs user tokens (`persons`, `patients`, `federation`), the
-//!   one such issuer with metadata is described for SMART App Launch;
-//!   several are refused, naming them, and so is none.
-//! - **Backend Services:** otherwise, the one `machines` issuer with
-//!   metadata is described for Backend Services only
-//!   ([`Purpose::BackendServices`]); several are refused, naming them.
-//! - **None:** otherwise the document describes no issuer, and is refused.
+//!   is a trusted issuer with metadata.
+//! - **The one SMART issuer:** otherwise, the one SMART authorization
+//!   server with metadata is described; several are refused, naming them,
+//!   and so is none. A `federation` issuer is another party's, so it is
+//!   never chosen unnamed.
 //!
 //! The order the issuers are offered in, which is the order of the
 //! `[auth.issuer.<name>]` tables, never decides: a refusal names the issuers sorted.
@@ -34,19 +28,13 @@
 //! use ferrohealth_smart::resource::described::{Candidate, Metadata, describe};
 //!
 //! let candidates = [
-//!     Candidate::new("https://m2m.example", IssuerKind::Machines, Metadata::Available, 1),
-//!     Candidate::new("https://login.example", IssuerKind::Persons, Metadata::Available, 2),
+//!     Candidate::new("https://other.example", IssuerKind::Federation, Metadata::Available, 1),
+//!     Candidate::new("https://smart.example", IssuerKind::Smart, Metadata::Available, 2),
 //! ];
 //! let described = describe(candidates, None)?;
-//! assert_eq!(described.issuer(), "https://login.example");
+//! assert_eq!(described.issuer(), "https://smart.example");
 //! assert_eq!(described.purpose(), Purpose::AppLaunch);
 //! assert_eq!(described.into_check(), 2);
-//!
-//! let machines = [
-//!     Candidate::new("https://m2m.example", IssuerKind::Machines, Metadata::Available, 1),
-//! ];
-//! let described = describe(machines, None)?;
-//! assert_eq!(described.purpose(), Purpose::BackendServices);
 //! # Ok::<(), ferrohealth_smart::resource::described::DescribeError>(())
 //! ```
 
@@ -145,19 +133,11 @@ impl<T> Candidate<T> {
         self.metadata
     }
 
-    /// Returns whether the document may describe this issuer for SMART App
-    /// Launch: its kind is not `machines` and its metadata is available.
+    /// Returns whether the document describes this issuer unnamed: a SMART
+    /// authorization server whose metadata is available.
     #[must_use]
     pub fn is_eligible(&self) -> bool {
-        self.kind != IssuerKind::Machines && self.metadata == Metadata::Available
-    }
-
-    /// Returns whether the document may describe this issuer for SMART
-    /// Backend Services alone: its kind is `machines` and its metadata is
-    /// available.
-    #[must_use]
-    pub fn is_backend_eligible(&self) -> bool {
-        self.kind == IssuerKind::Machines && self.metadata == Metadata::Available
+        self.kind == IssuerKind::Smart && self.metadata == Metadata::Available
     }
 
     /// Returns the product's check of the issuer.
@@ -229,16 +209,6 @@ pub enum DescribeError {
         /// The issuer named.
         issuer: SecretUrl,
     },
-    /// `described_issuer` names a `machines` issuer while an issuer is
-    /// eligible for app launch.
-    #[error(
-        "described_issuer names the machines issuer {issuer}, while the deployment trusts an \
-         issuer user launches start at: the document would advertise Backend Services only"
-    )]
-    MachinesIssuer {
-        /// The issuer named.
-        issuer: SecretUrl,
-    },
     /// `described_issuer` names an issuer whose metadata is not available.
     #[error(
         "described_issuer names {issuer}, whose metadata is not available: its key set is a \
@@ -248,7 +218,7 @@ pub enum DescribeError {
         /// The issuer named.
         issuer: SecretUrl,
     },
-    /// No issuer is named and several are eligible for app launch.
+    /// No issuer is named and several are eligible.
     #[error(
         "the discovery document can describe any of the issuers {}; set described_issuer to \
          the one user launches start at",
@@ -258,22 +228,10 @@ pub enum DescribeError {
         /// The eligible issuers, sorted.
         issuers: Vec<SecretUrl>,
     },
-    /// No issuer is named, no issuer signs user tokens, and several
-    /// `machines` issuers are eligible for Backend Services.
-    #[error(
-        "the discovery document can describe any of the machines issuers {} for Backend \
-         Services; set described_issuer to the one backend clients take tokens from",
-        Listed(.issuers)
-    )]
-    SeveralMachines {
-        /// The eligible `machines` issuers, sorted.
-        issuers: Vec<SecretUrl>,
-    },
     /// No issuer is eligible.
     #[error(
-        "the discovery document can describe no issuer: it needs a trusted issuer whose \
-         metadata is available, of kind persons, patients or federation for app launch, or, \
-         when the deployment trusts none of those kinds, of kind machines for Backend Services"
+        "the discovery document can describe no issuer: it needs a trusted SMART issuer whose \
+         metadata is available, or described_issuer naming one"
     )]
     NoneEligible,
 }
@@ -295,9 +253,8 @@ impl fmt::Display for Listed<'_> {
 
 /// Returns the issuer the discovery document describes, and what for.
 ///
-/// That is the one `named` names when set, else the one issuer eligible for
-/// app launch, else, when no trusted issuer signs user tokens, the one
-/// `machines` issuer for Backend Services.
+/// That is the one `named` names when set, else the one SMART issuer whose
+/// metadata is available.
 ///
 /// A product calls it when it loads, with
 /// [`Resolved::described_issuer`](crate::config::Resolved::described_issuer)
@@ -307,14 +264,10 @@ impl fmt::Display for Listed<'_> {
 /// # Errors
 ///
 /// With `named`: [`DescribeError::UnknownIssuer`] when no candidate is that
-/// issuer, [`DescribeError::NoMetadata`] when its metadata is absent, and
-/// [`DescribeError::MachinesIssuer`] when it is a `machines` issuer while a
-/// candidate is eligible for app launch. Without:
-/// [`DescribeError::SeveralEligible`] naming every issuer eligible for app
-/// launch when there are several, [`DescribeError::SeveralMachines`] naming
-/// every `machines` issuer with metadata when no candidate signs user tokens
-/// and there are several, and [`DescribeError::NoneEligible`] when no issuer
-/// can be described.
+/// issuer, and [`DescribeError::NoMetadata`] when its metadata is absent.
+/// Without: [`DescribeError::SeveralEligible`] naming every eligible issuer
+/// when there are several, and [`DescribeError::NoneEligible`] when there is
+/// none.
 pub fn describe<T>(
     candidates: impl IntoIterator<Item = Candidate<T>>,
     named: Option<&SecretUrl>,
@@ -329,51 +282,34 @@ pub fn describe<T>(
                 issuer: named.clone(),
             });
         };
-        let launch = candidates.iter().any(Candidate::is_eligible);
         let found = candidates.swap_remove(at);
         if found.metadata == Metadata::Absent {
             return Err(DescribeError::NoMetadata {
                 issuer: named.clone(),
             });
         }
-        if found.kind != IssuerKind::Machines {
-            return Ok(Described {
-                candidate: found,
-                purpose: Purpose::AppLaunch,
-            });
-        }
-        if launch {
-            return Err(DescribeError::MachinesIssuer {
-                issuer: named.clone(),
-            });
-        }
         return Ok(Described {
             candidate: found,
-            purpose: Purpose::BackendServices,
+            purpose: Purpose::AppLaunch,
         });
     }
-    let signs_user_tokens = candidates
-        .iter()
-        .any(|candidate| candidate.kind != IssuerKind::Machines);
-    let (eligible, purpose): (fn(&Candidate<T>) -> bool, Purpose) = if signs_user_tokens {
-        (Candidate::is_eligible, Purpose::AppLaunch)
-    } else {
-        (Candidate::is_backend_eligible, Purpose::BackendServices)
-    };
-    let mut chosen: Vec<Candidate<T>> = candidates.into_iter().filter(eligible).collect();
+    let mut chosen: Vec<Candidate<T>> = candidates
+        .into_iter()
+        .filter(Candidate::is_eligible)
+        .collect();
     if chosen.len() > 1 {
         let mut issuers: Vec<SecretUrl> = chosen
             .iter()
             .map(|candidate| SecretUrl::new(candidate.issuer.clone()))
             .collect();
         issuers.sort_by(|left, right| left.expose().cmp(right.expose()));
-        return Err(match purpose {
-            Purpose::BackendServices => DescribeError::SeveralMachines { issuers },
-            Purpose::AppLaunch => DescribeError::SeveralEligible { issuers },
-        });
+        return Err(DescribeError::SeveralEligible { issuers });
     }
     chosen
         .pop()
-        .map(|candidate| Described { candidate, purpose })
+        .map(|candidate| Described {
+            candidate,
+            purpose: Purpose::AppLaunch,
+        })
         .ok_or(DescribeError::NoneEligible)
 }

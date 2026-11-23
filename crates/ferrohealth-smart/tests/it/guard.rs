@@ -441,7 +441,7 @@ async fn a_valid_token_reaches_the_handler_and_is_audited_with_the_fixed_fields(
     );
     assert_eq!("synthetic-client-sub", line.field("principal"));
     assert_eq!("synthetic-client", line.field("client"));
-    assert_eq!("person", line.field("kind"), "the caller kind (#215)");
+    assert_eq!("user", line.field("kind"), "the caller kind (#215)");
     assert_eq!(
         "-",
         line.field("binding"),

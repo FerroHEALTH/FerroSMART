@@ -22,7 +22,6 @@ use ferrohealth_smart::kind::Actor;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::kind::Unclassified;
-use ferrohealth_smart::profile::ProfileError;
 use ferrohealth_smart::resource::Caller;
 use ferrohealth_smart::resource::Rejection;
 use ferrohealth_smart::resource::ResourceError;
@@ -116,12 +115,12 @@ fn code(system: &str, code: &str) -> Code {
 #[tokio::test]
 async fn the_iua_mapping_reads_the_professional_of_a_persons_token() -> Outcome {
     let caller = admit(
-        IssuerKind::Persons,
+        IssuerKind::Smart,
         |settings| settings.attributes = Some(table(BTreeMap::new())),
         &person(&iua()),
     )
     .await?;
-    assert_eq!(&CallerKind::Person, caller.kind());
+    assert_eq!(&CallerKind::User, caller.kind());
     let attributes = caller.attributes().ok_or("the table is read")?;
     let text = |field| attributes.field(field).and_then(Attribute::text);
     assert_eq!(Some("Dr. John Smith"), text(Field::ProfessionalName));
@@ -156,7 +155,7 @@ async fn a_claim_source_of_the_table_reads_its_own_path() -> Outcome {
         vec![Source::Claim(String::from("uzi"))],
     )]);
     let caller = admit(
-        IssuerKind::Persons,
+        IssuerKind::Smart,
         |settings| {
             settings.attributes = Some(AttributesSection {
                 mapping: None,
@@ -184,7 +183,7 @@ async fn a_constant_source_states_its_value_for_every_token() -> Outcome {
         vec![Source::Constant(String::from("NL"))],
     )]);
     let caller = admit(
-        IssuerKind::Persons,
+        IssuerKind::Smart,
         |settings| settings.attributes = Some(table(fields)),
         &person(&json!({})),
     )
@@ -216,7 +215,7 @@ async fn the_authorization_details_purposes_join_the_iua_ones() -> Outcome {
         let claims = claims.clone();
         async move {
             admit(
-                IssuerKind::Persons,
+                IssuerKind::Smart,
                 |settings| {
                     settings.attributes = Some(AttributesSection {
                         authorization_details_purposes: purposes,
@@ -266,7 +265,7 @@ async fn a_claim_in_the_wrong_shape_is_refused() -> Outcome {
     ];
     for (extra, field) in shapes {
         let outcome = admit(
-            IssuerKind::Persons,
+            IssuerKind::Smart,
             |settings| {
                 settings.attributes = Some(AttributesSection {
                     authorization_details_purposes: true,
@@ -293,7 +292,7 @@ async fn a_machine_token_carries_its_purposes_and_no_professional() -> Outcome {
     let mut app = person(&iua());
     app["sub"] = json!(FIRST_PARTY);
     let caller = admit(
-        IssuerKind::Persons,
+        IssuerKind::Smart,
         |settings| settings.attributes = Some(table(BTreeMap::new())),
         &app,
     )
@@ -311,7 +310,7 @@ async fn a_machine_token_carries_its_purposes_and_no_professional() -> Outcome {
         "a machine states no professional"
     );
     assert_eq!(Vec::<Code>::new(), attributes.roles().to_vec());
-    let caller = admit(IssuerKind::Persons, |_| {}, &person(&iua())).await?;
+    let caller = admit(IssuerKind::Smart, |_| {}, &person(&iua())).await?;
     assert!(
         caller.attributes().is_none(),
         "an issuer without a table states nothing"
@@ -329,7 +328,7 @@ async fn a_coding_with_an_empty_code_names_no_code() -> Outcome {
         ]
     }}}));
     let caller = admit(
-        IssuerKind::Persons,
+        IssuerKind::Smart,
         |settings| settings.attributes = Some(table(BTreeMap::new())),
         &claims,
     )
@@ -365,7 +364,7 @@ async fn an_attributes_table_on_a_federation_issuer_or_with_another_source_is_re
             ..
         })
     ));
-    let mut settings = Settings::new(ISSUER, AUDIENCE, IssuerKind::Persons);
+    let mut settings = Settings::new(ISSUER, AUDIENCE, IssuerKind::Smart);
     settings.attributes = Some(table(BTreeMap::from([(
         Field::PurposeOfUse,
         vec![Source::AuthorizationDetails(String::from("purpose"))],
@@ -376,37 +375,13 @@ async fn an_attributes_table_on_a_federation_issuer_or_with_another_source_is_re
     ));
 }
 
-#[test]
-fn a_patients_or_machines_table_names_the_purpose_of_use_alone() {
-    for kind in [IssuerKind::Patients, IssuerKind::Machines] {
-        let mut settings = Settings::new(ISSUER, AUDIENCE, kind);
-        settings.attributes = Some(table(BTreeMap::from([(
-            Field::PurposeOfUse,
-            vec![Source::Claim(String::from("purpose"))],
-        )])));
-        assert!(settings.validate().is_ok(), "{kind:?}");
-        settings.attributes = Some(table(BTreeMap::from([(
-            Field::ProfessionalCountryCode,
-            vec![Source::Constant(String::from("NL"))],
-        )])));
-        assert!(
-            matches!(
-                settings.validate(),
-                Err(ResourceError::Federation(FederationError::PurposeOnly {
-                    field: "professional.country_code"
-                }))
-            ),
-            "{kind:?}"
-        );
-    }
-}
-
-/// The claims of a patient's token naming only the record subject.
+/// The claims of a patient's own token.
 fn patient(extra: &Value) -> Value {
     let mut members = json!({
         "sub": "patient-sub-1",
         "scope": "launch/patient patient/Observation.rs",
         "patient": "synthetic-patient",
+        "fhirUser": "Patient/synthetic-patient",
     });
     if let (Some(members), Some(extra)) = (members.as_object_mut(), extra.as_object()) {
         members.extend(extra.clone());
@@ -414,65 +389,29 @@ fn patient(extra: &Value) -> Value {
     person(&members)
 }
 
+// NOTE: RFC 8693 §4.1, only the top-level `act` is the current actor; the
+// nested one is informational.
 #[tokio::test]
-async fn a_patients_token_with_act_is_refused_unless_the_issuer_reads_a_representative() -> Outcome
-{
-    let act = json!({ "act": { "sub": "representative-7" } });
-    let outcome = admit(IssuerKind::Patients, |_| {}, &patient(&act)).await;
-    assert!(
-        matches!(
-            outcome,
-            Err(Rejection::Unclassified {
-                reason: Unclassified::PatientActor
-            })
-        ),
-        "never the patient's own access: {outcome:?}"
-    );
-    let caller = admit(IssuerKind::Patients, |_| {}, &patient(&json!({}))).await?;
-    assert_eq!(&CallerKind::Patient, caller.kind(), "no act, the patient");
-    Ok(())
-}
-
-#[tokio::test]
-async fn a_patients_token_act_names_the_patients_representative() -> Outcome {
-    // NOTE: RFC 8693 §4.1, only the top-level `act` is the current actor; the
-    // nested one is informational.
+async fn a_patients_token_with_act_names_its_actor_and_is_not_the_persons_own() -> Outcome {
     let act = json!({ "act": {
         "iss": "https://idp.example.org", "sub": "representative-7",
-        "act": { "sub": "earlier-actor", "act": { "sub": "earliest-actor" } }
     }});
-    let caller = admit(
-        IssuerKind::Patients,
-        |settings| settings.profile.act_represents_patient = true,
-        &patient(&act),
-    )
-    .await?;
+    let caller = admit(IssuerKind::Smart, |_| {}, &patient(&act)).await?;
+    assert_eq!(&CallerKind::Patient, caller.kind());
     assert_eq!(
-        &CallerKind::PatientRepresentative {
-            actor: Actor {
-                issuer: String::from("https://idp.example.org"),
-                sub: String::from("representative-7"),
-            }
-        },
-        caller.kind()
+        Some(&Actor {
+            issuer: String::from("https://idp.example.org"),
+            sub: String::from("representative-7"),
+        }),
+        caller.actor()
     );
     assert!(
         !caller.is_the_person(),
-        "a representative's access is not the person's own"
-    );
-    let caller = admit(
-        IssuerKind::Patients,
-        |settings| settings.profile.act_represents_patient = true,
-        &patient(&json!({ "act": { "sub": "representative-8" } })),
-    )
-    .await?;
-    assert!(
-        matches!(caller.kind(), CallerKind::PatientRepresentative { actor } if actor.issuer == ISSUER),
-        "an act without iss is the token's issuer's"
+        "an actor's access is not the person's own"
     );
     let outcome = admit(
-        IssuerKind::Patients,
-        |settings| settings.profile.act_represents_patient = true,
+        IssuerKind::Smart,
+        |_| {},
         &patient(&json!({ "act": "representative-9" })),
     )
     .await;
@@ -482,6 +421,8 @@ async fn a_patients_token_act_names_the_patients_representative() -> Outcome {
             reason: Unclassified::ActorChain
         })
     ));
+    let caller = admit(IssuerKind::Smart, |_| {}, &patient(&json!({}))).await?;
+    assert!(caller.is_the_person(), "no act, the patient's own");
     Ok(())
 }
 
@@ -489,7 +430,6 @@ async fn a_patients_token_act_names_the_patients_representative() -> Outcome {
 async fn a_patient_and_their_representative_carry_their_purposes_and_no_professional() -> Outcome {
     let reason = "http://terminology.hl7.org/CodeSystem/v3-ActReason";
     let tables = |settings: &mut Settings| {
-        settings.profile.act_represents_patient = true;
         settings.attributes = Some(table(BTreeMap::new()));
     };
     let claims = |extra: &Value| {
@@ -499,18 +439,15 @@ async fn a_patient_and_their_representative_carry_their_purposes_and_no_professi
         }
         claims
     };
-    let own = admit(IssuerKind::Patients, tables, &claims(&json!({}))).await?;
+    let own = admit(IssuerKind::Smart, tables, &claims(&json!({}))).await?;
     let represented = admit(
-        IssuerKind::Patients,
+        IssuerKind::Smart,
         tables,
-        &claims(&json!({ "act": { "sub": "representative-7" } })),
+        &claims(&json!({ "fhirUser": "RelatedPerson/r-7" })),
     )
     .await?;
     assert_eq!(&CallerKind::Patient, own.kind());
-    assert!(matches!(
-        represented.kind(),
-        CallerKind::PatientRepresentative { .. }
-    ));
+    assert_eq!(&CallerKind::RelatedPerson, represented.kind());
     for caller in [own, represented] {
         let attributes = caller.attributes().ok_or("the purposes are read")?;
         assert_eq!(
@@ -526,35 +463,15 @@ async fn a_patient_and_their_representative_carry_their_purposes_and_no_professi
 }
 
 #[test]
-fn act_represents_patient_outside_a_patients_issuer_is_refused() {
-    let mut settings = Settings::new(ISSUER, AUDIENCE, IssuerKind::Persons);
-    settings.profile.act_represents_patient = true;
-    assert!(matches!(
-        settings.validate(),
-        Err(ResourceError::Profile(ProfileError::Kind {
-            key: "act_represents_patient",
-            ..
-        }))
-    ));
-}
-
-#[test]
 fn the_attributes_tables_load_from_toml_and_name_their_issuers() -> Outcome {
     let text = format!(
         r#"[issuer.i1]
 issuer = "{ISSUER}"
-kind = "persons"
 audience = ["{AUDIENCE}"]
-
-[issuer.i1.profile]
 
 [issuer.i2]
 issuer = "https://patients.example.org"
-kind = "patients"
 audience = ["{AUDIENCE}"]
-
-[issuer.i2.profile]
-act_represents_patient = true
 
 [issuer.i1.attributes]
 mapping = "iua"
@@ -580,25 +497,11 @@ mapping = "iua"
     let patients = resolved
         .issuers
         .iter()
-        .find(|settings| settings.kind == IssuerKind::Patients)
+        .find(|settings| settings.issuer == "https://patients.example.org")
         .ok_or("the patients issuer")?;
-    assert!(patients.profile.act_represents_patient);
     assert_eq!(
         Some(Mapping::Iua),
         patients.attributes.as_ref().ok_or("its table")?.mapping
-    );
-    let professional = text.replace(
-        "[issuer.i2.attributes]\nmapping = \"iua\"",
-        "[issuer.i2.attributes]\nmapping = \"iua\"\n\n\
-         [issuer.i2.attributes.fields]\n\"professional.name\" = [{ constant = \"x\" }]",
-    );
-    let refused: ferrohealth_smart::config::AuthSection = toml::from_str(&professional)?;
-    assert!(
-        matches!(
-            refused.resolve(&[]),
-            Err(ferrohealth_smart::config::ConfigError::Attributes { .. })
-        ),
-        "a patients issuer states only the purpose of use"
     );
     let twice = text.replace(
         "[issuer.i2.attributes]",

@@ -191,11 +191,11 @@ async fn a_patient_s_own_token_is_exchanged_for_their_ehr_at_the_paired_base() {
     // NOTE: docs/architecture.md §3.13, the openEHR server reads the issued token as
     // the person under the `ferrosmart` preset, with the exchanging client admitted.
     let (_, _, jwks) = smart.get("/jwks", None).await;
-    let caller = crate::support::read_under_preset(
+    let caller = crate::support::read_at_resource_server(
         &serde_json::from_str(&jwks).expect("a JWK Set"),
         ISSUER,
         &platform.openehr_base,
-        ferrohealth_smart::kind::IssuerKind::Persons,
+        ferrohealth_smart::kind::IssuerKind::Smart,
         &ferrohealth_smart::profile::ProfileKeys::default(),
         body["access_token"].as_str().expect("a token"),
     )

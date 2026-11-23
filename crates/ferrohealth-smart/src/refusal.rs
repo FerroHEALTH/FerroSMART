@@ -686,35 +686,10 @@ mod tests {
     fn unclassified_codes() -> Vec<(String, &'static str)> {
         let mut codes = Vec::new();
         let unclassified = [
-            (
-                Unclassified::Expected {
-                    claim: String::from("c"),
-                },
-                "claim-unexpected",
-            ),
-            (
-                Unclassified::UserClaim {
-                    claim: String::from("c"),
-                },
-                "user-claim-missing",
-            ),
-            (Unclassified::Impersonation, "impersonation"),
-            (Unclassified::MarkersDisagree, "app-only-markers-disagree"),
-            (
-                Unclassified::ScopeForm {
-                    claim: String::from("c"),
-                },
-                "scope-form",
-            ),
-            (Unclassified::NotPatientContext, "not-patient-context"),
-            (Unclassified::PatientActor, "patient-actor-refused"),
-            (Unclassified::NotAppOnly, "not-app-only"),
+            (Unclassified::ScopeForm, "scope-form"),
             (Unclassified::NoClient, "client-missing"),
+            (Unclassified::FhirUser, "fhir-user-refused"),
             (Unclassified::ActorChain, "actor-chain-refused"),
-            (
-                Unclassified::RepresentationWithAct,
-                "representation-with-act",
-            ),
             (
                 Unclassified::ExternalIncomplete { missing: vec![] },
                 "professional-incomplete",
@@ -751,7 +726,7 @@ mod tests {
             ),
             (
                 Unclassified::NoStep {
-                    kind: crate::kind::IssuerKind::Machines,
+                    kind: crate::kind::IssuerKind::Federation,
                 },
                 "kind-unclassified",
             ),

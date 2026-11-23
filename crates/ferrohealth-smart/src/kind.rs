@@ -1,17 +1,18 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! Who stands behind a credential: the kind of issuer a token comes from and
-//! the [`CallerKind`] the token's claims make its caller.
+//! Who stands behind a credential, read from the token's standard claims
+//! the same way for every issuer.
 //!
-//! RFC 9068 §2.2 has `sub` name the resource owner when one is involved and
-//! "an identifier the authorization server uses to indicate the client
-//! application" when none is, and that is a SHOULD, so whether a token names
-//! a person is read from the issuer's profile ([`crate::profile`]), never
-//! from `sub` alone. RFC 8693 §4.1 names an actor in `act`. A Basic
-//! credential is a person's, never a system's: a machine authenticates with
-//! the client credentials grant (RFC 6749 §4.4) and is classified from its
-//! token. How callers are classified is our own design over those sources.
+//! A token with no user is a client credentials token, whose `sub` names
+//! its client (RFC 9068 §2.2; SMART App Launch 2.2.0, Backend Services).
+//! A user is named by their `fhirUser` and its resource type, with
+//! `patient` the launch context (SMART App Launch 2.2.0, Scopes and Launch
+//! Context), and an RFC 8693 §4.1 `act` names the actor beside them. A
+//! `federation` issuer's tokens are read under its own table
+//! ([`crate::federation`]). A Basic credential is a user's, never a
+//! system's: a machine authenticates with the client credentials grant
+//! (RFC 6749 §4.4).
 
 use std::fmt;
 
@@ -25,33 +26,30 @@ use crate::federation::External;
 use crate::federation::Outcome;
 use crate::profile::Profile;
 
-/// Whose tokens an issuer signs, declared on every `[auth.issuer.<name>]`.
+/// Whose tokens an issuer signs.
+///
+/// Every issuer is a SMART authorization server unless its table declares
+/// `kind = "federation"`.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IssuerKind {
-    /// Professionals and other people of the deployment, signing in through
-    /// the deployment's own clients; also the app-only tokens of its
-    /// machines.
-    Persons,
-    /// Patients, each token naming only the record subject (the `patient`
-    /// context of SMART on openEHR `master08-scopes`).
-    Patients,
-    /// Machines, through the client credentials grant only.
-    Machines,
+    /// A SMART App Launch 2.2 authorization server, FerroSMART among them,
+    /// whose tokens are read from their standard claims.
+    #[default]
+    #[serde(skip_deserializing)]
+    Smart,
     /// Another party's issuer, whose tokens name its professionals or its
-    /// organisation.
+    /// organisation (Regulation (EU) 2025/327 Art 23).
     Federation,
 }
 
 impl IssuerKind {
-    /// Returns the configuration spelling.
+    /// Returns the name the configuration and the refusals use.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Persons => "persons",
-            Self::Patients => "patients",
-            Self::Machines => "machines",
+            Self::Smart => "smart",
             Self::Federation => "federation",
         }
     }
@@ -75,45 +73,29 @@ pub struct Actor {
 
 /// Who stands behind a caller's credential.
 ///
-/// The `Debug` rendering names the kind and never a represented subject or
-/// a ground.
+/// A user is named by the resource type of their `fhirUser` (SMART App
+/// Launch 2.2.0, Scopes and Launch Context). The `Debug` rendering names the
+/// kind alone.
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CallerKind {
-    /// The patient: on a `patients` issuer, the token naming only the
-    /// record subject; on a `persons` issuer whose profile sets
-    /// `fhir_user_patient`, a token whose `fhirUser` is the `Patient` its
-    /// `patient` claim names, with only `patient/` scopes.
-    Patient,
-    /// A machine: an app-only token by the issuer's profile.
+    /// No user: a client credentials token, whose `sub` is its `client_id`.
     System,
-    /// A person through an RFC 8693 §4.1 actor, read as the issuer
-    /// asserts it.
-    Delegated {
-        /// The current actor.
-        actor: Actor,
-    },
-    /// A person acting for another subject, on a `persons` issuer that
-    /// declares `representation`.
-    Representative {
-        /// The represented subject's identifier, as asserted.
-        represented: String,
-        /// The ground of the representation, as asserted.
-        ground: Option<String>,
-    },
-    /// A person under their own account, through any client the token was
-    /// issued to, or through HTTP Basic.
+    /// A user whose `fhirUser` is a `Patient`.
+    Patient,
+    /// A user whose `fhirUser` is a `Practitioner`.
+    Practitioner,
+    /// A user whose `fhirUser` is a `PractitionerRole`.
+    PractitionerRole,
+    /// A user whose `fhirUser` is a `RelatedPerson`: with a patient in
+    /// context, that patient's representative (Regulation (EU) 2025/327
+    /// Art 4(2)).
+    RelatedPerson,
+    /// A user whose `fhirUser` is a `Person`.
     Person,
-    /// Someone acting for the patient, on a `patients` issuer that declares
-    /// `act_represents_patient`: the token's top-level `act` names them
-    /// (RFC 8693 §4.1) and its `sub` the patient.
-    PatientRepresentative {
-        /// The current actor, the representative.
-        actor: Actor,
-    },
-    /// A guest by the issuer's profile, with the kind it would otherwise
-    /// have; a product admits one only by a setting of its own.
-    Guest(Box<CallerKind>),
+    /// A user of no stated type: a token without `fhirUser`, or a Basic
+    /// credential.
+    User,
     /// A professional of another party, on a `federation` issuer, with what
     /// the token asserts about them.
     ExternalPerson(Box<External>),
@@ -124,13 +106,6 @@ pub enum CallerKind {
 impl fmt::Debug for CallerKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Delegated { actor } => f.debug_struct("Delegated").field("actor", actor).finish(),
-            Self::PatientRepresentative { actor } => f
-                .debug_struct("PatientRepresentative")
-                .field("actor", actor)
-                .finish(),
-            Self::Representative { .. } => f.debug_struct("Representative").finish_non_exhaustive(),
-            Self::Guest(kind) => f.debug_tuple("Guest").field(kind).finish(),
             Self::ExternalPerson(external) => {
                 f.debug_tuple("ExternalPerson").field(external).finish()
             }
@@ -138,9 +113,7 @@ impl fmt::Debug for CallerKind {
                 .debug_tuple("ExternalOrganisation")
                 .field(external)
                 .finish(),
-            Self::Patient => f.write_str("Patient"),
-            Self::System => f.write_str("System"),
-            Self::Person => f.write_str("Person"),
+            other => f.write_str(other.variant()),
         }
     }
 }
@@ -150,16 +123,61 @@ impl CallerKind {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::Patient => "patient",
             Self::System => "system",
-            Self::Delegated { .. } => "delegated",
-            Self::Representative { .. } => "representative",
+            Self::Patient => "patient",
+            Self::Practitioner => "practitioner",
+            Self::PractitionerRole => "practitioner_role",
+            Self::RelatedPerson => "related_person",
             Self::Person => "person",
-            Self::PatientRepresentative { .. } => "patient_representative",
-            Self::Guest(_) => "guest",
+            Self::User => "user",
             Self::ExternalPerson(_) => "external_person",
             Self::ExternalOrganisation(_) => "external_organisation",
         }
+    }
+
+    /// Returns the variant's name, for the `Debug` rendering.
+    const fn variant(&self) -> &'static str {
+        match self {
+            Self::System => "System",
+            Self::Patient => "Patient",
+            Self::Practitioner => "Practitioner",
+            Self::PractitionerRole => "PractitionerRole",
+            Self::RelatedPerson => "RelatedPerson",
+            Self::Person => "Person",
+            Self::User => "User",
+            Self::ExternalPerson(_) => "ExternalPerson",
+            Self::ExternalOrganisation(_) => "ExternalOrganisation",
+        }
+    }
+
+    /// Returns the kind of the user whose `fhirUser` names a resource of
+    /// `resource_type`, or `None` for a type SMART App Launch 2.2.0 does
+    /// not name for `fhirUser`.
+    #[must_use]
+    pub fn of_fhir_user(resource_type: &str) -> Option<Self> {
+        Some(match resource_type {
+            "Patient" => Self::Patient,
+            "Practitioner" => Self::Practitioner,
+            "PractitionerRole" => Self::PractitionerRole,
+            "RelatedPerson" => Self::RelatedPerson,
+            "Person" => Self::Person,
+            _ => return None,
+        })
+    }
+
+    /// Returns whether the caller is a user, a person named by a token or a
+    /// Basic credential, and not a system or another party.
+    #[must_use]
+    pub const fn is_user(&self) -> bool {
+        matches!(
+            self,
+            Self::Patient
+                | Self::Practitioner
+                | Self::PractitionerRole
+                | Self::RelatedPerson
+                | Self::Person
+                | Self::User
+        )
     }
 
     /// Returns what a `federation` token asserts about the other party,
@@ -179,53 +197,21 @@ impl CallerKind {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Unclassified {
-    /// A claim the profile's `expect` names is absent or holds another
-    /// value.
-    #[error("the claim {claim} does not hold the value the profile expects")]
-    Expected {
-        /// The claim.
-        claim: String,
-    },
-    /// A token that is not app-only lacks a claim the profile's
-    /// `user_claims` names.
-    #[error("a user token lacks the claim {claim}")]
-    UserClaim {
-        /// The claim.
-        claim: String,
-    },
-    /// The token carries the profile's impersonation marker.
-    #[error("the token carries the impersonation marker")]
-    Impersonation,
-    /// The profile's app-only markers disagree about the token.
-    #[error("the app-only markers disagree")]
-    MarkersDisagree,
-    /// A scope claim is present in another JSON form than the profile's.
-    #[error("the scope claim {claim} is not in the profile's form")]
-    ScopeForm {
-        /// The claim.
-        claim: String,
-    },
-    /// A `patients` token does not name only the record subject: it lacks a
-    /// `patient/` scope or carries a `user/` or `system/` one.
-    #[error("a patients token does not name only the record subject")]
-    NotPatientContext,
-    /// A `patients` token names an actor in `act`, and its issuer does not
-    /// declare `act_represents_patient`.
-    #[error("a patients token names an actor its issuer does not read as a representative")]
-    PatientActor,
-    /// A `machines` token is not app-only.
-    #[error("a machines token is not app-only")]
-    NotAppOnly,
-    /// A `persons` token names no client.
-    #[error("a persons token names no client")]
+    /// The `scope` claim is not one string (RFC 9068 §2.2.3).
+    #[error("the scope claim is not one string")]
+    ScopeForm,
+    /// A user's token names no client.
+    #[error("a user's token names no client")]
     NoClient,
+    /// The `fhirUser` claim is no reference to a `Patient`, a
+    /// `Practitioner`, a `PractitionerRole`, a `RelatedPerson` or a
+    /// `Person`.
+    #[error("the fhirUser claim names no user resource")]
+    FhirUser,
     /// The `act` chain is deeper than the profile admits, or `act` is not
     /// an object with a string `sub`.
     #[error("the act chain is deeper than admitted or malformed")]
     ActorChain,
-    /// A representation claim arrives together with an `act`.
-    #[error("a representation claim arrives together with an act")]
-    RepresentationWithAct,
     /// A token that names a professional misses required fields, each named.
     #[error("a federation token names a professional and misses {missing:?}")]
     ExternalIncomplete {
@@ -294,17 +280,10 @@ impl Unclassified {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
-            Self::Expected { .. } => "claim-unexpected",
-            Self::UserClaim { .. } => "user-claim-missing",
-            Self::Impersonation => "impersonation",
-            Self::MarkersDisagree => "app-only-markers-disagree",
-            Self::ScopeForm { .. } => "scope-form",
-            Self::NotPatientContext => "not-patient-context",
-            Self::PatientActor => "patient-actor-refused",
-            Self::NotAppOnly => "not-app-only",
+            Self::ScopeForm => "scope-form",
             Self::NoClient => "client-missing",
+            Self::FhirUser => "fhir-user-refused",
             Self::ActorChain => "actor-chain-refused",
-            Self::RepresentationWithAct => "representation-with-act",
             Self::ExternalIncomplete { .. } => "professional-incomplete",
             Self::RequiredFields { .. } => "required-fields-missing",
             Self::OutOfBounds { .. } => "attribute-out-of-bounds",
@@ -325,15 +304,14 @@ impl Unclassified {
 pub(crate) struct Classified {
     /// The kind.
     pub(crate) kind: CallerKind,
-    /// The client the profile's client claims name.
+    /// The client the token names.
     pub(crate) client: Option<String>,
-    /// Whether the profile's markers call the token app-only.
-    pub(crate) app_only: bool,
+    /// The current RFC 8693 §4.1 actor, when the token names one.
+    pub(crate) actor: Option<Actor>,
 }
 
 /// Returns the kind of the caller whose verified `claims` an issuer of
-/// `kind` signed under `profile`, attributed to `issuer`, after every check
-/// of the profile.
+/// `kind` signed under `profile`, attributed to `issuer`.
 pub(crate) fn classify(
     kind: IssuerKind,
     profile: &Profile,
@@ -341,62 +319,14 @@ pub(crate) fn classify(
     claims: &Map<String, Value>,
     issuer: &str,
 ) -> Result<Classified, Unclassified> {
-    for (claim, value) in &profile.expect {
-        let holds = match claims.get(claim) {
-            Some(Value::String(text)) => text == value,
-            Some(Value::Number(number)) => number.to_string() == *value,
-            Some(Value::Bool(flag)) => flag.to_string() == *value,
-            _ => false,
-        };
-        if !holds {
-            return Err(Unclassified::Expected {
-                claim: claim.clone(),
-            });
-        }
-    }
-    if profile
-        .impersonation_marker
-        .as_ref()
-        .is_some_and(|marker| claims.contains_key(marker))
-    {
-        return Err(Unclassified::Impersonation);
-    }
-    let client = profile.client(claims).map(str::to_owned);
-    let app_only = app_only(profile, claims, client.as_deref())?;
-    if !app_only
-        && let Some(claim) = profile
-            .user_claims
-            .iter()
-            .find(|claim| !claims.contains_key(*claim))
-    {
-        return Err(Unclassified::UserClaim {
-            claim: claim.clone(),
-        });
-    }
-    let kind = match kind {
-        IssuerKind::Patients => {
-            let context = patient_context(profile, claims)?;
-            // NOTE: SMART on openEHR `master08-scopes`: the `patient` context alone,
-            // with no `user/` or `system/` grant, names only the record subject.
-            if !app_only && context {
-                patient(profile, claims, issuer)?
-            } else {
-                return Err(Unclassified::NotPatientContext);
+    let client = Profile::client(claims).map(str::to_owned);
+    let caller = match kind {
+        IssuerKind::Smart if Profile::app_only(claims) => CallerKind::System,
+        IssuerKind::Smart => {
+            if client.is_none() {
+                return Err(Unclassified::NoClient);
             }
-        }
-        IssuerKind::Machines | IssuerKind::Persons if app_only => CallerKind::System,
-        IssuerKind::Machines => return Err(Unclassified::NotAppOnly),
-        IssuerKind::Persons => {
-            let person = person(profile, claims, client.as_deref(), issuer)?;
-            if profile
-                .guest
-                .iter()
-                .any(|marker| marker.matches(claims, client.as_deref()))
-            {
-                CallerKind::Guest(Box::new(person))
-            } else {
-                person
-            }
+            user(claims)?
         }
         IssuerKind::Federation => {
             let context = federation.ok_or(Unclassified::NoStep { kind })?;
@@ -408,127 +338,59 @@ pub(crate) fn classify(
             }
         }
     };
+    let actor = match claims.get("act") {
+        Some(act) => Some(actor(
+            act,
+            &token_issuer(claims, issuer),
+            profile.max_actor_chain,
+        )?),
+        None => None,
+    };
     Ok(Classified {
-        kind,
+        kind: caller,
         client,
-        app_only,
+        actor,
     })
 }
 
-/// Returns whether the profile's app-only markers call the token app-only,
-/// refusing a token they disagree about.
-fn app_only(
-    profile: &Profile,
-    claims: &Map<String, Value>,
-    client: Option<&str>,
-) -> Result<bool, Unclassified> {
-    let mut verdicts = profile
-        .app_only
-        .iter()
-        .map(|marker| marker.matches(claims, client));
-    let first = verdicts.next().unwrap_or(false);
-    if verdicts.any(|verdict| verdict != first) {
-        return Err(Unclassified::MarkersDisagree);
+/// Returns the kind of the user `claims` name by their `fhirUser`, a user
+/// of no stated type when the token carries none.
+fn user(claims: &Map<String, Value>) -> Result<CallerKind, Unclassified> {
+    match claims.get("fhirUser") {
+        None => Ok(CallerKind::User),
+        Some(Value::String(fhir_user)) => fhir_user_type(fhir_user)
+            .and_then(CallerKind::of_fhir_user)
+            .ok_or(Unclassified::FhirUser),
+        Some(_) => Err(Unclassified::FhirUser),
     }
-    Ok(first)
 }
 
-/// Returns the kind of the person a `persons` token that is not app-only
-/// names: acting through its current actor, for the subject it represents,
-/// as the patient when it is the patient's own, or under their own account.
-fn person(
-    profile: &Profile,
-    claims: &Map<String, Value>,
-    client: Option<&str>,
-    issuer: &str,
-) -> Result<CallerKind, Unclassified> {
-    if client.is_none() {
-        return Err(Unclassified::NoClient);
-    }
-    // NOTE: no specification governs who asks under a `patient/` scope (SMART App
-    // Launch 2.2.0, Patient-specific scopes): our own design (#681).
-    let own =
-        profile.fhir_user_patient && fhir_user_patient(claims) && patient_context(profile, claims)?;
-    let represented = profile.representation.as_ref().and_then(|representation| {
-        text(claims, &representation.claim).map(|represented| {
-            let ground = representation
-                .ground_claim
-                .as_deref()
-                .and_then(|claim| text(claims, claim));
-            (represented, ground)
-        })
-    });
-    if let Some(act) = claims.get("act") {
-        if represented.is_some() {
-            return Err(Unclassified::RepresentationWithAct);
-        }
-        let actor = actor(act, &token_issuer(claims, issuer), profile.max_actor_chain)?;
-        return Ok(CallerKind::Delegated { actor });
-    }
-    Ok(match represented {
-        Some((represented, ground)) => CallerKind::Representative {
-            represented,
-            ground,
-        },
-        None if own => CallerKind::Patient,
-        None => CallerKind::Person,
-    })
+/// Returns the resource type of the `fhirUser` reference `fhir_user`,
+/// relative (`Practitioner/<id>`) or absolute.
+pub(crate) fn fhir_user_type(fhir_user: &str) -> Option<&str> {
+    fhir_user_parts(fhir_user).map(|(resource_type, _)| resource_type)
 }
 
-/// Returns whether the scopes of `claims` name the `patient` context alone:
-/// a `patient/` grant, and no `user/` or `system/` one.
-fn patient_context(profile: &Profile, claims: &Map<String, Value>) -> Result<bool, Unclassified> {
-    let scope = profile
-        .scope_claim
-        .read(claims)
-        .map_err(|_form| Unclassified::ScopeForm {
-            claim: profile.scope_claim.claim.clone(),
-        })?;
-    Ok(grants_in(&scope, "patient") && !grants_in(&scope, "user") && !grants_in(&scope, "system"))
-}
-
-/// Returns whether the `fhirUser` of `claims` is the `Patient` its `patient`
-/// claim names, by a relative (`Patient/<x>`) or an absolute URL.
-fn fhir_user_patient(claims: &Map<String, Value>) -> bool {
+/// Returns the resource type and the id of the `fhirUser` reference
+/// `fhir_user`: a relative `<type>/<id>`, or the last two path segments of
+/// an absolute URL.
+pub(crate) fn fhir_user_parts(fhir_user: &str) -> Option<(&str, &str)> {
     // NOTE: SMART App Launch 2.2.0, Scopes for requesting identity data: the
     // `fhirUser` URL MAY be absolute or relative to the FHIR base.
-    let (Some(fhir_user), Some(patient)) = (text(claims, "fhirUser"), text(claims, "patient"))
-    else {
-        return false;
-    };
-    if patient.contains('/') {
-        return false;
+    let mut segments = fhir_user.rsplit('/');
+    let id = segments.next().filter(|id| !id.is_empty())?;
+    let resource_type = segments.next().filter(|kind| !kind.is_empty())?;
+    match segments.next() {
+        None => Some((resource_type, id)),
+        Some(_) if fhir_user.contains("://") => Some((resource_type, id)),
+        Some(_) => None,
     }
-    fhir_user
-        .strip_suffix(patient.as_str())
-        .and_then(|rest| rest.strip_suffix("Patient/"))
-        .is_some_and(|base| base.is_empty() || (base.ends_with('/') && base.contains("://")))
 }
 
 /// Returns the issuer of `claims`: its `iss`, or `issuer`, the one it is
 /// attributed to, when it names none (an RFC 7662 §2.2 response).
 fn token_issuer(claims: &Map<String, Value>, issuer: &str) -> String {
     text(claims, "iss").unwrap_or_else(|| issuer.to_owned())
-}
-
-/// Returns the kind of a `patients` token that names only the record
-/// subject: the patient, or, when it names an actor in `act`, the patient's
-/// representative under a profile that declares `act_represents_patient`.
-fn patient(
-    profile: &Profile,
-    claims: &Map<String, Value>,
-    issuer: &str,
-) -> Result<CallerKind, Unclassified> {
-    let Some(act) = claims.get("act") else {
-        return Ok(CallerKind::Patient);
-    };
-    if !profile.act_represents_patient {
-        return Err(Unclassified::PatientActor);
-    }
-    // NOTE: RFC 8693 §4.1, only the top-level `act` is the current actor, and a
-    // nested one is "informational only", so no depth is held against it.
-    let (actor, _) = current_actor(act, &token_issuer(claims, issuer))?;
-    Ok(CallerKind::PatientRepresentative { actor })
 }
 
 /// Returns the current actor `act` names, with its object, refusing an
@@ -576,12 +438,20 @@ fn text(claims: &Map<String, Value>, name: &str) -> Option<String> {
     crate::roles::claim_text(claims, name).map(str::to_owned)
 }
 
-/// Returns whether a token of the space-delimited `scope` names `context`,
-/// the `<context>/` prefix both SMART grammars share.
-pub(crate) fn grants_in(scope: &str, context: &str) -> bool {
-    scope.split(' ').any(|token| {
-        token
-            .strip_prefix(context)
-            .is_some_and(|rest| rest.starts_with('/'))
-    })
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fhir_user_reference_is_relative_or_absolute() {
+        assert_eq!(Some("Practitioner"), fhir_user_type("Practitioner/p-1"));
+        assert_eq!(
+            Some(("Patient", "p-1")),
+            fhir_user_parts("https://fhir.example.org/r4/Patient/p-1")
+        );
+        assert_eq!(None, fhir_user_type("Patient"));
+        assert_eq!(None, fhir_user_type("Patient/"));
+        assert_eq!(None, fhir_user_type("Group/Patient/p-1"));
+        assert_eq!(Some("RelatedPerson"), fhir_user_type("RelatedPerson/r-1"));
+    }
 }

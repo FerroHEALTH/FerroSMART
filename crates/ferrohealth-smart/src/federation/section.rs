@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! The rules of one `[auth.issuer.<name>.federation]` table: how it is set over a
-//! preset's defaults, the sources of its fields, and the checks it passes
-//! before the issuer loads.
+//! The rules of one `[auth.issuer.<name>.federation]` table: the sources of
+//! its fields, and the checks it passes before the issuer loads.
 
 use std::collections::BTreeMap;
 
@@ -13,54 +12,7 @@ use crate::federation::Field;
 use crate::federation::Mapping;
 use crate::federation::Source;
 
-/// Returns `value` when it is not empty, else `default`.
-fn or_default<T>(value: Vec<T>, default: Vec<T>) -> Vec<T> {
-    if value.is_empty() { default } else { value }
-}
-
 impl FederationSection {
-    /// Returns this table set over `defaults`, a preset's
-    /// ([`crate::profile::Preset::federation`]): each key this table sets
-    /// wins, each field's sources included, and a key it leaves unset or
-    /// empty keeps the default. A `true` of either side holds.
-    #[must_use]
-    pub fn over(self, defaults: Self) -> Self {
-        let mut fields = defaults.fields;
-        fields.extend(self.fields);
-        Self {
-            issuer: if self.issuer.is_empty() {
-                defaults.issuer
-            } else {
-                self.issuer
-            },
-            contact_point: self.contact_point.or(defaults.contact_point),
-            mapping: self.mapping.or(defaults.mapping),
-            fields,
-            countries: or_default(self.countries, defaults.countries),
-            issuing_authorities: or_default(self.issuing_authorities, defaults.issuing_authorities),
-            provider_identifier_prefixes: or_default(
-                self.provider_identifier_prefixes,
-                defaults.provider_identifier_prefixes,
-            ),
-            attests_authorization_details: self.attests_authorization_details
-                || defaults.attests_authorization_details,
-            authorization_details_type: self
-                .authorization_details_type
-                .or(defaults.authorization_details_type),
-            organisation_types: or_default(self.organisation_types, defaults.organisation_types),
-            presentations_claim: self.presentations_claim.or(defaults.presentations_claim),
-            user_credential_types: or_default(
-                self.user_credential_types,
-                defaults.user_credential_types,
-            ),
-            required_fields: or_default(self.required_fields, defaults.required_fields),
-            requires_sender_constraint: self.requires_sender_constraint
-                || defaults.requires_sender_constraint,
-            exchanges_from: or_default(self.exchanges_from, defaults.exchanges_from),
-            person_mapping: self.person_mapping.or(defaults.person_mapping),
-        }
-    }
-
     /// Returns the sources of every field: the mapping's, with the table's
     /// own over them.
     #[must_use]

@@ -22,7 +22,7 @@ use ferrohealth_smart::resource::Settings;
 /// Returns a section of `top` keys and one `persons` issuer table.
 fn one_issuer(top: &str) -> AuthSection {
     toml::from_str(&format!(
-        "{top}\n[issuer.i1]\nissuer = \"https://as.example.org\"\nkind = \"persons\"\naudience = [\"a\"]\n"
+        "{top}\n[issuer.i1]\nissuer = \"https://as.example.org\"\naudience = [\"a\"]\n"
     ))
     .expect("the section parses")
 }
@@ -35,12 +35,10 @@ fn each_issuer_table_carries_its_own_settings() {
 
         [issuer.i2]
         issuer = "https://one.example.org"
-        kind = "persons"
         audience = ["https://bridge.example.org/fhir"]
 
         [issuer.i3]
         issuer = "https://two.example.org"
-        kind = "machines"
         audience = ["https://other.example.org"]
         clock_skew = "10s"
         jwks_file = "/etc/ferro/two.jwks"
@@ -52,7 +50,7 @@ fn each_issuer_table_carries_its_own_settings() {
     let resolved = section.resolve(&[]).expect("the section resolves");
     assert_eq!(2, resolved.issuers.len());
     let one = &resolved.issuers[0];
-    assert_eq!(IssuerKind::Persons, one.kind);
+    assert_eq!(IssuerKind::Smart, one.kind);
     assert_eq!(
         vec![String::from("https://bridge.example.org/fhir")],
         one.audience
@@ -65,7 +63,7 @@ fn each_issuer_table_carries_its_own_settings() {
     assert_eq!(Duration::from_secs(600), one.jwks_max_age);
     assert_eq!(3, one.role_claims.len(), "RFC 9068 §2.2.3.1 defaults");
     let two = &resolved.issuers[1];
-    assert_eq!(IssuerKind::Machines, two.kind);
+    assert_eq!(IssuerKind::Smart, two.kind);
     assert_eq!(Duration::from_secs(10), two.clock_skew);
     assert_eq!(
         Some(std::path::PathBuf::from("/etc/ferro/two.jwks")),
@@ -74,7 +72,7 @@ fn each_issuer_table_carries_its_own_settings() {
     assert_eq!(Vec::<String>::new(), two.role_claims);
     assert_eq!(Some(String::from("ferrobridge")), resolved.realm);
     assert_eq!(
-        Some(&IssuerKind::Machines),
+        Some(&IssuerKind::Smart),
         resolved.kinds.get("https://two.example.org")
     );
     assert!(resolved.basic.is_none());
@@ -91,7 +89,7 @@ fn a_section_that_breaks_a_rule_refuses_the_start() {
     ));
     let table = |extra: &str| -> AuthSection {
         toml::from_str(&format!(
-            "[issuer.i4]\nissuer = \"https://as.example.org\"\nkind = \"persons\"\naudience = [\"a\"]\n{extra}"
+            "[issuer.i4]\nissuer = \"https://as.example.org\"\naudience = [\"a\"]\n{extra}"
         ))
         .expect("parses")
     };
@@ -112,7 +110,6 @@ fn a_section_that_breaks_a_rule_refuses_the_start() {
         r#"
         [issuer.i5]
         issuer = "https://as.example.org"
-        kind = "persons"
         audience = ["a"]
         [[basic.users]]
         user = "etl"
@@ -329,7 +326,6 @@ fn a_rendered_section_carries_every_key_and_no_secret() {
         r#"
         [issuer.i6]
         issuer = "https://as.example.org"
-        kind = "persons"
         audience = ["https://fhir.example.org"]
         role_claims = ["roles"]
         [[basic.users]]
@@ -446,7 +442,6 @@ fn every_endpoint_url_masks_its_userinfo_in_every_rendering() {
         r#"
 [issuer.i7]
 issuer = "https://idp.example"
-kind = "persons"
 audience = ["a"]
 [issuer.i7.introspection]
 endpoint = "https://u:INTROSPECT_PW@idp.example/introspect"
@@ -511,7 +506,6 @@ fn every_issuer_identifier_masks_its_userinfo_in_every_rendering() {
         r#"
 [issuer.i8]
 issuer = "https://u:AUTH_ISSUER_PW@idp.example/realms/r"
-kind = "persons"
 audience = ["a"]
 "#,
     )
@@ -573,7 +567,6 @@ fn every_table_of_an_issuer_masks_its_userinfo() {
         r#"
 [issuer.i10]
 issuer = "https://u:TABLE_ISSUER_PW@idp.example/realms/r"
-kind = "persons"
 audience = ["a"]
 
 [issuer.i10.attributes]
@@ -695,7 +688,6 @@ fn a_misspelt_key_in_an_issuer_entry_is_refused_by_its_name() {
         r#"
         [issuer.i11]
         issuer = "https://one.example.org"
-        kind = "persons"
         jwks_fiel = "/etc/ferro/one.jwks"
         "#,
     )
@@ -834,7 +826,7 @@ fn issuer_at(issuer: &str, jwks_file: Option<&std::path::Path>) -> AuthSection {
         format!("jwks_file = {:?}\n", path.display().to_string())
     });
     toml::from_str(&format!(
-        "enabled = true\n[issuer.i12]\nissuer = \"{issuer}\"\nkind = \"persons\"\naudience = [\"a\"]\n{file}"
+        "enabled = true\n[issuer.i12]\nissuer = \"{issuer}\"\naudience = [\"a\"]\n{file}"
     ))
     .expect("the section parses")
 }
@@ -928,9 +920,9 @@ fn a_basic_hash_below_the_owasp_floor_is_refused_naming_the_user_and_the_floor()
 #[test]
 fn one_issuer_in_two_tables_is_refused_naming_both() {
     let section: AuthSection = toml::from_str(
-        "[issuer.i13]\nissuer = \"https://user:secret@as.example.org\"\nkind = \"persons\"\naudience = [\"a\"]\n\
-         [issuer.i14]\nissuer = \"https://as.example.org\"\nkind = \"machines\"\naudience = [\"a\"]\n\
-         [issuer.i15]\nissuer = \"https://user:secret@as.example.org\"\nkind = \"machines\"\naudience = [\"a\"]\n",
+        "[issuer.i13]\nissuer = \"https://user:secret@as.example.org\"\naudience = [\"a\"]\n\
+         [issuer.i14]\nissuer = \"https://as.example.org\"\naudience = [\"a\"]\n\
+         [issuer.i15]\nissuer = \"https://user:secret@as.example.org\"\naudience = [\"a\"]\n",
     )
     .expect("the section parses");
     let refused = section.resolve(&[]);
@@ -960,10 +952,10 @@ fn one_issuer_in_two_tables_is_refused_naming_both() {
     assert!(!shown.contains("secret"), "{shown}");
 }
 
-/// The section of one issuer table under `ferrosmart`, with `extra` keys.
+/// The section of one SMART issuer table, with `extra` keys.
 fn smart_issuer(extra: &str) -> AuthSection {
     toml::from_str(&format!(
-        "[issuer.smart]\nissuer = \"https://smart.example.org\"\npreset = \"ferrosmart\"\n\
+        "[issuer.smart]\nissuer = \"https://smart.example.org\"\n\
          jwks_file = \"/dev/null\"\n{extra}"
     ))
     .expect("the section parses")
@@ -992,37 +984,15 @@ fn the_audience_defaults_to_the_bases_the_product_resolves_for() {
     );
 }
 
-// NOTE: no specification governs the kind: our own design (#730), the preset's kind
-// when the table names none.
+// NOTE: SMART App Launch 2.2.0: every issuer is a SMART authorization server
+// unless its table declares `kind = "federation"`.
 #[test]
-fn the_kind_defaults_to_the_presets() {
+fn an_issuer_table_names_only_its_issuer() {
     let base = ["https://ehr.example.org"];
     let resolved = smart_issuer("").resolve(&base).expect("resolves");
     assert_eq!(
-        Some(&IssuerKind::Persons),
-        resolved.kinds.get("https://smart.example.org"),
-        "ferrosmart signs persons tokens"
-    );
-    let resolved = smart_issuer("kind = \"machines\"\n")
-        .resolve(&base)
-        .expect("resolves");
-    assert_eq!(
-        Some(&IssuerKind::Machines),
-        resolved.kinds.get("https://smart.example.org"),
-        "an explicit kind wins"
-    );
-    let generic: AuthSection = toml::from_str(
-        "[issuer.sso]\nissuer = \"https://as.example.org\"\naudience = [\"a\"]\njwks_file = \"/dev/null\"\n",
-    )
-    .expect("the section parses");
-    assert!(
-        matches!(
-            generic.resolve(&base),
-            Err(ConfigError::Missing {
-                key: "auth.issuer.kind"
-            })
-        ),
-        "rfc9068 names no kind"
+        Some(&IssuerKind::Smart),
+        resolved.kinds.get("https://smart.example.org")
     );
     assert_eq!(
         Some(String::from("https://smart.example.org")),
@@ -1032,9 +1002,9 @@ fn the_kind_defaults_to_the_presets() {
 }
 
 // NOTE: no specification governs the party binding: our own design (#730), the
-// issuer's identifier and the preset's identifier type when the table names none.
+// issuer's identifier and FerroSMART's pairwise `sub` when the table names none.
 #[test]
-fn the_party_table_defaults_to_the_issuer_and_the_presets_identifier_type() {
+fn the_party_table_defaults_to_the_issuer_and_the_pairwise_identifier_type() {
     let base = ["https://ehr.example.org"];
     let resolved = smart_issuer("[issuer.smart.party]\n")
         .resolve(&base)
@@ -1056,146 +1026,9 @@ fn the_party_table_defaults_to_the_issuer_and_the_presets_identifier_type() {
     assert_eq!("login", table.identifier_type, "explicit wins");
 }
 
-// NOTE: SMART App Launch 2.2.0, Scopes and Launch Context, `launch/patient`; no
-// specification governs which issuer may set it: our own design (#730), per issuer.
 #[test]
-fn patient_context_is_on_under_ferrosmart_and_off_otherwise() {
-    let base = ["https://ehr.example.org"];
-    let resolved = smart_issuer("").resolve(&base).expect("resolves");
-    assert!(
-        resolved
-            .issuers
-            .first()
-            .expect("one")
-            .profile
-            .patient_context
-    );
-    let resolved = smart_issuer("[issuer.smart.profile]\npatient_context = false\n")
-        .resolve(&base)
-        .expect("resolves");
-    assert!(
-        !resolved
-            .issuers
-            .first()
-            .expect("one")
-            .profile
-            .patient_context,
-        "an explicit value wins"
-    );
-    let generic: AuthSection = toml::from_str(
-        "[issuer.sso]\nissuer = \"https://as.example.org\"\nkind = \"persons\"\njwks_file = \"/dev/null\"\n",
-    )
-    .expect("the section parses");
-    let resolved = generic.resolve(&base).expect("resolves");
-    assert!(
-        !resolved
-            .issuers
-            .first()
-            .expect("one")
-            .profile
-            .patient_context
-    );
-}
-
-// NOTE: no specification governs the profile model: our own design (#732), a
-// deployment's file over the preset and the issuer's profile table over both.
-#[test]
-fn a_profile_file_is_set_over_the_preset_and_the_profile_table_over_both() {
-    let file = crate::support::temp_file(
-        "profile-file.toml",
-        b"kind = \"persons\"\nperson_key = \"oid\"\ntenant_claim = \"tid\"\nclient_claims = [\"azp\"]\n",
-    );
-    let section: AuthSection = toml::from_str(&format!(
-        "[issuer.own]\nissuer = \"https://idp.example.org\"\npreset = \"ferrosmart\"\n\
-         profile_file = {:?}\naudience = [\"a\"]\njwks_file = \"/dev/null\"\n\
-         [issuer.own.profile]\nclient_claims = [\"client_id\"]\n",
-        file.display().to_string()
-    ))
-    .expect("the section parses");
-    let resolved = section.resolve(&[]).expect("resolves");
-    let profile = &resolved.issuers.first().expect("one issuer").profile;
-    assert_eq!("oid", profile.person_key, "the file over the preset");
-    assert_eq!(Some(String::from("tid")), profile.tenant_claim);
-    assert_eq!(
-        vec![String::from("client_id")],
-        profile.client_claims,
-        "the profile table over the file"
-    );
-    assert!(
-        profile.patient_context,
-        "the preset's key the file leaves alone"
-    );
-    assert_eq!(
-        Some(&IssuerKind::Persons),
-        resolved.kinds.get("https://idp.example.org"),
-        "the file's kind"
-    );
-}
-
-#[test]
-fn an_unreadable_or_unknown_profile_file_fails_to_load() {
-    let text = |path: &str| {
-        format!(
-            "[issuer.own]\nissuer = \"https://idp.example.org\"\nkind = \"persons\"\n\
-             profile_file = {path:?}\naudience = [\"a\"]\njwks_file = \"/dev/null\"\n"
-        )
-    };
-    let missing: AuthSection =
-        toml::from_str(&text("/nonexistent/ferro-profile.toml")).expect("parses");
-    assert!(matches!(
-        missing.resolve(&[]),
-        Err(ConfigError::Issuer { .. })
-    ));
-    let unknown = crate::support::temp_file("profile-unknown.toml", b"no_such_key = 1\n");
-    let unknown: AuthSection =
-        toml::from_str(&text(&unknown.display().to_string())).expect("parses");
-    let refused = unknown.resolve(&[]).expect_err("an unknown key");
-    let mut chain = vec![refused.to_string()];
-    let mut source = std::error::Error::source(&refused);
-    while let Some(cause) = source {
-        chain.push(cause.to_string());
-        source = cause.source();
-    }
-    assert!(
-        chain.iter().any(|line| line.contains("no_such_key")),
-        "{chain:?}"
-    );
-}
-
-// NOTE: the products ship no country content (owner rule, #732): the compiled
-// presets are the standards-only one and the vendors'.
-#[test]
-fn the_compiled_presets_are_the_standards_and_the_vendors_only() {
-    let mut shipped: Vec<String> =
-        std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles"))
-            .expect("the presets")
-            .map(|entry| {
-                entry
-                    .expect("an entry")
-                    .file_name()
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .collect();
-    shipped.sort();
-    assert_eq!(
-        vec![
-            "entra.toml",
-            "ferrosmart.toml",
-            "keycloak.toml",
-            "okta.toml",
-            "rfc9068.toml"
-        ],
-        shipped
-    );
-    let nl: Result<AuthSection, _> =
-        toml::from_str("[issuer.own]\nissuer = \"https://idp.example.org\"\npreset = \"nl\"\n");
-    assert!(nl.is_err(), "no country preset");
-    let old: Result<AuthSection, _> = toml::from_str(
-        "[issuer.own]\nissuer = \"https://idp.example.org\"\nkind = \"persons\"\nperson_key = \"sub\"\n",
-    );
-    assert!(
-        old.is_err(),
-        "a profile key on the issuer table itself is unknown"
-    );
+fn a_profile_key_on_the_issuer_table_itself_is_unknown() {
+    let old: Result<AuthSection, _> =
+        toml::from_str("[issuer.own]\nissuer = \"https://idp.example.org\"\nmax_actor_chain = 2\n");
+    assert!(old.is_err(), "profile keys sit in the profile table");
 }
