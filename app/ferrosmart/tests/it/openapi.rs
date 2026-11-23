@@ -22,12 +22,17 @@ async fn served(server: &Server) -> Value {
     let (status, headers, body) = server
         .call(Method::GET, "/admin/openapi.json", None, None)
         .await;
-    assert_eq!(StatusCode::OK, status);
+    assert_eq!(
+        StatusCode::OK,
+        status,
+        "the document answers without a token"
+    );
     assert_eq!(
         Some("application/json"),
         headers
             .get(http::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.to_str().ok()),
+        "the document is JSON"
     );
     body
 }
@@ -110,20 +115,29 @@ async fn the_document_names_exactly_the_operations_the_router_serves() {
 /// for its status and `media` type.
 fn holds(document: &Value, method: &str, path: &str, media: &str, answer: &Answer) {
     let status = answer.0.as_str();
-    let operation = &document["paths"][path][method];
-    let mut response = operation["responses"][status].clone();
+    let escaped = path.replace('~', "~0").replace('/', "~1");
+    let mut response = document
+        .pointer(&format!("/paths/{escaped}/{method}/responses/{status}"))
+        .cloned()
+        .unwrap_or_default();
     if let Some(reference) = response.get("$ref").and_then(Value::as_str) {
         let pointer = reference.trim_start_matches('#');
         response = document.pointer(pointer).expect("the response").clone();
     }
-    let schema = response["content"][media]["schema"].clone();
+    let media = media.replace('~', "~0").replace('/', "~1");
+    let schema = response
+        .pointer(&format!("/content/{media}/schema"))
+        .cloned()
+        .unwrap_or_default();
     assert!(
         schema.is_object(),
         "{method} {path} documents a {media} answer for {status}"
     );
     let mut root = document.clone();
-    root["$ref"] = Value::from("#/$defs/answer");
-    root["$defs"] = json!({ "answer": schema });
+    if let Some(members) = root.as_object_mut() {
+        members.insert(String::from("$ref"), Value::from("#/$defs/answer"));
+        members.insert(String::from("$defs"), json!({ "answer": schema }));
+    }
     let validator = jsonschema::draft202012::options()
         .build(&root)
         .expect("the schema compiles");
@@ -138,25 +152,30 @@ fn holds(document: &Value, method: &str, path: &str, media: &str, answer: &Answe
     );
 }
 
-#[tokio::test]
-async fn each_answer_holds_to_its_schema() {
-    let server = Server::start_with(OPEN).await;
-    let document = served(&server).await;
-    let admin = server.token("admin", "system/admin", ISSUER).await;
-    let json = "application/json";
+/// The answers' media type, but the audit records'.
+const JSON: &str = "application/json";
 
-    let app = json!({
+/// Returns an app's own registration request.
+fn own_app() -> Value {
+    json!({
         "client_name": "My health app",
         "token_endpoint_auth_method": "none",
         "redirect_uris": ["https://myhealth.example.org/callback"],
         "grant_types": ["authorization_code"],
         "scope": "openid patient/Observation.rs",
-    });
+    })
+}
+
+#[tokio::test]
+async fn each_registration_answer_holds_to_its_schema() {
+    let server = Server::start_with(OPEN).await;
+    let document = served(&server).await;
+    let admin = server.token("admin", "system/admin", ISSUER).await;
     let created = server
-        .call(Method::POST, "/register", Some(&app), None)
+        .call(Method::POST, "/register", Some(&own_app()), None)
         .await;
     assert_eq!(StatusCode::CREATED, created.0, "{}", created.2);
-    holds(&document, "post", "/register", json, &created);
+    holds(&document, "post", "/register", JSON, &created);
     let client_id = created.2["client_id"].as_str().expect("an id").to_owned();
     let own = created.2["registration_access_token"]
         .as_str()
@@ -166,17 +185,16 @@ async fn each_answer_holds_to_its_schema() {
     let read = server
         .call(Method::GET, &configuration, None, Some(&own))
         .await;
-    assert_eq!(StatusCode::OK, read.0);
-    holds(&document, "get", "/register/{client_id}", json, &read);
-    let mut changed = app.clone();
+    assert_eq!(StatusCode::OK, read.0, "{}", read.2);
+    holds(&document, "get", "/register/{client_id}", JSON, &read);
+    let mut changed = own_app();
     changed["client_id"] = Value::from(client_id.as_str());
     changed["client_name"] = Value::from("My renamed health app");
     let updated = server
         .call(Method::PUT, &configuration, Some(&changed), Some(&own))
         .await;
     assert_eq!(StatusCode::OK, updated.0, "{}", updated.2);
-    holds(&document, "put", "/register/{client_id}", json, &updated);
-
+    holds(&document, "put", "/register/{client_id}", JSON, &updated);
     let symmetric = json!({
         "client_name": "Ward app",
         "token_endpoint_auth_method": "client_secret_basic",
@@ -188,54 +206,66 @@ async fn each_answer_holds_to_its_schema() {
         .call(Method::POST, "/register", Some(&symmetric), Some(&admin))
         .await;
     assert_eq!(StatusCode::CREATED, issued.0, "{}", issued.2);
-    assert!(issued.2["client_secret"].is_string());
-    holds(&document, "post", "/register", json, &issued);
+    assert!(issued.2["client_secret"].is_string(), "the secret, once");
+    holds(&document, "post", "/register", JSON, &issued);
     let refused = server
         .call(Method::POST, "/register", Some(&json!(["no object"])), None)
         .await;
-    assert_eq!(StatusCode::BAD_REQUEST, refused.0);
-    holds(&document, "post", "/register", json, &refused);
+    assert_eq!(StatusCode::BAD_REQUEST, refused.0, "{}", refused.2);
+    holds(&document, "post", "/register", JSON, &refused);
+    let removed = server
+        .call(Method::DELETE, &configuration, None, Some(&own))
+        .await;
+    assert_eq!(StatusCode::NO_CONTENT, removed.0, "{}", removed.2);
+    assert!(
+        document["paths"]["/register/{client_id}"]["delete"]["responses"]["204"]
+            .get("content")
+            .is_none(),
+        "a deletion answers no body"
+    );
+    server.stop().await;
+}
 
+#[tokio::test]
+async fn each_registry_answer_holds_to_its_schema() {
+    let server = Server::start().await;
+    let document = served(&server).await;
+    let admin = server.token("admin", "system/admin", ISSUER).await;
     let list = server
         .call(Method::GET, "/admin/clients", None, Some(&admin))
         .await;
-    assert_eq!(StatusCode::OK, list.0);
-    holds(&document, "get", "/admin/clients", json, &list);
+    assert_eq!(StatusCode::OK, list.0, "{}", list.2);
+    holds(&document, "get", "/admin/clients", JSON, &list);
     let unauthorized = server.call(Method::GET, "/admin/clients", None, None).await;
-    holds(&document, "get", "/admin/clients", json, &unauthorized);
+    holds(&document, "get", "/admin/clients", JSON, &unauthorized);
     let reader = server.token("rs", "system/introspect", ISSUER).await;
     let forbidden = server
         .call(Method::GET, "/admin/clients", None, Some(&reader))
         .await;
-    holds(&document, "get", "/admin/clients", json, &forbidden);
-
-    let disable = format!("/admin/clients/{client_id}/disable");
-    let disabled = server
-        .call(Method::POST, &disable, None, Some(&admin))
-        .await;
+    holds(&document, "get", "/admin/clients", JSON, &forbidden);
+    let disable = "/admin/clients/app/disable";
+    let disabled = server.call(Method::POST, disable, None, Some(&admin)).await;
     assert_eq!(StatusCode::OK, disabled.0, "{}", disabled.2);
     holds(
         &document,
         "post",
         "/admin/clients/{client_id}/disable",
-        json,
+        JSON,
         &disabled,
     );
-    let again = server
-        .call(Method::POST, &disable, None, Some(&admin))
-        .await;
-    assert_eq!(StatusCode::CONFLICT, again.0);
+    let again = server.call(Method::POST, disable, None, Some(&admin)).await;
+    assert_eq!(StatusCode::CONFLICT, again.0, "{}", again.2);
     holds(
         &document,
         "post",
         "/admin/clients/{client_id}/disable",
-        json,
+        JSON,
         &again,
     );
     let enabled = server
         .call(
             Method::POST,
-            &format!("/admin/clients/{client_id}/enable"),
+            "/admin/clients/app/enable",
             None,
             Some(&admin),
         )
@@ -245,7 +275,7 @@ async fn each_answer_holds_to_its_schema() {
         &document,
         "post",
         "/admin/clients/{client_id}/enable",
-        json,
+        JSON,
         &enabled,
     );
     let unknown = server
@@ -256,22 +286,31 @@ async fn each_answer_holds_to_its_schema() {
             Some(&admin),
         )
         .await;
-    assert_eq!(StatusCode::NOT_FOUND, unknown.0);
+    assert_eq!(StatusCode::NOT_FOUND, unknown.0, "{}", unknown.2);
     holds(
         &document,
         "post",
         "/admin/clients/{client_id}/enable",
-        json,
+        JSON,
         &unknown,
     );
-
     let keys = server
         .call(Method::GET, "/admin/keys", None, Some(&admin))
         .await;
-    assert_eq!(StatusCode::OK, keys.0);
-    holds(&document, "get", "/admin/keys", json, &keys);
+    assert_eq!(StatusCode::OK, keys.0, "{}", keys.2);
+    holds(&document, "get", "/admin/keys", JSON, &keys);
+    server.stop().await;
+}
 
-    let export = list.2["clients"]
+#[tokio::test]
+async fn the_audit_answer_holds_to_its_schema() {
+    let server = Server::start().await;
+    let document = served(&server).await;
+    let admin = server.token("admin", "system/admin", ISSUER).await;
+    let (_, _, listed) = server
+        .call(Method::GET, "/admin/clients", None, Some(&admin))
+        .await;
+    let export = listed["clients"]
         .as_array()
         .and_then(|clients| {
             clients
@@ -301,12 +340,12 @@ async fn each_answer_holds_to_its_schema() {
     let records = server
         .call(Method::GET, "/audit?_count=5", None, Some(&auditor))
         .await;
-    assert_eq!(StatusCode::OK, records.0);
+    assert_eq!(StatusCode::OK, records.0, "{}", records.2);
     assert!(
         records.2["entry"]
             .as_array()
             .is_some_and(|entry| !entry.is_empty()),
-        "the changes above are recorded"
+        "the registration above is recorded"
     );
     holds(
         &document,
@@ -314,17 +353,6 @@ async fn each_answer_holds_to_its_schema() {
         "/audit",
         "application/fhir+json",
         &records,
-    );
-
-    let removed = server
-        .call(Method::DELETE, &configuration, None, Some(&own))
-        .await;
-    assert_eq!(StatusCode::NO_CONTENT, removed.0);
-    assert!(
-        document["paths"]["/register/{client_id}"]["delete"]["responses"]["204"]
-            .get("content")
-            .is_none(),
-        "a deletion answers no body"
     );
     server.stop().await;
 }
