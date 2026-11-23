@@ -182,6 +182,50 @@ ahead of the rotation that makes it sign) and `retiring` (published until
 the tokens it signed have expired). The private keys stay in the files
 `[ferrosmart.keys]` names ([keys and rotation](../operate/keys.md)).
 
+## The upstream providers
+
+`GET /admin/upstreams` shows whether each provider people log in at can
+still be read, in configuration order, without reading the logs. Each
+entry carries the provider's `name`, `label`, `protocol` (`oidc` or
+`saml`), its `issuer` (the issuer identifier or the SAML entity ID), the
+`clients` that name it in their `upstreams` (a client that names none may
+use every provider), and its `documents`:
+
+- an OpenID Connect provider's `openid_configuration` and `jwks`, read
+  when the request is answered, since the key set is read at each login
+  and FerroSMART holds no copy of it;
+- a SAML provider's `saml_metadata` as this replica last read it, with
+  `last_good_read_at` (the copy in use) and the metadata's `valid_until`.
+
+Each document has `read_at`, `ok` and, for a failed read, `error`. A key
+set or metadata also lists `certificates_expire_at`, the `notAfter` of
+each signing certificate it carries. A failed SAML read leaves the last
+good copy in use until its `validUntil`. The providers' configuration and
+secrets stay in the file and are never answered.
+
+```json
+{
+  "upstreams": [
+    {
+      "name": "national",
+      "label": "National login",
+      "protocol": "saml",
+      "issuer": "https://idp.example.org/saml",
+      "clients": ["clinic"],
+      "documents": [
+        {
+          "document": "saml_metadata",
+          "read_at": "2026-11-23T10:00:00Z",
+          "ok": false,
+          "error": "the identity provider's metadata cannot be fetched",
+          "last_good_read_at": "2026-11-22T10:00:00Z",
+          "certificates_expire_at": ["2027-06-01T00:00:00Z"]
+        }
+      ]
+    }
+  ]
+}
+```
 ## A client's new secret
 
 `POST /admin/clients/{client_id}/secret` issues a confidential symmetric

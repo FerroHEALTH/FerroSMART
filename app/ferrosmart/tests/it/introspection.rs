@@ -69,7 +69,8 @@ impl Server {
     }
 
     /// Starts the server with `extra` appended to its configuration, such
-    /// as its own `[[ferrosmart.resource]]` tables.
+    /// as its own `[[ferrosmart.resource]]` tables, logging people in at
+    /// the providers it configures.
     pub(crate) async fn start_with(extra: &str) -> Self {
         let keys = Keys::new();
         let pem = std::fs::read(ec_key(keys.dir.path(), "client.pem")).expect("the key reads");
@@ -111,7 +112,9 @@ impl Server {
             .expect("connects");
         store.migrate().await.expect("migrates");
         let audit = audit(&settings);
-        let state = Arc::new(AppState::new(settings.clone(), store.clone(), audit));
+        let providers = crate::support::providers(&settings).await;
+        let state =
+            Arc::new(AppState::new(settings.clone(), store.clone(), audit).with_login(providers));
         crate::support::apply(
             &state,
             &crate::support::clients(&crate::support::reach_every_base(&text)),
