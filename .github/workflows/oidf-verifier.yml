@@ -1,0 +1,165 @@
+# SPDX-FileCopyrightText: Cadasto B.V.
+# SPDX-License-Identifier: BUSL-1.1
+
+# The OpenID Foundation's OpenID4VP 1.0 + HAIP 1.0 verifier test plan
+# against FerroSMART's EUDI Wallet verifier (#817, docs/architecture.md
+# §13.32). No specification governs the lane: our own design.
+#
+#   1. `lane` runs the plan on the suite's pinned image on the runner, for a
+#      pull request that reaches the verifier and on every push to main, and
+#      holds each module to app/ferrosmart/oidf/expected.tsv.
+#   2. `certification` runs the same plan at www.certification.openid.net,
+#      by hand or weekly from main, never for a pull request. FerroSMART
+#      is reached through a Cloudflare quick tunnel, and the suite's token
+#      stays in the step's environment.
+name: OIDF verifier
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - app/ferrosmart/**
+      - crates/ferrohealth-smart/src/**
+      - scripts/oidf/**
+      - docs/specs/oidf-conformance-suite/**
+      - docs/VERSIONS.md
+      - Cargo.lock
+      - .github/workflows/oidf-verifier.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+concurrency:
+  group: oidf-verifier-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  lane:
+    name: verifier plan (local suite)
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:19.0@sha256:bb6e70add742cd868fb62cb3b2f67d1dd2bdd2b65a521e778420748753687c60
+        env:
+          POSTGRES_USER: ferrosmart
+          POSTGRES_PASSWORD: ferrosmart
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ferrosmart"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-save-if: "false"
+      - name: The verifier plan
+        env:
+          LANE_DIR: ${{ runner.temp }}/oidf-verifier
+          LANE_PG: postgres://ferrosmart:ferrosmart@localhost:5432
+          OIDF_PYTHON: ${{ runner.temp }}/oidf-python/bin/python
+        run: |
+          cargo build -p ferrosmart --locked
+          python3 -m venv "$RUNNER_TEMP/oidf-python"
+          "$OIDF_PYTHON" -m pip install --quiet --require-hashes --no-deps -r app/ferrosmart/oidf/requirements.txt
+          scripts/oidf/lane.sh verifier
+      - if: failure() || cancelled()
+        name: Keep the lane's logs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: oidf-verifier
+          path: |
+            ${{ runner.temp }}/oidf-verifier/*.log
+            ${{ runner.temp }}/oidf-verifier/*.tsv
+            ${{ runner.temp }}/oidf-verifier/plan-*.json
+          if-no-files-found: ignore
+
+  certification:
+    name: verifier plan (OpenID Foundation suite)
+    if: (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:19.0@sha256:bb6e70add742cd868fb62cb3b2f67d1dd2bdd2b65a521e778420748753687c60
+        env:
+          POSTGRES_USER: ferrosmart
+          POSTGRES_PASSWORD: ferrosmart
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ferrosmart"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: The token reaches the suite
+        env:
+          CONFORMANCE_TOKEN: ${{ secrets.OIDF_CONFORMANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CONFORMANCE_TOKEN" \
+            https://www.certification.openid.net/api/currentuser)
+          if [ "$code" != 200 ]; then
+            echo "the suite answered the token with $code" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-save-if: "false"
+      - name: Build FerroSMART and the runner
+        env:
+          OIDF_PYTHON: ${{ runner.temp }}/oidf-python/bin/python
+        run: |
+          cargo build -p ferrosmart --locked
+          python3 -m venv "$RUNNER_TEMP/oidf-python"
+          "$OIDF_PYTHON" -m pip install --quiet --require-hashes --no-deps -r app/ferrosmart/oidf/requirements.txt
+          scripts/oidf/install-cloudflared.sh 2026.10.7 "$RUNNER_TEMP/bin"
+      - name: The verifier plan at the OpenID Foundation's suite
+        env:
+          LANE_DIR: ${{ runner.temp }}/oidf-verifier
+          LANE_PG: postgres://ferrosmart:ferrosmart@localhost:5432
+          OIDF_PYTHON: ${{ runner.temp }}/oidf-python/bin/python
+          CONFORMANCE_TOKEN: ${{ secrets.OIDF_CONFORMANCE_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$LANE_DIR"
+          "$RUNNER_TEMP/bin/cloudflared" tunnel --no-autoupdate --url http://127.0.0.1:9443 \
+            > "$LANE_DIR/cloudflared.log" 2>&1 &
+          tunnel=""
+          for _ in $(seq 1 60); do
+            tunnel=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$LANE_DIR/cloudflared.log" | head -1 || true)
+            [ -z "$tunnel" ] || break
+            sleep 1
+          done
+          [ -n "$tunnel" ] || { echo "the tunnel gave no URL" >&2; exit 1; }
+          TUNNEL_URL="$tunnel" scripts/oidf/lane.sh certify
+      - if: failure() || cancelled()
+        name: Keep the run's logs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: oidf-verifier-certification
+          path: |
+            ${{ runner.temp }}/oidf-verifier/*.log
+            ${{ runner.temp }}/oidf-verifier/*.tsv
+          if-no-files-found: ignore

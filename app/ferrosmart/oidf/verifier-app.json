@@ -1,0 +1,9 @@
+{
+  "client_id": "oidf-verifier-app",
+  "client_name": "OpenID Foundation verifier lane app",
+  "token_endpoint_auth_method": "none",
+  "redirect_uris": ["set by the lane"],
+  "scope": "openid fhirUser",
+  "resources": ["set by the lane"],
+  "grant_types": ["authorization_code"]
+}

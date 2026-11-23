@@ -4531,6 +4531,29 @@ the lane runs them with a `client_secret_basic` upstream (#706). The FAPI 2.0 pl
 RFC 10070's audience rule, need PAR and DPoP and are the lane's next
 target.
 
+**The verifier plan.** `.github/workflows/oidf-verifier.yml` runs the
+suite's `oid4vp-1final-verifier-haip-test-plan` (OpenID4VP 1.0 Final with
+HAIP 1.0, `x509_hash`, a signed `request_uri`) against the EUDI Wallet
+verifier of 13.32, with `credential_format=sd_jwt_vc` and
+`response_mode=direct_post.jwt` (#817). `scripts/oidf/lane.sh verifier`
+runs it on the pinned suite image for a pull request that reaches the
+verifier and on every push to `main`. The suite acts as the wallet: its
+credential key carries a certificate under the anchor the lane gives
+FerroSMART, and it trusts the root of the access certificate the lane
+makes. `scripts/oidf/verifier-client.sh` starts each presentation at
+FerroSMART, whose wallet endpoint is the suite's authorization endpoint,
+and records whether FerroSMART accepted or refused it. Every module's
+result is a row of `expected.tsv`. A negative module ends in FerroSMART's
+`400` at the response URI. A positive one ends as REVIEW, since the suite
+asks for a screenshot of the verifier's success, which the lane does not
+upload. The `certification` job runs the same plan at
+www.certification.openid.net, by hand or weekly from `main`. It reaches
+FerroSMART through a Cloudflare quick tunnel (cloudflared, pinned by
+sha256), reads the suite's token from the `OIDF_CONFORMANCE_TOKEN` secret
+into one step's environment, and first checks that the suite answers
+`/api/currentuser` with `200`. The README shows the workflow's status on
+`main` and claims no OpenID certification.
+
 ### 13.25 What every OpenID Provider implements
 
 OpenID Connect Core 1.0 §15.1 lists what every OpenID Provider implements,

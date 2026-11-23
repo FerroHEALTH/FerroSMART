@@ -1,0 +1,11 @@
+{
+  "alias": "set by the lane",
+  "description": "FerroSMART as the OpenID4VP verifier of the EUDI Wallet",
+  "client": {
+    "request_object_trust_anchor_pem": "set by the lane: the root of FerroSMART's access certificate"
+  },
+  "credential": {
+    "signing_jwk": "set by the lane: the PID provider's key, its certificate as x5c"
+  },
+  "waitTimeoutSeconds": 20
+}
