@@ -15,7 +15,6 @@ use ferrohealth_smart::kind::Actor;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::kind::Unclassified;
-use ferrohealth_smart::profile::Delegate;
 use ferrohealth_smart::profile::Marker;
 use ferrohealth_smart::profile::Preset;
 use ferrohealth_smart::profile::Profile;
@@ -47,10 +46,8 @@ const ISSUER: &str = "https://as.example.org/realms/ferro";
 const AUDIENCE: &str = "https://ehr.example.org/openehr";
 /// The deployment's own client, through which a person signs in.
 const FIRST_PARTY: &str = "first-party-app";
-/// A third-party client the issuer declares a delegate.
+/// A third-party client the person's token was issued to.
 const THIRD_PARTY: &str = "third-party-app";
-/// A client neither list names.
-const UNLISTED: &str = "unlisted-app";
 /// The client of the machine's client credentials grant.
 const MACHINE: &str = "machine-client";
 
@@ -227,7 +224,6 @@ impl Harness {
     fn new(vendor: Vendor) -> Result<Self, Box<dyn StdError>> {
         let mut profile = Profile::resolve(vendor.preset, &ProfileKeys::default())?;
         (vendor.deploy)(&mut profile);
-        profile.first_party_clients = vec![String::from(FIRST_PARTY)];
         Ok(Self {
             vendor,
             key: ec_key("k1", Algorithm::ES256),
@@ -334,10 +330,6 @@ mod cases {
                 claim: String::from("represents"),
                 ground_claim: Some(String::from("ground")),
             });
-            profile.delegates = vec![Delegate::Actor {
-                issuer: None,
-                sub: String::from("actor-1"),
-            }];
         };
         let mut claims = h.person("user/Observation.rs");
         claims["represents"] = json!("represented-subject-9");
@@ -401,46 +393,38 @@ mod cases {
 
     // NOTE: RFC 8693 §4.1: `act` identifies "the acting party to whom authority
     // has been delegated", by `iss` and `sub`; prior actors are informational only.
-    pub(super) async fn an_rfc_8693_actor_is_delegated_only_when_listed(h: &Harness) -> Outcome {
-        let listed = |profile: &mut Profile| {
-            profile.delegates = vec![Delegate::Actor {
-                issuer: None,
-                sub: String::from("actor-1"),
-            }];
-        };
+    pub(super) async fn an_rfc_8693_actor_is_delegated_as_asserted(h: &Harness) -> Outcome {
         let mut claims = h.person("user/Observation.rs");
         claims["act"] = json!({ "sub": "actor-1" });
-        let caller = h.admit(IssuerKind::Persons, listed, &claims).await?;
+        let caller = h.admit(IssuerKind::Persons, keep, &claims).await?;
         assert_eq!(
             &CallerKind::Delegated {
-                actor: Some(Actor {
+                actor: Actor {
                     issuer: String::from(ISSUER),
                     sub: String::from("actor-1"),
-                }),
+                },
             },
             caller.kind()
         );
-        claims["act"] = json!({ "sub": "actor-2" });
-        assert_eq!(
-            Some(Unclassified::UnlistedActor),
-            refused(h.admit(IssuerKind::Persons, listed, &claims).await)
-        );
         claims["act"] = json!({ "sub": "actor-1", "iss": "https://other.example.org" });
+        let caller = h.admit(IssuerKind::Persons, keep, &claims).await?;
         assert_eq!(
-            Some(Unclassified::UnlistedActor),
-            refused(h.admit(IssuerKind::Persons, listed, &claims).await),
+            &CallerKind::Delegated {
+                actor: Actor {
+                    issuer: String::from("https://other.example.org"),
+                    sub: String::from("actor-1"),
+                },
+            },
+            caller.kind(),
             "the actor is its issuer and its sub together"
         );
         claims["act"] = json!({ "sub": "actor-1", "act": { "sub": "prior" } });
         assert_eq!(
             Some(Unclassified::ActorChain),
-            refused(h.admit(IssuerKind::Persons, listed, &claims).await),
+            refused(h.admit(IssuerKind::Persons, keep, &claims).await),
             "a chain deeper than one actor is refused unless declared"
         );
-        let deeper = |profile: &mut Profile| {
-            listed(profile);
-            profile.max_actor_chain = 2;
-        };
+        let deeper = |profile: &mut Profile| profile.max_actor_chain = 2;
         assert!(h.admit(IssuerKind::Persons, deeper, &claims).await.is_ok());
         Ok(())
     }
@@ -460,19 +444,19 @@ mod cases {
         Ok(())
     }
 
-    pub(super) async fn a_third_party_client_is_delegated_only_when_listed(h: &Harness) -> Outcome {
-        let listed = |profile: &mut Profile| {
-            profile.delegates = vec![Delegate::Client(String::from(THIRD_PARTY))];
-        };
+    // NOTE: RFC 9068 §4 has the resource server check that `aud` names it, and RFC
+    // 8707 lets the issuer issue a token only for the resources its client may reach.
+    pub(super) async fn every_client_of_a_token_for_this_server_is_admitted(
+        h: &Harness,
+    ) -> Outcome {
         let mut claims = h.person("user/Observation.rs");
         claims[h.client_claim()] = json!(THIRD_PARTY);
-        let caller = h.admit(IssuerKind::Persons, listed, &claims).await?;
-        assert_eq!(&CallerKind::Delegated { actor: None }, caller.kind());
-        assert_eq!(Some(THIRD_PARTY), caller.client_id());
-        claims[h.client_claim()] = json!(UNLISTED);
+        let caller = h.admit(IssuerKind::Persons, keep, &claims).await?;
+        assert_eq!(&CallerKind::Person, caller.kind());
         assert_eq!(
-            Some(Unclassified::UnlistedClient),
-            refused(h.admit(IssuerKind::Persons, listed, &claims).await)
+            Some(THIRD_PARTY),
+            caller.client_id(),
+            "the client is recorded"
         );
         let mut clientless = h.person("user/Observation.rs");
         if let Some(object) = clientless.as_object_mut() {
@@ -540,12 +524,6 @@ mod cases {
                 .await
             )
         );
-        let mut unlisted = h.person("user/Observation.rs");
-        unlisted[h.client_claim()] = json!(UNLISTED);
-        assert_eq!(
-            Some(Unclassified::UnlistedClient),
-            refused(h.admit(IssuerKind::Persons, keep, &unlisted).await)
-        );
         // NOTE: a federation token is classified by its issuer's federation table
         // (tests/it/federation.rs); an issuer without one never loads.
         assert!(
@@ -610,11 +588,9 @@ macro_rules! suite {
             }
 
             #[tokio::test]
-            async fn an_rfc_8693_actor_is_delegated_only_when_listed() -> Outcome {
-                cases::an_rfc_8693_actor_is_delegated_only_when_listed(&Harness::new(
-                    super::$vendor(),
-                )?)
-                .await
+            async fn an_rfc_8693_actor_is_delegated_as_asserted() -> Outcome {
+                cases::an_rfc_8693_actor_is_delegated_as_asserted(&Harness::new(super::$vendor())?)
+                    .await
             }
 
             #[tokio::test]
@@ -624,8 +600,8 @@ macro_rules! suite {
             }
 
             #[tokio::test]
-            async fn a_third_party_client_is_delegated_only_when_listed() -> Outcome {
-                cases::a_third_party_client_is_delegated_only_when_listed(&Harness::new(
+            async fn every_client_of_a_token_for_this_server_is_admitted() -> Outcome {
+                cases::every_client_of_a_token_for_this_server_is_admitted(&Harness::new(
                     super::$vendor(),
                 )?)
                 .await
@@ -668,7 +644,6 @@ fn a_basic_credential_is_a_person_and_never_a_system() {
     let caller = Caller::basic(String::from("etl"), "system/*.rs");
     assert_eq!(&CallerKind::Person, caller.kind());
     assert_ne!(&CallerKind::System, caller.kind());
-    assert!(!caller.scopeless());
 }
 
 /// The Entra ID cases of its profile's own claims.
@@ -776,31 +751,20 @@ mod keycloak_profile {
     // NOTE: Keycloak 26.8.0 release notes: an impersonation session's tokens carry the RFC
     // 8693 `act` claim, which TokenManager.java fills with `sub` and `preferred_username`.
     #[tokio::test]
-    async fn an_impersonation_is_an_actor_delegated_only_when_listed() -> Outcome {
+    async fn an_impersonation_is_an_actor_delegated() -> Outcome {
         let h = Harness::new(keycloak())?;
-        let listed = |profile: &mut Profile| {
-            profile.delegates = vec![Delegate::Actor {
-                issuer: None,
-                sub: String::from("admin-user-uuid"),
-            }];
-        };
         let mut claims = h.person("user/Observation.rs");
         claims["act"] = json!({ "sub": "admin-user-uuid", "preferred_username": "admin" });
-        let caller = h.admit(IssuerKind::Persons, listed, &claims).await?;
+        let caller = h.admit(IssuerKind::Persons, keep, &claims).await?;
         assert_eq!(
             &CallerKind::Delegated {
-                actor: Some(Actor {
+                actor: Actor {
                     issuer: String::from(ISSUER),
                     sub: String::from("admin-user-uuid"),
-                }),
+                },
             },
             caller.kind(),
             "an act with no iss names an actor of the token's own issuer"
-        );
-        assert_eq!(
-            Some(Unclassified::UnlistedActor),
-            refused(h.admit(IssuerKind::Persons, keep, &claims).await),
-            "an impersonator no delegate names is refused"
         );
         Ok(())
     }
@@ -926,15 +890,10 @@ mod ferrosmart_profile {
         claims
     }
 
-    /// Lists [`THIRD_PARTY`] as a delegate client.
-    fn delegate(profile: &mut Profile) {
-        profile.delegates = vec![Delegate::Client(String::from(THIRD_PARTY))];
-    }
-
     // NOTE: no specification governs who asks under a `patient/` scope (SMART App
     // Launch 2.2.0, Patient-specific scopes): the owner's decision on #681.
     #[tokio::test]
-    async fn a_patients_own_token_through_an_admitted_client_is_the_person() -> Outcome {
+    async fn a_patients_own_token_through_any_client_is_the_person() -> Outcome {
         let h = Harness::new(ferrosmart())?;
         let claims = own(
             &h,
@@ -942,11 +901,7 @@ mod ferrosmart_profile {
             "openid fhirUser launch/patient patient/Observation.rs",
         );
         let caller = h.admit(IssuerKind::Persons, keep, &claims).await?;
-        assert_eq!(
-            &CallerKind::Patient,
-            caller.kind(),
-            "through a first-party client"
-        );
+        assert_eq!(&CallerKind::Patient, caller.kind());
         assert!(caller.is_the_person());
         assert_eq!(
             Some(PATIENT),
@@ -959,60 +914,30 @@ mod ferrosmart_profile {
             "the client is recorded"
         );
         let claims = own(&h, THIRD_PARTY, "patient/Observation.rs");
-        let caller = h.admit(IssuerKind::Persons, delegate, &claims).await?;
+        let caller = h.admit(IssuerKind::Persons, keep, &claims).await?;
         assert_eq!(
             &CallerKind::Patient,
             caller.kind(),
-            "through a delegate client"
+            "through another client"
         );
         Ok(())
     }
 
-    // NOTE: RFC 9068 §4 checks `aud` before any list; under `audience_delegates` a
-    // FerroSMART token for this server admits its client as a delegate (#682).
+    // NOTE: RFC 9068 §4 has the resource server check that `aud` names it.
     #[tokio::test]
-    async fn every_client_of_a_token_for_this_server_is_a_delegate_under_audience_delegates()
-    -> Outcome {
+    async fn a_token_for_another_server_is_refused_before_the_client_is_read() -> Outcome {
         let h = Harness::new(ferrosmart())?;
         let mut claims = h.person("openid user/Observation.rs");
         claims["client_id"] = json!(THIRD_PARTY);
-        assert_eq!(
-            Some(Unclassified::UnlistedClient),
-            refused(h.admit(IssuerKind::Persons, keep, &claims).await),
-            "off by default: an unlisted client is refused"
-        );
-        let by_audience = |profile: &mut Profile| profile.audience_delegates = true;
-        let caller = h.admit(IssuerKind::Persons, by_audience, &claims).await?;
-        assert_eq!(&CallerKind::Delegated { actor: None }, caller.kind());
-        assert_eq!(Some(THIRD_PARTY), caller.client_id());
-        let caller = h.admit(IssuerKind::Persons, delegate, &claims).await?;
-        assert_eq!(
-            &CallerKind::Delegated { actor: None },
-            caller.kind(),
-            "the listed delegates read as before"
-        );
-        let caller = h
-            .admit(IssuerKind::Persons, by_audience, &{
-                let mut first = claims.clone();
-                first["client_id"] = json!(FIRST_PARTY);
-                first
-            })
-            .await?;
-        assert_eq!(
-            &CallerKind::Person,
-            caller.kind(),
-            "a first-party client stays first party"
-        );
-        let mut elsewhere = claims.clone();
-        elsewhere["aud"] = json!("https://elsewhere.example.org/fhir");
+        claims["aud"] = json!("https://elsewhere.example.org/fhir");
         assert!(
             matches!(
-                h.admit(IssuerKind::Persons, by_audience, &elsewhere).await,
+                h.admit(IssuerKind::Persons, keep, &claims).await,
                 Err(Rejection::Invalid {
                     reason: ferrohealth_smart::refusal::Reason::Audience
                 })
             ),
-            "a token for another server is refused before any list"
+            "a token for another server is refused"
         );
         Ok(())
     }
@@ -1020,30 +945,16 @@ mod ferrosmart_profile {
     // NOTE: SMART App Launch 2.2.0, Scopes and Launch Context, `launch/patient`: the
     // authorization server's own picker acts for the signed-in person (#730).
     #[tokio::test]
-    async fn the_pickers_token_is_the_person_with_no_app_granted() -> Outcome {
+    async fn the_pickers_token_is_the_person() -> Outcome {
         let h = Harness::new(ferrosmart())?;
         let mut claims = h.person("openid fhirUser user/Patient.rs");
         claims["client_id"] = json!(ISSUER);
         let caller = h.admit(IssuerKind::Persons, keep, &claims).await?;
-        assert_eq!(&CallerKind::Person, caller.kind(), "no delegate lists it");
+        assert_eq!(&CallerKind::Person, caller.kind());
         assert_eq!(
             Some(ISSUER),
             caller.client_id(),
             "the access record names FerroSMART as the client"
-        );
-        let off = |profile: &mut Profile| profile.issuer_client_is_person = false;
-        assert_eq!(
-            Some(Unclassified::UnlistedClient),
-            refused(h.admit(IssuerKind::Persons, off, &claims).await),
-            "an explicit key turns the reading off"
-        );
-        let generic = Harness::new(generic())?;
-        let mut claims = generic.person("openid user/Patient.rs");
-        claims["client_id"] = json!(ISSUER);
-        assert_eq!(
-            Some(Unclassified::UnlistedClient),
-            refused(generic.admit(IssuerKind::Persons, keep, &claims).await),
-            "only the ferrosmart preset reads the issuer's own client as the person"
         );
         Ok(())
     }
@@ -1099,19 +1010,6 @@ mod ferrosmart_profile {
                 "{other} names no patient"
             );
         }
-        Ok(())
-    }
-
-    // NOTE: the owner's decision on #681 keeps the client admission of 3.14 before
-    // the patient reading, so an unlisted client is refused as before.
-    #[tokio::test]
-    async fn a_patients_own_token_through_an_unlisted_client_is_refused() -> Outcome {
-        let h = Harness::new(ferrosmart())?;
-        let claims = own(&h, UNLISTED, "patient/Observation.rs");
-        assert_eq!(
-            Some(Unclassified::UnlistedClient),
-            refused(h.admit(IssuerKind::Persons, delegate, &claims).await)
-        );
         Ok(())
     }
 
@@ -1171,17 +1069,8 @@ mod ferrosmart_profile {
         let h = Harness::new(ferrosmart())?;
         let mut acted = own(&h, FIRST_PARTY, "patient/Observation.rs");
         acted["act"] = json!({ "sub": "actor-1" });
-        let listed = |profile: &mut Profile| {
-            profile.delegates = vec![Delegate::Actor {
-                issuer: None,
-                sub: String::from("actor-1"),
-            }];
-        };
-        let caller = h.admit(IssuerKind::Persons, listed, &acted).await?;
-        assert!(matches!(
-            caller.kind(),
-            CallerKind::Delegated { actor: Some(_) }
-        ));
+        let caller = h.admit(IssuerKind::Persons, keep, &acted).await?;
+        assert!(matches!(caller.kind(), CallerKind::Delegated { .. }));
         let mut represented = own(&h, FIRST_PARTY, "patient/Observation.rs");
         represented["represents"] = json!("represented-subject-9");
         let declare = |profile: &mut Profile| {

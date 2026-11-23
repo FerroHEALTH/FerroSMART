@@ -55,7 +55,6 @@ async fn admit(
     let set = json!({ "keys": [key.jwk.clone()] }).to_string();
     let mut settings = Settings::new(ISSUER, AUDIENCE, kind);
     settings.jwks_file = Some(temp_file("attributes-jwks.json", set.as_bytes()));
-    settings.profile.first_party_clients = vec![String::from(FIRST_PARTY)];
     tweak(&mut settings);
     let server = ResourceServer::discover(settings)
         .await
@@ -548,7 +547,6 @@ kind = "persons"
 audience = ["{AUDIENCE}"]
 
 [issuer.i1.profile]
-first_party_clients = ["{FIRST_PARTY}"]
 
 [issuer.i2]
 issuer = "https://patients.example.org"

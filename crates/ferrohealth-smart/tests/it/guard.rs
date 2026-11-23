@@ -1045,7 +1045,6 @@ impl Verifier for BlankSubject {
                 None,
                 "",
                 None,
-                false,
                 ferrohealth_smart::kind::CallerKind::Person,
             ))
         })

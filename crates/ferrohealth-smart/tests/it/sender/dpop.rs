@@ -422,7 +422,6 @@ async fn a_product_verifier_refuses_a_dpop_request_by_default() {
                 None,
                 "",
                 None,
-                false,
                 ferrohealth_smart::kind::CallerKind::Person,
             ))))
         }

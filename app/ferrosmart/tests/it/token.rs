@@ -363,7 +363,7 @@ async fn a_backend_services_token_is_read_under_the_ferrosmart_preset() {
         ISSUER,
         RESOURCE,
         ferrohealth_smart::kind::IssuerKind::Persons,
-        &crate::support::one_table("app"),
+        &ferrohealth_smart::profile::ProfileKeys::default(),
         token,
     )
     .await

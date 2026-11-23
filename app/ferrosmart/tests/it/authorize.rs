@@ -2122,7 +2122,7 @@ async fn a_patient_gets_their_own_record_in_context_with_no_picker_and_no_role()
             ISSUER,
             &base,
             ferrohealth_smart::kind::IssuerKind::Persons,
-            &crate::support::one_table("app"),
+            &ferrohealth_smart::profile::ProfileKeys::default(),
             body["access_token"].as_str().expect("a token"),
         )
         .await
