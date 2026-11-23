@@ -3545,6 +3545,7 @@ created fresh, since sqlx refuses a file whose checksum changed.
 
 ```toml
 [ferrosmart]
+name = "Example Hospital"                     # the deployment's name on every page, and the brand's by default
 issuer = "https://smart.example.org"          # the issuer identifier, https, no query or fragment
 access_token_lifetime = "5min"                # at most one hour (smart app-launch, Response); the book's flows page tells apps to refresh
 refresh_idle = "30d"
@@ -3641,12 +3642,11 @@ name = "clinician"
 scopes = ["user/Observation.rs", "user/Patient.rs"]    # user/ and patient/ scopes only
 
 [ferrosmart.branding]                          # content, never code (13.15)
-name = "Example Hospital"                     # the name the pages carry
 smart_style_url = "https://ehr.example.org/smart-style.json"  # an app's token response carries it
 consent_text = "We log every access in your record's audit trail."  # the deployment's own words
 
 [ferrosmart.brand]                             # optional: the User Access Brands Bundle at {issuer}/brands (13.23, §8)
-name = "Example Hospital"                     # Organization.name
+# name = "Example Hospital"                   # Organization.name; [ferrosmart] name when absent
 website = "https://example.org"               # Organization.telecom, the brand's own website
 identifier = [{ system = "urn:ietf:rfc:3986", value = "https://example.org" }]   # unique across the brands
 category = ["prov"]                           # codes of ValueSet/user-access-category

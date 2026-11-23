@@ -118,6 +118,10 @@ pub struct Config {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FerroSmartSection {
+    /// The deployment's name, such as the hospital's: what every page
+    /// carries, and the User Access Brand's `Organization.name` when
+    /// `[ferrosmart.brand]` names none.
+    pub name: String,
     /// The issuer identifier (RFC 8414 §2): an `https` URL with no query and
     /// no fragment, whose path is `[server] base_path`.
     pub issuer: String,
@@ -155,8 +159,8 @@ pub struct FerroSmartSection {
     /// `[[ferrosmart.role]]`: the scopes each upstream role may be granted,
     /// the policy as content (`docs/architecture.md` §13.6 item 5).
     pub role: Vec<RoleSection>,
-    /// `[ferrosmart.branding]`: the deployment's name and words on the
-    /// pages, content and never code (13.15).
+    /// `[ferrosmart.branding]`: the deployment's words on the pages,
+    /// content and never code (13.15).
     pub branding: BrandingSection,
     /// `[ferrosmart.brand]`: the User Access Brands Bundle the deployment
     /// publishes; without it the server serves none.
@@ -183,27 +187,15 @@ pub struct RegistrationSection {
 }
 
 /// `[ferrosmart.branding]`.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BrandingSection {
-    /// The name the pages carry, such as the hospital's.
-    pub name: String,
     /// The deployment's own words on the consent page, such as what it does
     /// with the access a person gives; empty for none.
     pub consent_text: String,
     /// The `smart_style_url` an app's token response carries: an https URL
     /// of the deployment's SMART style document; empty for none.
     pub smart_style_url: String,
-}
-
-impl Default for BrandingSection {
-    fn default() -> Self {
-        Self {
-            name: String::from("FerroSMART"),
-            consent_text: String::new(),
-            smart_style_url: String::new(),
-        }
-    }
 }
 
 /// `[ferrosmart.audit]`: how FerroSMART names itself in its audit records,
@@ -358,6 +350,7 @@ pub enum ResourceKind {
 impl Default for FerroSmartSection {
     fn default() -> Self {
         Self {
+            name: String::from("FerroSMART"),
             issuer: String::new(),
             access_token_lifetime: Span::from_mins(5),
             refresh_idle: Span::from_days(30),

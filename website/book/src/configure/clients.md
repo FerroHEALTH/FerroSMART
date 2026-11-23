@@ -242,7 +242,7 @@ are listed as fixed lines with no box: they give the app no data the
 boxes do not, and the person ends lasting access on the management page. The page shows the app's logo and
 links to its home page, privacy policy and terms when the client registers
 them. FerroSMART draws the page itself, with the
-deployment's name and `consent_text` from `[ferrosmart.branding]`.
+deployment's `[ferrosmart] name` and the `consent_text` of `[ferrosmart.branding]`.
 
 When the person ticks "Remember this choice", FerroSMART keeps the consent
 for that client, that resource server (the request's `aud`) and that scope

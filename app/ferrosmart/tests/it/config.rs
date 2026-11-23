@@ -722,3 +722,36 @@ fn an_open_registration_names_a_patient_facing_scope() {
         assert_eq!(admitted, resolved.is_ok(), "{registration}: {resolved:?}");
     }
 }
+
+// NOTE: SMART App Launch 2.2.0, User Access Brands, Organization.name: the
+// deployment's one name, which a brand naming none takes.
+#[test]
+fn the_deployment_s_name_is_one_key_the_brand_takes_by_default() {
+    let keys = Keys::new();
+    let text = "[ferrosmart]\nname = \"Example Hospital\"\nissuer = \"https://smart.example.org\"\n\
+                [[ferrosmart.resource]]\nbase = \"https://fhir.example.org/r4\"\n\
+                [ferrosmart.brand]\nwebsite = \"https://example.org\"\n\
+                [[ferrosmart.brand.endpoint]]\nbase = \"https://fhir.example.org/r4\"\n\
+                fhir_version = [\"4.0.1\"]\ncontact = [\"https://developer.example.org\"]\n";
+    let settings = config(text, &keys).resolve().expect("resolves");
+    assert_eq!("Example Hospital", settings.name);
+    let brands = settings.brand.expect("a Bundle");
+    let instants = brands
+        .digests()
+        .into_keys()
+        .map(|resource| (resource, String::from("2026-11-23T00:00:00Z")))
+        .collect();
+    let changed = ferrosmart::brands::Changed::new(&brands, &instants).expect("changed");
+    let bundle = brands.bundle(&changed).to_string();
+    assert!(bundle.contains("\"name\":\"Example Hospital\""), "{bundle}");
+    let refused = ferrosmart::config::Config::from_sources(
+        Some(
+            "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.branding]\nname = \"x\"",
+        ),
+        &std::collections::BTreeMap::new(),
+    );
+    assert!(
+        matches!(refused, Err(Error::Load(_))),
+        "the branding name is gone"
+    );
+}

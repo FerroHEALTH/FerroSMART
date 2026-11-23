@@ -30,7 +30,7 @@ pub fn confirm(state: &AppState, pending: &PendingLogout, reach: &[String]) -> R
     let intro = locale.lookup_with(
         &*CATALOG,
         "logout-intro",
-        &[("name", Arg::from(state.settings().branding.name.as_str()))],
+        &[("name", Arg::from(state.settings().name.as_str()))],
     );
     let form = Html::raw(format!(
         "<form method=\"post\" action=\"{action}\" class=\"fui-stack\">\
