@@ -27,8 +27,8 @@
 #
 # The signing key signs every access token under RS256 and is published,
 # public half only, at the `jwks_uri` of the SMART configuration. Rotation
-# adds a next and a previous key ([ferrosmart.keys], in the configuration
-# file below).
+# takes a second key file in the list (FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILES,
+# comma separated) and hands over every `rotation_period`.
 #
 # CONFIGURATION. The environment below sets what the quickstart needs, and
 # every key of the configuration tree is reachable the same way, as
@@ -91,7 +91,7 @@ services:
       # or .env sets it, so no file is read until you write one.
       FERROSMART_CONFIG:
       FERROSMART__FERROSMART__ISSUER: ${FERROSMART_ISSUER:-http://localhost:8080}
-      FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILE: /run/secrets/signing_key
+      FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILES: /run/secrets/signing_key
       FERROSMART__FERROSMART__DATABASE__URL_FILE: /run/secrets/database_url
       FERROSMART__FERROSMART__RESOURCE__0__BASE: ${FERROSMART_RESOURCE:-http://localhost:8090/fhir}
       FERROSMART__FERROSMART__RESOURCE__0__KIND: fhir

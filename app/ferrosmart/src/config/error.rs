@@ -152,6 +152,19 @@ pub enum Error {
         #[source]
         source: ihe_atna::atna::feed::FeedConfigError,
     },
+    /// `ferrosmart.keys.private_key_files` names one key twice.
+    #[error("`ferrosmart.keys.private_key_files` names the key {kid} twice")]
+    RepeatedKey {
+        /// The key's `kid`.
+        kid: String,
+    },
+    /// The rotation period is shorter than a key stays published after it
+    /// stops signing.
+    #[error("`ferrosmart.keys.rotation_period` is at least {}s", shortest.as_secs())]
+    RotationPeriod {
+        /// The shortest period.
+        shortest: std::time::Duration,
+    },
     /// The keys of the ring repeat one another.
     #[error("`ferrosmart.keys` names one key twice")]
     KeyRing {

@@ -16,6 +16,7 @@ pub mod consent;
 pub mod grant;
 pub mod launch;
 pub mod logout;
+pub mod signing;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -65,6 +66,12 @@ pub enum StoreError {
     /// An audited write was to commit without its audit record.
     #[error("an audited write has no audit record")]
     Unrecorded,
+    /// A signing key's row holds a state the server never writes.
+    #[error("the signing key `{kid}` holds a state the server never writes")]
+    CorruptKey {
+        /// The key's `kid`.
+        kid: String,
+    },
     /// A stored row holds a value the server never writes.
     #[error("the stored row `{client_id}` holds a value the server never writes")]
     Corrupt {

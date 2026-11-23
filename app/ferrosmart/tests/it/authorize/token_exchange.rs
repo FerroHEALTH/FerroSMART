@@ -228,6 +228,7 @@ async fn a_professional_s_or_a_machine_s_token_is_never_exchanged_and_is_recorde
     let machine = smart
         .settings
         .keys
+        .ring()
         .current()
         .sign(
             "at+jwt",
@@ -280,6 +281,7 @@ async fn an_expired_revoked_or_foreign_subject_token_is_refused() {
     let expired = smart
         .settings
         .keys
+        .ring()
         .current()
         .sign(
             "at+jwt",

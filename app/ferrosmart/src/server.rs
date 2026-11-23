@@ -41,6 +41,9 @@ use crate::upstream::Providers;
 /// specification governs the value: our own design.
 pub const JWKS_CACHE_CONTROL: &str = "public, max-age=3600";
 
+/// The `max-age` of [`JWKS_CACHE_CONTROL`].
+pub const JWKS_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
+
 /// The routes that answer a person's browser with a page.
 ///
 /// They are the consent page, the patient picker, the management page, and
@@ -301,7 +304,7 @@ async fn openid_configuration(State(state): State<Arc<AppState>>) -> Response {
 /// `GET {issuer}/jwks`, the JWK Set (RFC 7517 §5), cacheable as
 /// [`JWKS_CACHE_CONTROL`] says.
 async fn jwks(State(state): State<Arc<AppState>>) -> Response {
-    let mut response = public(Json(state.settings.keys.published()).into_response());
+    let mut response = public(Json(state.settings.keys.ring().published()).into_response());
     response.headers_mut().insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static(JWKS_CACHE_CONTROL),
@@ -371,5 +374,18 @@ impl HealthIndicator for Database {
                 Err(_unreachable) => Outcome::down("the database answers no statement"),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_jwks_max_age_is_the_cache_control_s() {
+        assert_eq!(
+            format!("public, max-age={}", JWKS_MAX_AGE.as_secs()),
+            JWKS_CACHE_CONTROL
+        );
     }
 }

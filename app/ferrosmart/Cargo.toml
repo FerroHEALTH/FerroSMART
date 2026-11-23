@@ -56,6 +56,8 @@ http.workspace = true
 # with its asset router.
 ferrohealth-ui = { version = "=0.6.11", default-features = false, features = ["axum"] }
 fluent-templates.workspace = true
+# The signing key ring every request reads while the rotation swaps it.
+arc-swap.workspace = true
 # The random token ids and their base64url form.
 aws-lc-rs.workspace = true
 base64.workspace = true

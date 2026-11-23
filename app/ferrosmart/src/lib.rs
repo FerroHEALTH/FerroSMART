@@ -34,6 +34,7 @@ pub mod revoke;
 pub mod saml;
 pub mod scopes;
 pub mod server;
+pub mod signing;
 pub mod store;
 pub mod token;
 pub mod upstream;

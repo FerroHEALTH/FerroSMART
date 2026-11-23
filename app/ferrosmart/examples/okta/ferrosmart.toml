@@ -42,9 +42,8 @@ client_id = "0oaexampleferrosmart"
 # another: its public keys hold the JWK FerroSMART publishes at
 # {issuer}/upstream-jwks, and FerroSMART signs each client assertion with
 # the current key of its own assertion ring, never a token key
-# (RFC 8725 §3.12). The ring is read as [ferrosmart.keys] is; a rotation
-# adds the next key's JWK to the integration before the ring makes it
-# current.
+# (RFC 8725 §3.12). A rotation adds the next key's JWK to the integration
+# before the ring makes it current.
 [ferrosmart.upstream.oidc.private_key_jwt.keys]
 private_key_file = "/run/secrets/upstream-assertion.pem"
 
