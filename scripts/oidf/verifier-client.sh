@@ -56,10 +56,16 @@ present() {
     return
     ;;
   esac
-  # 2. The suite, as the wallet, fetches the request object, posts its answer
-  #    to the response URI and follows the redirect_uri FerroSMART answers
-  #    with (§8.2), or stops on a refusal.
-  location=$(redirect "$location")
+  # 2. The suite, as the wallet, fetches the request object and posts its answer
+  #    to the response URI; the redirect_uri FerroSMART answers with (§8.2) is in
+  #    the module's log, and none is there after a refusal.
+  redirect "$location" > /dev/null
+  location=""
+  for _ in $(seq 1 10); do
+    location=$(get "$OIDF_SUITE/api/log/$module" | jq -r '[.[] | .redirect_uri? // empty | strings][0] // empty')
+    [ -z "$location" ] || break
+    sleep 1
+  done
   case "$location" in
     "$issuer"/wallet/complete*) ;;
     *)
