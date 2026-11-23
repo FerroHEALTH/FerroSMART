@@ -497,6 +497,264 @@
           }
         }
       }
+    },
+    "/admin/subjects": {
+      "get": {
+        "operationId": "findSubject",
+        "summary": "A person's FerroSMART subject: the pairwise subject of their sub at a provider.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "upstream",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The provider's name."
+          },
+          {
+            "name": "sub",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The person's subject at the provider."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The subject.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is missing, named twice, or unknown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "No provider is configured under the name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/subjects/{sub}/grants": {
+      "parameters": [
+        {
+          "name": "sub",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The person's FerroSMART subject."
+        }
+      ],
+      "get": {
+        "operationId": "listSubjectAccess",
+        "summary": "A person's live grants, newest first, and the consents they remembered.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The person's access.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectAccess"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/admin/subjects/{sub}/grants/{grant_id}": {
+      "parameters": [
+        {
+          "name": "sub",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The person's FerroSMART subject."
+        },
+        {
+          "name": "grant_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "delete": {
+        "operationId": "revokeSubjectGrant",
+        "summary": "Revokes one of the person's live grants with every token under it.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The grant is revoked."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "The person holds no live grant under the id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/subjects/{sub}/consents/{client_id}": {
+      "parameters": [
+        {
+          "name": "sub",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The person's FerroSMART subject."
+        },
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "delete": {
+        "operationId": "withdrawSubjectConsent",
+        "summary": "Disconnects the client from the person: their remembered consent is forgotten and the client's grants about them revoked (GDPR Art 7(3)).",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What was ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Withdrawn"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/admin/subjects/{sub}/sessions": {
+      "parameters": [
+        {
+          "name": "sub",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The person's FerroSMART subject."
+        }
+      ],
+      "delete": {
+        "operationId": "endSubjectSessions",
+        "summary": "Ends every upstream session of the person with the online_access grants in it.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What was ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndedSessions"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1270,6 +1528,160 @@
             "items": {
               "$ref": "#/components/schemas/Upstream"
             }
+          }
+        }
+      },
+      "Subject": {
+        "type": "object",
+        "required": [
+          "upstream",
+          "subject"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "upstream": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          }
+        }
+      },
+      "SubjectGrant": {
+        "type": "object",
+        "required": [
+          "grant_id",
+          "client_id",
+          "aud",
+          "scope",
+          "issued_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "grant_id": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "aud": {
+            "type": "string",
+            "format": "uri"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "page",
+              "remembered",
+              "administrative",
+              "first-party"
+            ]
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "offline",
+              "online"
+            ]
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When a token was last issued under the grant."
+          }
+        }
+      },
+      "SubjectConsent": {
+        "type": "object",
+        "required": [
+          "client_id",
+          "aud",
+          "scope",
+          "granted_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "aud": {
+            "type": "string",
+            "format": "uri"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SubjectAccess": {
+        "type": "object",
+        "required": [
+          "subject",
+          "grants",
+          "consents"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubjectGrant"
+            }
+          },
+          "consents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubjectConsent"
+            }
+          }
+        }
+      },
+      "Withdrawn": {
+        "type": "object",
+        "required": [
+          "remembered",
+          "grants"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "remembered": {
+            "type": "boolean"
+          },
+          "grants": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "EndedSessions": {
+        "type": "object",
+        "required": [
+          "sessions",
+          "grants"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "grants": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       }
