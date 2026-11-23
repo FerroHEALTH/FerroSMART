@@ -25,7 +25,7 @@ use crate::federation::Field;
 use crate::kind::Actor;
 use crate::kind::CallerKind;
 use crate::kind::IssuerKind;
-use crate::profile::Marker;
+use crate::profile::Profile;
 use crate::resource::Settings;
 use crate::roles::lookup;
 
@@ -70,25 +70,14 @@ pub(crate) fn check(
     }
     audience(issued, target)?;
     lifetime(issued, subject, route.lifetime, now)?;
-    for (claim, value) in &settings.profile.expect {
-        let marker = Marker::Claim {
-            claim: claim.clone(),
-            value: value.clone(),
-        };
-        if !marker.matches(issued, None) {
-            return Err(Rejected::Expected {
-                claim: claim.clone(),
-            });
-        }
-    }
     named_actor(route, actor, issued)?;
     match settings.kind {
         IssuerKind::Federation => federation(settings, target, subject, issued),
-        IssuerKind::Patients => {
-            person(settings, subject, issued)?;
-            patient(settings, subject, issued)
+        IssuerKind::Smart if *subject.kind() == CallerKind::Patient => {
+            person(subject, issued)?;
+            patient(subject, issued)
         }
-        IssuerKind::Persons | IssuerKind::Machines => person(settings, subject, issued),
+        IssuerKind::Smart => person(subject, issued),
     }
 }
 
@@ -174,7 +163,7 @@ fn windows(subject: &SubjectToken, exp: i64) -> Result<(), Rejected> {
 }
 
 /// Checks that `issued` names the requesting client as its actor: in `act`
-/// (RFC 8693 §4.1), or, with no `act`, in the profile's client claims.
+/// (RFC 8693 §4.1), or, with no `act`, as its `client_id`.
 fn named_actor(
     route: &Route<'_>,
     actor: Option<&Actor>,
@@ -199,49 +188,33 @@ fn named_actor(
         // NOTE: RFC 8693 §4.1, a delegated token names its actor in `act`, so
         // an actor token sent and no `act` issued is no delegation.
         None if actor.is_some() => Err(Rejected::Actor),
-        None if profile.client(issued) == Some(route.client_id) => Ok(()),
+        None if Profile::client(issued) == Some(route.client_id) => Ok(()),
         None => Err(Rejected::Actor),
     }
 }
 
-/// Checks that `issued` names the subject token's person by every claim of
-/// the profile's `person_equality`.
-fn person(
-    settings: &Settings,
-    subject: &SubjectToken,
-    issued: &Map<String, Value>,
-) -> Result<(), Rejected> {
-    for claim in &settings.profile.person_equality {
+/// Checks that `issued` names the subject token's person by `iss` and
+/// `sub`, which together name one user (OpenID Connect Core 1.0 §5.7).
+fn person(subject: &SubjectToken, issued: &Map<String, Value>) -> Result<(), Rejected> {
+    for claim in ["iss", "sub"] {
         let held = subject.claims().get(claim).filter(|value| !value.is_null());
         if held.is_none() || held != issued.get(claim) {
             return Err(Rejected::Person {
-                claim: claim.clone(),
+                claim: claim.to_owned(),
             });
         }
     }
     Ok(())
 }
 
-/// Checks that `issued` reads as a patient token of the `patients` issuer
-/// and names the subject token's patient context by every claim of it the
-/// subject token carries.
-fn patient(
-    settings: &Settings,
-    subject: &SubjectToken,
-    issued: &Map<String, Value>,
-) -> Result<(), Rejected> {
-    // NOTE: RFC 8693 §4.1, an `act` of the issued token names the requesting
-    // client, which `named_actor` checked, so it is read here as no representative.
-    let mut patient_claims = issued.clone();
-    patient_claims.remove("act");
-    crate::kind::classify_listed(
-        IssuerKind::Patients,
-        &settings.profile,
-        None,
-        &patient_claims,
-        &settings.issuer,
-    )
-    .map_err(Rejected::Patient)?;
+/// Checks that `issued` names a `Patient` as its `fhirUser` and the
+/// subject token's patient context by every claim of it the subject token
+/// carries.
+fn patient(subject: &SubjectToken, issued: &Map<String, Value>) -> Result<(), Rejected> {
+    let fhir_user = issued.get("fhirUser").and_then(Value::as_str);
+    if fhir_user.and_then(crate::kind::fhir_user_type) != Some("Patient") {
+        return Err(Rejected::Patient);
+    }
     for claim in subject.patient_context() {
         let held = lookup(subject.claims(), claim).filter(|value| !value.is_null());
         if held.is_some() && held != lookup(issued, claim) {
@@ -286,7 +259,7 @@ fn federation(
             .as_ref()
             .map(|assurance| &assurance.levels),
     };
-    let classified = crate::kind::classify_listed(
+    let classified = crate::kind::classify(
         IssuerKind::Federation,
         &settings.profile,
         Some(&context),

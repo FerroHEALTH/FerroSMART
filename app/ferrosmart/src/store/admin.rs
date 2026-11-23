@@ -4,15 +4,14 @@
 //! The admin API's reads and writes of the client registry
 //! (`docs/architecture.md` §13.8).
 //!
-//! Every write runs in an audited [`Transaction`] and makes the store the
-//! client's source, so the configuration no longer writes it at start. No
-//! specification governs the registry's storage: our own design.
+//! Every write runs in an audited [`Transaction`]. No specification governs
+//! the registry's storage: our own design.
 
 use sqlx::Row as _;
 
 use crate::clients::Client;
 use crate::store::{
-    CLIENT_COLUMNS, Source, Store, StoreError, Transaction, read_client, write_client,
+    CLIENT_COLUMNS, RegisteredBy, Store, StoreError, Transaction, read_client, write_client,
 };
 
 /// A client as the registry holds it, disabled or not.
@@ -20,8 +19,8 @@ use crate::store::{
 pub struct Registered {
     /// The client.
     pub client: Client,
-    /// Where its row came from.
-    pub source: Source,
+    /// Who registered it.
+    pub by: RegisteredBy,
     /// When it was disabled, in seconds since the epoch; none while it is
     /// enabled.
     pub disabled_at: Option<i64>,
@@ -41,26 +40,17 @@ pub struct Ended {
 /// The query of every registered client's row.
 fn select(filter: &str) -> String {
     format!(
-        "SELECT {CLIENT_COLUMNS}, source, extract(epoch FROM disabled_at)::bigint AS disabled_at \
+        "SELECT {CLIENT_COLUMNS}, extract(epoch FROM disabled_at)::bigint AS disabled_at \
          FROM client {filter}"
     )
 }
 
-/// Reads a `client` row with its source and disabled time.
+/// Reads a `client` row with its disabled time.
 fn read_registered(row: &sqlx::postgres::PgRow) -> Result<Registered, StoreError> {
     let client = read_client(row)?;
-    let source = match row.try_get::<String, _>("source")?.as_str() {
-        "config" => Source::Config,
-        "admin" => Source::Admin,
-        _ => {
-            return Err(StoreError::Corrupt {
-                client_id: client.client_id,
-            });
-        }
-    };
     Ok(Registered {
         disabled_at: row.try_get("disabled_at")?,
-        source,
+        by: RegisteredBy::of(&client),
         client,
     })
 }
@@ -95,6 +85,29 @@ impl Store {
     }
 }
 
+impl Store {
+    /// Returns whether the enabled client `client_id` holds the registration
+    /// access token whose SHA-256 is `hash`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Database`] when the query fails.
+    pub async fn holds_registration_token(
+        &self,
+        client_id: &str,
+        hash: &str,
+    ) -> Result<bool, StoreError> {
+        let held: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM client WHERE client_id = $1 AND registration_token_hash = $2 \
+             AND disabled_at IS NULL",
+        )
+        .bind(client_id)
+        .bind(hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(held.is_some())
+    }
+}
+
 impl Transaction {
     /// Returns the client registered as `client_id`, its row locked until
     /// the transaction ends, so two changes of one client queue.
@@ -112,35 +125,83 @@ impl Transaction {
         row.as_ref().map(read_registered).transpose()
     }
 
-    /// Registers `client` through the admin API; `false` when its id is
-    /// registered already, and nothing is written then.
+    /// Registers `client`; `false` when its id is registered already, and
+    /// nothing is written then.
     ///
     /// # Errors
     /// Returns [`StoreError::Database`] when a statement fails, a launch URL
     /// another client registers included.
     pub async fn create_client(&mut self, client: &Client) -> Result<bool, StoreError> {
         let claimed = sqlx::query(
-            "INSERT INTO client (client_id, name, kind, source) VALUES ($1, $1, 'public', 'admin') \
+            "INSERT INTO client (client_id, client_name, token_endpoint_auth_method, registered_by) VALUES ($1, $1, 'none', $2) \
              ON CONFLICT (client_id) DO NOTHING",
         )
         .bind(&client.client_id)
+        .bind(RegisteredBy::of(client).as_str())
         .execute(&mut *self.tx)
         .await?;
         if claimed.rows_affected() == 0 {
             return Ok(false);
         }
-        write_client(&mut self.tx, client, Source::Admin).await?;
+        write_client(&mut self.tx, client).await?;
         Ok(true)
     }
 
-    /// Writes `client` over its row through the admin API, which keeps its
-    /// disabled time.
+    /// Writes `client` over its row, which keeps its disabled time.
     ///
     /// # Errors
     /// Returns [`StoreError::Database`] when a statement fails, a launch URL
     /// another client registers included.
     pub async fn update_client(&mut self, client: &Client) -> Result<(), StoreError> {
-        write_client(&mut self.tx, client, Source::Admin).await
+        write_client(&mut self.tx, client).await
+    }
+
+    /// Replaces the registration access token of `client_id` with the one
+    /// whose SHA-256 is `hash` (RFC 7592 §3).
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Database`] when the statement fails.
+    pub async fn set_registration_token(
+        &mut self,
+        client_id: &str,
+        hash: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query("UPDATE client SET registration_token_hash = $2 WHERE client_id = $1")
+            .bind(client_id)
+            .bind(hash)
+            .execute(&mut *self.tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Deletes `client_id` once [`Transaction::disable_client`] ended
+    /// everything it held (RFC 7592 §2.3).
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Database`] when the statement fails.
+    pub async fn delete_client(&mut self, client_id: &str) -> Result<(), StoreError> {
+        sqlx::query("DELETE FROM client WHERE client_id = $1")
+            .bind(client_id)
+            .execute(&mut *self.tx)
+            .await?;
+        Ok(())
+    }
+
+    /// Replaces the secret hash of `client_id` with `hash`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Database`] when the statement fails.
+    pub async fn set_secret(
+        &mut self,
+        client_id: &str,
+        hash: &crate::clients::SecretHash,
+    ) -> Result<(), StoreError> {
+        sqlx::query("UPDATE client SET secret_hash = $2, updated_at = now() WHERE client_id = $1")
+            .bind(client_id)
+            .bind(hash.phc())
+            .execute(&mut *self.tx)
+            .await?;
+        Ok(())
     }
 
     /// Disables `client_id`: no request finds it again, every grant and
@@ -152,7 +213,7 @@ impl Transaction {
     /// Returns [`StoreError::Database`] when a statement fails.
     pub async fn disable_client(&mut self, client_id: &str) -> Result<Ended, StoreError> {
         sqlx::query(
-            "UPDATE client SET disabled_at = now(), source = 'admin', updated_at = now() \
+            "UPDATE client SET disabled_at = now(), updated_at = now() \
              WHERE client_id = $1 AND disabled_at IS NULL",
         )
         .bind(client_id)
@@ -183,6 +244,7 @@ impl Transaction {
             "DELETE FROM authorization_code WHERE client_id = $1 AND redeemed_at IS NULL",
             "DELETE FROM launch WHERE client_id = $1 AND used_at IS NULL",
             "DELETE FROM pending_authorization WHERE client_id = $1",
+            "DELETE FROM pushed_request WHERE client_id = $1",
         ] {
             sqlx::query(statement)
                 .bind(client_id)
@@ -208,28 +270,12 @@ impl Transaction {
     /// Returns [`StoreError::Database`] when the statement fails.
     pub async fn enable_client(&mut self, client_id: &str) -> Result<bool, StoreError> {
         let enabled = sqlx::query(
-            "UPDATE client SET disabled_at = NULL, source = 'admin', updated_at = now() \
+            "UPDATE client SET disabled_at = NULL, updated_at = now() \
              WHERE client_id = $1 AND disabled_at IS NOT NULL",
         )
         .bind(client_id)
         .execute(&mut *self.tx)
         .await?;
         Ok(enabled.rows_affected() == 1)
-    }
-
-    /// Clears the organisation approval of `client_id`, its first-party
-    /// mark with it.
-    ///
-    /// # Errors
-    /// Returns [`StoreError::Database`] when the statement fails.
-    pub async fn clear_approval(&mut self, client_id: &str) -> Result<(), StoreError> {
-        sqlx::query(
-            "UPDATE client SET approved_scope = NULL, approved_by = NULL, approved_at = NULL, \
-             first_party = false, source = 'admin', updated_at = now() WHERE client_id = $1",
-        )
-        .bind(client_id)
-        .execute(&mut *self.tx)
-        .await?;
-        Ok(())
     }
 }

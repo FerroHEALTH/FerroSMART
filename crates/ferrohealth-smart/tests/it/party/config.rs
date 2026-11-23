@@ -15,25 +15,25 @@ fn section(text: &str) -> Result<AuthSection, toml::de::Error> {
 const ISSUERS: &str = r#"
 [issuer.i1]
 issuer = "https://login.example.org/tenant-1/v2.0"
-kind = "persons"
-preset = "entra"
 audience = ["api://ferro"]
 jwks_file = "/dev/null"
 
-[issuer.i1.profile]
-first_party_clients = ["first-party-app"]
-
 [issuer.i2]
 issuer = "https://as.example.org/realms/other"
-kind = "persons"
 audience = ["api://ferro"]
 jwks_file = "/dev/null"
 
 [issuer.i3]
-issuer = "https://as.example.org/realms/machines"
-kind = "machines"
+issuer = "https://other-party.example.org"
+kind = "federation"
 audience = ["api://ferro"]
 jwks_file = "/dev/null"
+
+[issuer.i3.federation]
+contact_point = false
+countries = ["NL"]
+issuing_authorities = ["CIBG"]
+provider_identifier_prefixes = ["urn:oid:2.16.528.1.1007.3.3."]
 "#;
 
 /// Returns the party error a section of [`ISSUERS`] and `party` resolves to.
@@ -83,50 +83,10 @@ identifier_type = "login"
     Ok(())
 }
 
-// NOTE: OpenID Connect Core 1.0 §5.7: `email`, `phone_number`, `preferred_username` and
-// `name` "MUST NOT be used as unique identifiers for the End-User".
-#[test]
-fn a_banned_claim_as_key_fails_to_load() -> Outcome2 {
-    let banned = ISSUERS.replacen(
-        "first_party_clients = [\"first-party-app\"]",
-        "first_party_clients = [\"first-party-app\"]\nperson_key = \"email\"",
-        1,
-    );
-    let text = format!(
-        "{banned}
-[issuer.i1.party]
-identifier_issuer = \"urn:example:ferro:login\"
-identifier_type = \"guid\"
-"
-    );
-    assert!(
-        matches!(
-            section(&text)?.resolve(&[]),
-            Err(ConfigError::Issuer { .. })
-        ),
-        "the profile refuses the key at load"
-    );
-    let source: Arc<dyn PartySource> = FakeSource::answering(one_professional());
-    let unstable = Profile {
-        person_key: String::from("preferred_username"),
-        ..profile()
-    };
-    assert_eq!(
-        Err(PartyError::UnstableKey {
-            issuer: String::from(ISSUER),
-            claim: String::from("preferred_username"),
-        }),
-        PartyBinding::new(source)
-            .with_issuer(table(), IssuerKind::Persons, &unstable)
-            .map(|_binding| ())
-    );
-    Ok(())
-}
-
 // NOTE: no specification governs the configuration: our own design; a table binds only
-// a trusted persons issuer, and its unknown keys are refused.
+// a trusted SMART issuer, and its unknown keys are refused.
 #[test]
-fn a_table_loads_with_deny_unknown_fields_and_binds_only_a_persons_issuer() -> Outcome2 {
+fn a_table_loads_with_deny_unknown_fields_and_binds_only_a_smart_issuer() -> Outcome2 {
     let unknown = section(&format!(
         "{ISSUERS}
 [issuer.i1.party]
@@ -143,12 +103,12 @@ match = \"exact\"
         party_error(
             r#"
 [issuer.i3.party]
-identifier_issuer = "urn:example:ferro:machines"
+identifier_issuer = "urn:example:ferro:other"
 identifier_type = "login"
 "#,
         )?,
-        PartyError::NotPersons {
-            kind: Some(IssuerKind::Machines),
+        PartyError::NotSmart {
+            kind: Some(IssuerKind::Federation),
             ..
         }
     ));
@@ -167,102 +127,4 @@ group_identifier_issuer = \"urn:example:ferro:groups\"
     let binding = PartyBinding::new(source).with_resolved(&resolved)?;
     assert!(format!("{binding:?}").contains(ISSUER), "{binding:?}");
     Ok(())
-}
-
-/// The `[auth.idp.entra]` table of the configuration cases, with `base_url`.
-#[cfg(feature = "idp-entra")]
-fn entra_table(base_url: &str) -> String {
-    format!(
-        "
-[idp.entra]
-base_url = \"{base_url}\"
-[idp.entra.credentials]
-token_endpoint = \"https://login.example.org/tenant-1/oauth2/v2.0/token\"
-client_id = \"synthetic-graph-reader\"
-client_secret = \"synthetic-graph-secret\"
-"
-    )
-}
-
-#[cfg(feature = "idp-entra")]
-#[test]
-fn the_idp_entra_table_builds_its_adapter_and_the_binding_registers_it() -> Outcome2 {
-    let resolved = section(&format!(
-        "{ISSUERS}{}",
-        entra_table("https://graph.microsoft.com/v1.0")
-    ))?
-    .resolve(&[])?;
-    let names: Vec<&str> = resolved.adapters.iter().map(|(name, _)| name).collect();
-    assert_eq!(vec![ferrohealth_smart::idp::entra::NAME], names);
-    let source: Arc<dyn PartySource> = FakeSource::answering(one_professional());
-    let binding = PartyBinding::new(source)
-        .with_resolved(&resolved)?
-        .with_issuer(
-            table(),
-            IssuerKind::Persons,
-            &Profile {
-                adapter: Some(String::from(ferrohealth_smart::idp::entra::NAME)),
-                ..profile()
-            },
-        )?;
-    assert!(format!("{binding:?}").contains("idp-entra"), "{binding:?}");
-    Ok(())
-}
-
-#[cfg(feature = "idp-entra")]
-#[test]
-fn an_idp_entra_table_breaking_a_rule_is_refused_naming_the_adapter() -> Outcome2 {
-    let refused = section(&format!(
-        "{ISSUERS}{}",
-        entra_table("http://graph.example.org")
-    ))?
-    .resolve(&[])
-    .expect_err("an http Graph root is refused");
-    assert!(
-        matches!(
-            refused,
-            ConfigError::Adapter {
-                adapter: "idp-entra",
-                ..
-            }
-        ),
-        "{refused:?}"
-    );
-    Ok(())
-}
-
-#[cfg(feature = "idp-entra")]
-#[test]
-fn an_unknown_key_of_the_idp_tables_is_refused() {
-    for unknown in [
-        format!(
-            "{}colour = \"blue\"\n",
-            entra_table("https://graph.microsoft.com/v1.0")
-        ),
-        String::from("\n[idp.okta]\nbase_url = \"https://okta.example.org\"\n"),
-    ] {
-        assert!(
-            section(&format!("{ISSUERS}{unknown}")).is_err(),
-            "{unknown:?} was read"
-        );
-    }
-}
-
-#[test]
-fn without_an_idp_table_no_adapter_is_built() -> Outcome2 {
-    let resolved = section(ISSUERS)?.resolve(&[])?;
-    assert!(resolved.adapters.is_empty(), "{:?}", resolved.adapters);
-    Ok(())
-}
-
-#[cfg(not(feature = "idp-entra"))]
-#[test]
-fn a_build_without_the_entra_adapter_refuses_its_table() {
-    assert!(
-        section(&format!(
-            "{ISSUERS}\n[idp.entra]\nbase_url = \"https://graph.microsoft.com/v1.0\"\n"
-        ))
-        .is_err(),
-        "a table for an adapter the build lacks was read"
-    );
 }

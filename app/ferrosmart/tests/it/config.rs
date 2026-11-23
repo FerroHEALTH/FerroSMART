@@ -5,7 +5,7 @@
 
 use ferrosmart::config::error::Error;
 
-use crate::support::{Keys, config, ec_key};
+use crate::support::{ASSURANCE, Keys, config, ec_key};
 
 #[test]
 fn a_configuration_with_an_issuer_and_a_key_resolves() {
@@ -195,13 +195,13 @@ fn the_refresh_idle_times_default_and_refuse_zero() {
 fn a_missing_or_unreadable_key_is_refused() {
     let keys = Keys::new();
     let missing = format!(
-        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_file = {:?}",
+        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_files = [{:?}]",
         keys.dir.path().join("absent.pem").display().to_string()
     );
     assert!(matches!(
         config(&missing, &keys).resolve(),
         Err(Error::KeyFile {
-            key: "ferrosmart.keys.private_key_file",
+            key: "ferrosmart.keys.private_key_files",
             ..
         })
     ));
@@ -216,7 +216,7 @@ fn a_missing_or_unreadable_key_is_refused() {
     assert!(matches!(
         none.resolve(),
         Err(Error::Missing {
-            key: "ferrosmart.keys.private_key_file"
+            key: "ferrosmart.keys.private_key_files"
         })
     ));
 }
@@ -226,13 +226,13 @@ fn a_key_that_cannot_sign_rs256_is_refused() {
     let keys = Keys::new();
     let ec = ec_key(keys.dir.path(), "ec.pem");
     let text = format!(
-        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_file = {:?}",
+        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_files = [{:?}]",
         ec.display().to_string()
     );
     assert!(matches!(
         config(&text, &keys).resolve(),
         Err(Error::Key {
-            key: "ferrosmart.keys.private_key_file",
+            key: "ferrosmart.keys.private_key_files",
             ..
         })
     ));
@@ -242,12 +242,12 @@ fn a_key_that_cannot_sign_rs256_is_refused() {
 fn a_ring_that_names_one_key_twice_is_refused() {
     let keys = Keys::new();
     let text = format!(
-        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_file = {current:?}\nnext_private_key_file = {current:?}",
+        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_files = [{current:?}, {current:?}]",
         current = keys.current.display().to_string()
     );
     assert!(matches!(
         config(&text, &keys).resolve(),
-        Err(Error::KeyRing { .. })
+        Err(Error::RepeatedKey { .. })
     ));
 }
 
@@ -260,11 +260,24 @@ fn an_unknown_key_is_refused_when_the_file_loads() {
     assert!(matches!(refused, Err(Error::Load(_))));
 }
 
+// NOTE: RFC 6749 §2, registration is the server's: a client lives in the store alone.
+#[test]
+fn a_client_table_is_refused_as_an_unknown_key() {
+    let refused = ferrosmart::config::Config::from_sources(
+        Some(
+            "[ferrosmart]\nissuer = \"https://smart.example.org\"\n\
+             [[ferrosmart.client]]\nclient_id = \"app\"\nkind = \"public\"",
+        ),
+        &std::collections::BTreeMap::new(),
+    );
+    assert!(matches!(refused, Err(Error::Load(_))));
+}
+
 #[test]
 fn a_missing_database_url_is_refused() {
     let keys = Keys::new();
     let text = format!(
-        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.database]\nmax_connections = 4\n[ferrosmart.keys]\nprivate_key_file = {:?}",
+        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.database]\nmax_connections = 4\n[ferrosmart.keys]\nprivate_key_files = [{:?}]",
         keys.current.display().to_string()
     );
     assert!(matches!(
@@ -441,8 +454,9 @@ fn upstream(keys: &Keys, extra: &str) -> String {
     let current = keys.current.display().to_string();
     format!(
         "[ferrosmart]\nissuer = \"https://smart.example.org\"\n\
-         [ferrosmart.keys]\nprivate_key_file = {current:?}\n\
-         [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = \"https://idp.example.org\"\nclient_id = \"ferrosmart\"\n{extra}"
+         [ferrosmart.keys]\nprivate_key_files = [{current:?}]\n\
+         [[ferrosmart.upstream]]\nname = \"idp\"\n{ASSURANCE}\
+         [ferrosmart.upstream.oidc]\nissuer = \"https://idp.example.org\"\nclient_id = \"ferrosmart\"\n{extra}"
     )
 }
 
@@ -684,4 +698,60 @@ fn the_purposes_of_use_belong_to_an_openehr_base_and_each_is_a_header_value() {
             "{kind} {table}"
         );
     }
+}
+
+// NOTE: RFC 7591 §5, an app's own registration is held to patient-facing scopes:
+// an open registration names them, and never a user/ or system/ scope.
+#[test]
+fn an_open_registration_names_a_patient_facing_scope() {
+    let keys = Keys::new();
+    for (registration, admitted) in [
+        (
+            "open = true\nscope = \"openid patient/Observation.rs\"",
+            true,
+        ),
+        ("open = false\nscope = \"user/Observation.rs\"", true),
+        ("open = true", false),
+        ("open = true\nscope = \"openid user/Observation.rs\"", false),
+        ("open = true\nscope = \"system/Patient.rs\"", false),
+    ] {
+        let text = format!(
+            "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.registration]\n{registration}"
+        );
+        let resolved = config(&text, &keys).resolve();
+        assert_eq!(admitted, resolved.is_ok(), "{registration}: {resolved:?}");
+    }
+}
+
+// NOTE: SMART App Launch 2.2.0, User Access Brands, Organization.name: the
+// deployment's one name, which a brand naming none takes.
+#[test]
+fn the_deployment_s_name_is_one_key_the_brand_takes_by_default() {
+    let keys = Keys::new();
+    let text = "[ferrosmart]\nname = \"Example Hospital\"\nissuer = \"https://smart.example.org\"\n\
+                [[ferrosmart.resource]]\nbase = \"https://fhir.example.org/r4\"\n\
+                [ferrosmart.brand]\nwebsite = \"https://example.org\"\n\
+                [[ferrosmart.brand.endpoint]]\nbase = \"https://fhir.example.org/r4\"\n\
+                fhir_version = [\"4.0.1\"]\ncontact = [\"https://developer.example.org\"]\n";
+    let settings = config(text, &keys).resolve().expect("resolves");
+    assert_eq!("Example Hospital", settings.name);
+    let brands = settings.brand.expect("a Bundle");
+    let instants = brands
+        .digests()
+        .into_keys()
+        .map(|resource| (resource, String::from("2026-11-23T00:00:00Z")))
+        .collect();
+    let changed = ferrosmart::brands::Changed::new(&brands, &instants).expect("changed");
+    let bundle = brands.bundle(&changed).to_string();
+    assert!(bundle.contains("\"name\":\"Example Hospital\""), "{bundle}");
+    let refused = ferrosmart::config::Config::from_sources(
+        Some(
+            "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.branding]\nname = \"x\"",
+        ),
+        &std::collections::BTreeMap::new(),
+    );
+    assert!(
+        matches!(refused, Err(Error::Load(_))),
+        "the branding name is gone"
+    );
 }

@@ -40,8 +40,11 @@ pub async fn dispatch(cli: Cli) -> Result<ExitCode, Failure> {
     let command = match cli.command {
         Command::Common(command) => command,
         Command::Client {
-            command: ClientCommand::HashSecret,
-        } => return hash_secret(),
+            command: ClientCommand::Apply { files },
+        } => return Box::pin(apply_clients(&cli.config, &files)).await,
+        Command::Client {
+            command: ClientCommand::Secret { client_id },
+        } => return Box::pin(rotate_secret(&cli.config, &client_id)).await,
         Command::Subject { upstream, sub } => return subject(&cli.config, &upstream, &sub),
         Command::Upstream {
             command: UpstreamCommand::Registration { name },
@@ -58,7 +61,7 @@ pub async fn dispatch(cli: Cli) -> Result<ExitCode, Failure> {
         Common::Healthcheck => healthcheck(&settings).await,
         Common::Config {
             command: ConfigCommand::Check,
-        } => config_check(&loaded, &settings),
+        } => config_check(&loaded),
         Common::Serve => {
             let telemetry = loaded.settings().telemetry.clone();
             Box::pin(serve(settings, telemetry)).await
@@ -66,29 +69,73 @@ pub async fn dispatch(cli: Cli) -> Result<ExitCode, Failure> {
     }
 }
 
-/// Runs `client hash-secret`: the secret on standard input, without its
-/// final line break, hashed with Argon2id at the OWASP Password Storage
-/// Cheat Sheet floor (m=19456, t=2, p=1) under a fresh 16-byte salt, and the
-/// PHC string printed. The parameters are those `secret_hash_file` requires
-/// (`docs/architecture.md` §13.9); the subcommand is our own design.
+/// Runs `client apply`: each file's client document written to the
+/// registry by [`crate::admin::apply`], in the order given, one line per
+/// client. The first file that cannot be read or is refused stops the job;
+/// the clients before it stay written.
+#[expect(
+    clippy::print_stdout,
+    reason = "the job's answer, a line per client, goes to standard output"
+)]
+async fn apply_clients(
+    args: &ConfigArgs,
+    files: &[std::path::PathBuf],
+) -> Result<ExitCode, Failure> {
+    let state = registry(args).await?;
+    for file in files {
+        let named = |context: &str| format!("{context} {}", file.display());
+        let bytes = std::fs::read(file)
+            .map_err(|error| Failure::from(error).with_context(named("cannot read")))?;
+        let document: crate::admin::document::ClientDocument = serde_json::from_slice(&bytes)
+            .map_err(|error| Failure::from(error).with_context(named("no client document in")))?;
+        let applied = crate::admin::apply(&state, document)
+            .await
+            .map_err(|error| Failure::from(error).with_context(named("cannot apply")))?;
+        let client = &applied.registered.client;
+        let done = if applied.created {
+            "created"
+        } else {
+            "replaced"
+        };
+        println!("ferrosmart: client {:?} {done}", client.client_id);
+        if let Some(secret) = &applied.secret {
+            println!(
+                "ferrosmart: client {:?} client_secret {}",
+                client.client_id,
+                secrecy::ExposeSecret::expose_secret(secret)
+            );
+        }
+        if let Some(warning) = crate::clients::unassured_public(client) {
+            println!("ferrosmart: warning: {warning}");
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Returns the state the `client` jobs write the registry through: the
+/// settings `args` name and the store, migrated.
+async fn registry(args: &ConfigArgs) -> Result<AppState, Failure> {
+    let settings = Config::load(args)
+        .and_then(|loaded| loaded.settings().resolve())
+        .map_err(Failure::refused_configuration)?;
+    let store = migrated(&settings, 1).await?;
+    let audit = crate::audit::Audit::new(settings.audit.observer.clone());
+    Ok(AppState::new(settings, store, audit))
+}
+
+/// Runs `client secret`: a new secret for the confidential symmetric client
+/// `client_id`, its hash stored and the change recorded, the secret printed
+/// once (RFC 7591 §3.2.1).
 #[expect(
     clippy::print_stdout,
     reason = "the job's one answer goes to standard output"
 )]
-fn hash_secret() -> Result<ExitCode, Failure> {
-    let mut secret = String::new();
-    std::io::Read::read_to_string(&mut std::io::stdin(), &mut secret)
-        .map_err(|error| Failure::from(error).with_context("cannot read the secret"))?;
-    let secret = secret.strip_suffix('\n').map_or(secret.as_str(), |line| {
-        line.strip_suffix('\r').unwrap_or(line)
-    });
-    if secret.is_empty() {
-        return Err(Failure::boxed("the secret is empty"));
-    }
-    println!(
-        "{}",
-        crate::clients::hash_secret(secret).map_err(Failure::from)?
-    );
+async fn rotate_secret(args: &ConfigArgs, client_id: &str) -> Result<ExitCode, Failure> {
+    let state = registry(args).await?;
+    let secret = crate::admin::issue_secret(&state, client_id)
+        .await
+        .map_err(|error| Failure::from(error).with_context("cannot issue the secret"))?;
+    println!("{}", secrecy::ExposeSecret::expose_secret(&secret));
     Ok(ExitCode::SUCCESS)
 }
 
@@ -137,11 +184,8 @@ fn registration(args: &ConfigArgs, name: &str) -> Result<ExitCode, Failure> {
     clippy::print_stdout,
     reason = "the job's one answer goes to standard output"
 )]
-fn config_check(loaded: &Loaded<Config>, settings: &Settings) -> Result<ExitCode, Failure> {
+fn config_check(loaded: &Loaded<Config>) -> Result<ExitCode, Failure> {
     ferrohealth_server::run::config_check(loaded)?;
-    for warning in crate::clients::unassured_first_party(&settings.clients) {
-        println!("ferrosmart: warning: {warning}");
-    }
     println!("ferrosmart: the configuration is valid");
     Ok(ExitCode::SUCCESS)
 }
@@ -191,45 +235,37 @@ async fn serve(settings: Settings, section: TelemetrySection) -> Result<ExitCode
     served
 }
 
-/// Serves the state `settings` describe until `SIGTERM` or `SIGINT`.
-async fn listen_and_serve(settings: Settings) -> Result<ExitCode, Failure> {
-    let listen = settings.server.listen;
-    let section = settings.server.clone();
-    let store = Store::connect(&settings.database_url, settings.max_connections)
+/// Returns the store `settings` name, over at most `connections`
+/// connections, with its migrations run.
+async fn migrated(settings: &Settings, connections: u32) -> Result<Store, Failure> {
+    let store = Store::connect(&settings.database_url, connections)
         .await
         .map_err(|error| Failure::not_up(error).with_context("cannot reach the database"))?;
     store
         .migrate()
         .await
         .map_err(|error| Failure::not_up(error).with_context("cannot migrate the database"))?;
+    Ok(store)
+}
+
+/// Serves the state `settings` describe until `SIGTERM` or `SIGINT`.
+async fn listen_and_serve(settings: Settings) -> Result<ExitCode, Failure> {
+    let listen = settings.server.listen;
+    let section = settings.server.clone();
+    let store = migrated(&settings, settings.max_connections).await?;
     let audit = crate::audit::Audit::new(settings.audit.observer.clone());
-    let issuer = settings.endpoint_url("");
-    let origin = crate::approvals::Origin {
-        issuer: &settings.issuer,
-        endpoint: &issuer,
-        host: listen.ip(),
-    };
-    crate::approvals::withdraw_lapsed(&store, &audit, &settings.clients, origin)
-        .await
-        .map_err(|error| {
-            Failure::not_up(error).with_context("cannot withdraw a lapsed organisation approval")
-        })?;
-    let managed = store
-        .register(&settings.clients)
-        .await
-        .map_err(|error| Failure::not_up(error).with_context("cannot register the clients"))?;
-    for client_id in managed {
-        tracing::warn!(
-            %client_id,
-            "the client's [[ferrosmart.client]] table is not written: the admin API changed the client, so the store is its source"
-        );
-    }
     let forwarder = settings.audit.feed.clone().map(|feed| {
         let forwarder = Forwarder::fhir_feed_from(audit.outbox(store.clone(), FEED_IDLE), feed);
         let running = tokio::spawn(Arc::clone(&forwarder).run());
         (forwarder, running)
     });
-    let sweeper = tokio::spawn(sweep(store.clone()));
+    settings
+        .keys
+        .refresh(&store, jiff::Timestamp::now().as_second())
+        .await
+        .map_err(|error| Failure::not_up(error).with_context("cannot read the signing keys"))?;
+    let rotation = tokio::spawn(Arc::clone(&settings.keys).run(store.clone()));
+    let sweeper = tokio::spawn(sweep(store.clone(), settings.recent_retention));
     let providers = Providers::connect(
         &settings.upstreams,
         &settings.endpoint_url(crate::authorize::CALLBACK_ROUTE),
@@ -261,6 +297,7 @@ async fn listen_and_serve(settings: Settings) -> Result<ExitCode, Failure> {
     let stop = ferrohealth_server::serve::shutdown_signal();
     let served = ferrohealth_server::serve::run(listener, app, &section, lifecycle, stop).await;
     sweeper.abort();
+    rotation.abort();
     // NOTE: ITI TF-2 §3.20.4.1.1, a record not yet delivered stays in the store
     // and the next start sends it.
     if let Some((forwarder, running)) = forwarder {
@@ -287,14 +324,18 @@ pub const FEED_IDLE: Duration = Duration::from_secs(5);
 /// No specification governs the value: our own design.
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Deletes the expired rows every [`SWEEP_INTERVAL`]; a failed sweep is
-/// logged and the next one tries again.
-async fn sweep(store: Store) {
+/// Deletes the expired rows, and the recent patients older than
+/// `retention`, every [`SWEEP_INTERVAL`]; a failed sweep is logged and the
+/// next one tries again.
+async fn sweep(store: Store, retention: Duration) {
     let mut interval = tokio::time::interval(SWEEP_INTERVAL);
     loop {
         interval.tick().await;
         if let Err(error) = store.sweep().await {
             tracing::warn!(error = %chain(&error), "the expired rows were not swept");
+        }
+        if let Err(error) = store.sweep_recent(retention).await {
+            tracing::warn!(error = %chain(&error), "the lapsed recent patients were not swept");
         }
     }
 }

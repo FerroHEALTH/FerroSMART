@@ -54,8 +54,6 @@ mod introspection;
 mod issuer_lists;
 mod key_file;
 #[cfg(feature = "fetch")]
-mod keycloak_live;
-#[cfg(feature = "fetch")]
 mod metadata;
 mod nl_profile;
 #[cfg(feature = "oidc")]
@@ -88,7 +86,6 @@ mod section_eq;
 mod sender;
 #[cfg(feature = "fetch")]
 mod shape;
-mod standing;
 #[cfg_attr(
     not(feature = "fetch"),
     expect(

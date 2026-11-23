@@ -27,8 +27,8 @@
 #
 # The signing key signs every access token under RS256 and is published,
 # public half only, at the `jwks_uri` of the SMART configuration. Rotation
-# adds a next and a previous key ([ferrosmart.keys], in the configuration
-# file below).
+# takes a second key file in the list (FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILES,
+# comma separated) and hands over every `rotation_period`.
 #
 # CONFIGURATION. The environment below sets what the quickstart needs, and
 # every key of the configuration tree is reachable the same way, as
@@ -41,22 +41,30 @@
 #   FERROSMART_RESOURCE   the base URL of the FHIR server the tokens are for,
 #                         their `aud` (default http://localhost:8090/fhir)
 #
-# Clients, more resource servers and the rest of the policy go in a
-# configuration file in the ./config directory beside this one, which
-# FERROSMART_CONFIG names. A Backend Services client with its JWK Set URL:
+# More resource servers and the rest of the policy go in a configuration
+# file in the ./config directory beside this one, which FERROSMART_CONFIG
+# names (FERROSMART_CONFIG=/etc/ferrosmart/ferrosmart.toml).
+#
+# CLIENTS. Clients live in FerroSMART's database. Write each as a JSON client
+# document in ./config and apply it; `client apply` creates the client or
+# replaces the one with its client_id, and records the change. The first is
+# the administrator, a Backend Services client whose `system/admin` scope
+# reaches the admin API, with its JWK Set URL:
 #
 #   mkdir -p config
-#   cat > config/ferrosmart.toml <<'TOML'
-#   [[ferrosmart.client]]
-#   client_id = "bulk-export"
-#   name = "Bulk export"
-#   kind = "confidential_asymmetric"
-#   jwks_uri = "https://export.example.org/jwks.json"
-#   resources = ["http://localhost:8090/fhir"]
-#   scopes = ["system/Patient.rs", "system/Observation.rs"]
-#   grant_types = ["client_credentials"]
-#   TOML
-#   FERROSMART_CONFIG=/etc/ferrosmart/ferrosmart.toml
+#   cat > config/admin.json <<'JSON'
+#   {
+#     "client_id": "admin",
+#     "client_name": "Administrator",
+#     "token_endpoint_auth_method": "private_key_jwt",
+#     "jwks_uri": "https://admin.example.org/jwks.json",
+#     "scope": "system/admin",
+#     "grant_types": ["client_credentials"]
+#   }
+#   JSON
+#   docker compose run --rm ferrosmart client apply /etc/ferrosmart/admin.json
+#
+# Every other client goes the same way, or through the admin API.
 #
 # The environment wins over the file. `docker compose run --rm ferrosmart
 # config check` prints the resolved configuration with every secret masked.
@@ -91,7 +99,7 @@ services:
       # or .env sets it, so no file is read until you write one.
       FERROSMART_CONFIG:
       FERROSMART__FERROSMART__ISSUER: ${FERROSMART_ISSUER:-http://localhost:8080}
-      FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILE: /run/secrets/signing_key
+      FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILES: /run/secrets/signing_key
       FERROSMART__FERROSMART__DATABASE__URL_FILE: /run/secrets/database_url
       FERROSMART__FERROSMART__RESOURCE__0__BASE: ${FERROSMART_RESOURCE:-http://localhost:8090/fhir}
       FERROSMART__FERROSMART__RESOURCE__0__KIND: fhir

@@ -102,6 +102,13 @@ impl Saml {
     /// Starts FerroSMART over the SAML provider of `shape`, with the
     /// further `[[ferrosmart.upstream]]` entries `beside`.
     async fn start_beside(shape: Shape, beside: &str) -> Self {
+        Self::start_full(shape, beside, "substantial", "").await
+    }
+
+    /// Starts the server of [`Saml::start_beside`] whose provider's class
+    /// stands for the eIDAS level `level` and whose app's table carries
+    /// `client` too.
+    async fn start_full(shape: Shape, beside: &str, level: &str, client: &str) -> Self {
         let provider = Provider::start().await;
         let keys = Keys::new();
         let dir = keys.dir.path();
@@ -142,11 +149,12 @@ impl Saml {
              name_id_format = {PERSISTENT:?}\nauthn_contexts = [{strong:?}]\n\
              fhir_user_claim = \"fhir_user\"\nrole_claims = [\"roles\"]\n\
              [ferrosmart.upstream.saml.claims]\nname = \"displayName\"\nroles = \"role\"\nfhir_user = \"fhirUser\"\n\
+             [ferrosmart.upstream.assurance]\nlevels = {{ {strong:?} = {level:?} }}\n\
              {beside}\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = [\"user/Observation.rs\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"app\"\nclient_name = \"Synthetic App\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\"]",
+             scope = [\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n{client}",
             database = secrecy::ExposeSecret::expose_secret(&database.url),
             sp_entity = kit::SP,
             sp_key = written(dir, "sp-key.pem", &sp.key),
@@ -164,10 +172,11 @@ impl Saml {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let providers = crate::support::providers(&settings).await;
         let audit = audit(&settings);
         let state = AppState::new(settings.clone(), store.clone(), audit).with_login(providers);
+        let clients = crate::support::clients(&crate::support::reach_every_base(&text));
+        crate::support::apply(&state, &clients).await;
         Self {
             smart: Smart {
                 app: router(Arc::new(state)),
@@ -176,6 +185,7 @@ impl Saml {
                 database,
                 _keys: keys,
                 settings,
+                clients,
             },
             idp: signing_key(&idp),
             ars,
@@ -235,7 +245,7 @@ fn assertion(request_id: &str) -> Assertion {
         attributes: String::from(concat!(
             "<saml:Attribute Name=\"displayName\"><saml:AttributeValue>Synthetic Clinician</saml:AttributeValue></saml:Attribute>",
             "<saml:Attribute Name=\"role\"><saml:AttributeValue>clinician</saml:AttributeValue></saml:Attribute>",
-            "<saml:Attribute Name=\"fhirUser\"><saml:AttributeValue>Practitioner/synthetic-1</saml:AttributeValue></saml:Attribute>"
+            "<saml:Attribute Name=\"fhirUser\"><saml:AttributeValue>RelatedPerson/synthetic-1</saml:AttributeValue></saml:Attribute>"
         )),
         ..Assertion::default()
     }
@@ -368,12 +378,17 @@ async fn a_saml_login_by_post_reaches_the_consent_page_and_is_recorded() {
         .expect("reads")
         .expect("the request");
     assert_eq!(
-        Some("Practitioner/synthetic-1"),
+        Some("RelatedPerson/synthetic-1"),
         pending.fhir_user.as_deref(),
         "the fhirUser claim the attribute maps to"
     );
     assert_eq!(vec![String::from("clinician")], pending.roles);
     assert_eq!(Some("Synthetic Clinician"), pending.display_name.as_deref());
+    assert_eq!(
+        Some(ferrohealth_smart::assurance::AssuranceLevel::Substantial),
+        pending.acr,
+        "the level the class maps to"
+    );
     let recorded = logins(&saml.smart.store).await;
     let login = recorded.last().expect("the login is recorded");
     assert!(login.contains("\"outcome\":\"0\""), "{login}");
@@ -515,6 +530,58 @@ async fn a_class_below_the_minimum_is_refused_by_name() {
     saml.stop().await;
 }
 
+// NOTE: docs/architecture.md §13.28, the class's eIDAS level against the level the
+// client's default_acr_values ask for (OpenID Connect Dynamic Client Registration 1.0 §2).
+#[tokio::test]
+async fn a_class_is_held_to_its_eidas_level_and_the_client_s_default_acr_values() {
+    for (level, minimum, error) in [
+        ("high", "", None),
+        (
+            "substantial",
+            "default_acr_values = [\"http://eidas.europa.eu/LoA/high\"]",
+            Some("unmet_authentication_requirements"),
+        ),
+    ] {
+        let saml = Saml::start_full(Shape::Post, "", level, minimum).await;
+        let begun = begin(&saml.smart).await;
+        let response = saml.answer(&assertion(&begun.request_id));
+        let (status, headers, page) = saml
+            .acs_post(
+                &[
+                    ("SAMLResponse", &response),
+                    ("RelayState", &begun.relay_state),
+                ],
+                Some(&begun.binding),
+            )
+            .await;
+        assert_eq!(StatusCode::SEE_OTHER, status, "{page}");
+        let back = location(&headers);
+        match error {
+            None => {
+                assert_eq!("/consent", back.path());
+                let pending = saml
+                    .smart
+                    .store
+                    .pending(&begun.cookie)
+                    .await
+                    .expect("reads")
+                    .expect("the request");
+                assert_eq!(
+                    Some(ferrohealth_smart::assurance::AssuranceLevel::High),
+                    pending.acr
+                );
+            }
+            Some(error) => {
+                assert_eq!(Some(String::from(error)), param(&back, "error"));
+                let recorded = logins(&saml.smart.store).await;
+                let login = recorded.last().expect("the refusal is recorded");
+                assert!(login.contains("\"outcome\":\"4\""), "{login}");
+            }
+        }
+        saml.stop().await;
+    }
+}
+
 #[tokio::test]
 async fn a_provider_s_status_other_than_success_is_access_denied() {
     let saml = Saml::start(Shape::Post).await;
@@ -631,7 +698,7 @@ async fn the_chooser_lists_a_saml_provider_beside_an_openid_connect_one() {
     let oidc = Provider::start().await;
     let beside = format!(
         "[[ferrosmart.upstream]]\nname = \"staff\"\nlabel = \"Hospital staff\"\n\
-         [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n{assertion}",
+         [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n{assertion}{ASSURANCE}",
         oidc.server.uri()
     );
     let saml = Saml::start_beside(Shape::Post, &beside).await;
@@ -770,7 +837,9 @@ fn a_saml_provider_without_its_service_provider_or_complete_table_is_refused_at_
     let entry = |extra: &str| {
         format!(
             "[ferrosmart]\nissuer = {ISSUER:?}\n[[ferrosmart.upstream]]\nname = \"national\"\n\
+             [ferrosmart.upstream.assurance]\nlevels = {{ {:?} = \"substantial\" }}\n\
              [ferrosmart.upstream.saml]\nentity_id = {:?}\nmetadata_file = {metadata}\n{extra}",
+            kit::STRONG,
             kit::IDP
         )
     };

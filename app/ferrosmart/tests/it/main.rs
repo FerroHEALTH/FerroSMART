@@ -10,6 +10,7 @@
 )]
 
 mod admin;
+mod admin_subjects;
 mod audit;
 mod authorize;
 mod brands;
@@ -20,15 +21,20 @@ mod ehr_launch;
 mod ig_examples;
 mod introspection;
 mod launch;
+mod openapi;
 mod refresh;
+mod registration;
 mod replicas;
 mod resources;
 mod revocation;
 mod saml;
 mod screenshots;
+mod sender;
+mod signing;
 mod store;
 mod support;
 mod symmetric;
 mod token;
 mod upstream_config;
 mod upstream_vendors;
+mod upstreams;

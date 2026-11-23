@@ -82,7 +82,6 @@ impl OwnTokens {
             Some(record.client_id),
             &record.scope,
             None,
-            false,
             CallerKind::System,
         )
         .with_issuer(issuer.clone()))
@@ -96,6 +95,35 @@ impl Verifier for OwnTokens {
     ) -> Pin<Box<dyn Future<Output = Result<Caller, Rejection>> + Send + 'a>> {
         Box::pin(self.caller(token))
     }
+}
+
+/// Returns the client the administrator's bearer `token` belongs to: an
+/// active FerroSMART access token for its own issuer whose scope holds
+/// [`ADMIN_SCOPE`], of an enabled client; `None` for any other token.
+///
+/// # Errors
+/// Returns [`crate::store::StoreError`] when the store cannot be read.
+pub(crate) async fn administrator(
+    state: &AppState,
+    token: &str,
+) -> Result<Option<String>, crate::store::StoreError> {
+    let Some(jti) = crate::introspect::own_access_token(state, token) else {
+        return Ok(None);
+    };
+    let store = state.store();
+    let Some(record) = store
+        .access_token(&jti)
+        .await?
+        .filter(|record| record.active)
+    else {
+        return Ok(None);
+    };
+    let admin = record.audience == state.settings().issuer
+        && record.scope.split(' ').any(|scope| scope == ADMIN_SCOPE);
+    if !admin || store.client(&record.client_id).await?.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(record.client_id))
 }
 
 /// How the guard reads an admin request: every route the admin router

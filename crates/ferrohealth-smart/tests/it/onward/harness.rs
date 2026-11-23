@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! The harness token endpoint and the three profiles every criterion runs
-//! under: a standards-only authorization server, the `entra` preset and the
-//! `keycloak` preset, each with a person's subject token and the token its
+//! The harness token endpoint and the profiles every criterion runs under:
+//! an RFC 9068 authorization server with token exchange, and one with the
+//! JWT bearer grant, each with a person's subject token and the token its
 //! exchange issues.
 
 use std::sync::Arc;
@@ -17,8 +17,6 @@ use ferrohealth_smart::client::onward::exchange::Onward;
 use ferrohealth_smart::client::onward::exchange::OnwardToken;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
-use ferrohealth_smart::profile::Marker;
-use ferrohealth_smart::profile::Preset;
 use ferrohealth_smart::profile::Profile;
 use ferrohealth_smart::profile::ProfileKeys;
 use ferrohealth_smart::profile::onward::OnwardGrant;
@@ -27,7 +25,6 @@ use jsonwebtoken::Algorithm;
 use jsonwebtoken::DecodingKey;
 use jsonwebtoken::Validation;
 use jsonwebtoken::jwk::Jwk;
-use secrecy::SecretString;
 use serde_json::Value;
 use serde_json::json;
 use wiremock::Mock;
@@ -51,17 +48,6 @@ use crate::support::ec_key;
 /// The token endpoint route of every harness.
 pub(crate) const ROUTE: &str = "/token";
 
-/// The Entra ID tenant of the cases, in the placeholder form Microsoft's
-/// documents use.
-pub(crate) const TENANT: &str = "aaaabbbb-0000-cccc-1111-dddd2222eeee";
-
-/// The middle tier's application id under the `entra` preset, the client
-/// id of the "Second case" example.
-pub(crate) const ENTRA_CLIENT: &str = "11112222-bbbb-3333-cccc-4444dddd5555";
-
-/// The downstream API's application id under the `entra` preset.
-pub(crate) const ENTRA_TARGET: &str = "22223333-cccc-4444-dddd-5555eeee6666";
-
 /// The profile a harness runs under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Flavor {
@@ -69,22 +55,16 @@ pub(crate) enum Flavor {
     Generic,
     /// A standards-only authorization server with the JWT bearer grant.
     GenericJwtBearer,
-    /// The `entra` preset: the on-behalf-of flow.
-    Entra,
-    /// The `keycloak` preset: the standard token exchange.
-    Keycloak,
 }
 
-/// The three profiles every criterion runs under, standards-only first.
-pub(crate) const FLAVORS: [Flavor; 3] = [Flavor::Generic, Flavor::Entra, Flavor::Keycloak];
+/// The profile every criterion runs under.
+pub(crate) const FLAVORS: [Flavor; 1] = [Flavor::Generic];
 
 impl Flavor {
     /// Returns the issuer identifier.
     pub(crate) fn issuer(self) -> String {
         match self {
             Self::Generic | Self::GenericJwtBearer => String::from("https://as.example.org"),
-            Self::Entra => format!("https://login.microsoftonline.com/{TENANT}/v2.0"),
-            Self::Keycloak => String::from("https://kc.example.org/realms/test"),
         }
     }
 
@@ -92,16 +72,14 @@ impl Flavor {
     pub(crate) const fn client_id(self) -> &'static str {
         match self {
             Self::Generic | Self::GenericJwtBearer => "bridge",
-            Self::Entra => ENTRA_CLIENT,
-            Self::Keycloak => "requester-client",
         }
     }
 
     /// Returns the grant the flavor's profile names.
     pub(crate) const fn grant(self) -> OnwardGrant {
         match self {
-            Self::Generic | Self::Keycloak => OnwardGrant::TokenExchange,
-            Self::GenericJwtBearer | Self::Entra => OnwardGrant::JwtBearer,
+            Self::Generic => OnwardGrant::TokenExchange,
+            Self::GenericJwtBearer => OnwardGrant::JwtBearer,
         }
     }
 
@@ -112,29 +90,11 @@ impl Flavor {
             max_onward_lifetime: Some(ferrohealth_config::units::Duration::from_secs(lifetime)),
             ..ProfileKeys::default()
         };
-        let mut settings = Settings::new(self.issuer(), self.client_id(), IssuerKind::Persons);
-        settings.profile = match self {
-            Self::Generic => Profile::resolve(Preset::Rfc9068, &keys),
-            Self::GenericJwtBearer => Profile::resolve(
-                Preset::Rfc9068,
-                &ProfileKeys {
-                    onward_grant: Some(OnwardGrant::JwtBearer),
-                    ..keys
-                },
-            ),
-            Self::Entra => Profile::resolve(Preset::Entra, &keys),
-            Self::Keycloak => Profile::resolve(
-                Preset::Keycloak,
-                &ProfileKeys {
-                    app_only: Some(vec![Marker::Subjects(vec![String::from(
-                        "service-account-synthetic",
-                    )])]),
-                    ..keys
-                },
-            ),
-        }
-        .expect("the preset reads");
-        settings.profile.first_party_clients = vec![String::from(self.front_client())];
+        let mut settings = Settings::new(self.issuer(), self.client_id(), IssuerKind::Smart);
+        settings.profile = Profile::default().with_keys(ProfileKeys {
+            onward_grant: Some(self.grant()),
+            ..keys
+        });
         settings
     }
 
@@ -142,62 +102,27 @@ impl Flavor {
     const fn front_client(self) -> &'static str {
         match self {
             Self::Generic | Self::GenericJwtBearer => "portal",
-            Self::Entra => "33334444-dddd-5555-eeee-6666ffff7777",
-            Self::Keycloak => "initial-client",
         }
     }
 
     /// Returns the claims of a person's token addressed to the requesting
     /// client, issued at `now`.
     pub(crate) fn subject_claims(self, now: i64) -> Value {
-        let issuer = self.issuer();
-        match self {
-            Self::Generic | Self::GenericJwtBearer => json!({
-                "iss": issuer, "sub": "person-1", "aud": self.client_id(),
-                "client_id": self.front_client(), "iat": now, "exp": now + 600,
-                "jti": "subject-1", "scope": "user/*.rs"
-            }),
-            Self::Entra => json!({
-                "iss": issuer, "aud": ENTRA_CLIENT, "sub": "pairwise-for-the-middle-tier",
-                "oid": "00000000-0000-0000-66f3-3332eca7ea81", "tid": TENANT,
-                "azp": self.front_client(), "ver": "2.0", "scp": "access_as_user",
-                "iat": now, "exp": now + 600, "uti": "subject-uti", "acct": 0
-            }),
-            Self::Keycloak => json!({
-                "iss": issuer, "sub": "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
-                "aud": [self.client_id()], "azp": self.front_client(),
-                "iat": now, "exp": now + 600, "jti": "subject-1", "scope": "default-scope1"
-            }),
-        }
+        json!({
+            "iss": self.issuer(), "sub": "person-1", "aud": self.client_id(),
+            "client_id": self.front_client(), "iat": now, "exp": now + 600,
+            "jti": "subject-1", "scope": "user/*.rs"
+        })
     }
 
     /// Returns the claims of the token an exchange of `subject` issues at
     /// `now`, living 300 seconds.
     pub(crate) fn issued_claims(self, subject: &Value, now: i64) -> Value {
-        let issuer = self.issuer();
-        match self {
-            Self::Generic | Self::GenericJwtBearer => json!({
-                "iss": issuer, "sub": subject["sub"], "aud": "https://ehr.example.org",
-                "client_id": self.client_id(), "iat": now, "exp": now + 300,
-                "jti": "issued-1", "scope": "user/*.rs"
-            }),
-            // NOTE: Microsoft, "Access token claims reference": `sub` is pairwise per
-            // application while `oid` and `tid` stay; `azp` names the caller.
-            Self::Entra => json!({
-                "iss": issuer, "aud": ENTRA_TARGET, "sub": "pairwise-for-the-downstream-api",
-                "oid": subject["oid"], "tid": subject["tid"], "azp": ENTRA_CLIENT,
-                "ver": "2.0", "scp": "Data.Read", "iat": now, "exp": now + 300,
-                "uti": "issued-uti"
-            }),
-            // NOTE: Keycloak 26.8.2 token-exchange.adoc, Example 2: `azp` is the
-            // requester and `aud` only the requested audience.
-            Self::Keycloak => json!({
-                "iss": issuer, "sub": subject["sub"], "azp": "requester-client",
-                "scope": "optional-scope2", "aud": ["target-client2"],
-                "resource_access": { "target-client2": { "roles": ["target-client2-role"] } },
-                "iat": now, "exp": now + 300, "jti": "issued-1"
-            }),
-        }
+        json!({
+            "iss": self.issuer(), "sub": subject["sub"], "aud": "https://ehr.example.org",
+            "client_id": self.client_id(), "iat": now, "exp": now + 300,
+            "jti": "issued-1", "scope": "user/*.rs"
+        })
     }
 
     /// Returns the target the flavor's exchanges are for.
@@ -208,12 +133,6 @@ impl Flavor {
             Self::GenericJwtBearer => {
                 Target::new(["https://ehr.example.org"]).with_scope("https://ehr.example.org/read")
             }
-            Self::Entra => {
-                Target::new([ENTRA_TARGET]).with_scope(format!("api://{ENTRA_TARGET}/.default"))
-            }
-            Self::Keycloak => Target::new(["target-client2"])
-                .with_indicator("target-client2")
-                .with_scope("optional-scope2"),
         }
     }
 
@@ -261,14 +180,7 @@ impl Harness {
     pub(crate) async fn with_settings(flavor: Flavor, settings: Settings) -> Self {
         let server = MockServer::start().await;
         let client = ClientKey::new();
-        let mut credentials = client.credentials(endpoint(&server, ROUTE), flavor.client_id());
-        if flavor == Flavor::Keycloak {
-            credentials = ferrohealth_smart::client::ClientCredentials::new(
-                endpoint(&server, ROUTE),
-                flavor.client_id().to_owned(),
-                SecretString::from("password"),
-            );
-        }
+        let credentials = client.credentials(endpoint(&server, ROUTE), flavor.client_id());
         let clock = TestClock::now();
         let onward = Onward::with_clock(settings, credentials, clock.clone())
             .expect("the onward client builds");
@@ -405,19 +317,6 @@ impl Endpoint {
                 }
             }
             other => return Err(format!("the stub checks no {other:?}")),
-        }
-        if self.flavor == Flavor::Keycloak {
-            let expected = format!(
-                "Basic {}",
-                base64::engine::general_purpose::STANDARD.encode("requester-client:password")
-            );
-            let sent = request
-                .headers
-                .get(http::header::AUTHORIZATION)
-                .and_then(|value| value.to_str().ok());
-            return (sent == Some(expected.as_str()))
-                .then_some(())
-                .ok_or_else(|| String::from("client_secret_basic"));
         }
         self.verify_assertion(&form)
     }

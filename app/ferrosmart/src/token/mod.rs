@@ -12,9 +12,11 @@
 //! 9068 JWT.
 
 pub mod assertion;
+pub mod exchange;
 pub mod grants;
 pub mod mint;
 pub mod secret;
+pub mod sender;
 
 use self::grants::{authorization_code, client_credentials};
 
@@ -43,7 +45,8 @@ pub const JWT_BEARER: &str = "urn:ietf:params:oauth:client-assertion-type:jwt-be
 ///
 /// The client credentials and refresh token grants are always served, since
 /// a refresh token keeps its grant when the deployment stops logging people
-/// in; the authorization code grant needs a login.
+/// in; the authorization code grant and the token exchange of a person's
+/// token need a login.
 ///
 /// The metadata's `grant_types_supported` is this list (RFC 8414 §2), and
 /// the token endpoint refuses every other grant as
@@ -51,7 +54,12 @@ pub const JWT_BEARER: &str = "urn:ietf:params:oauth:client-assertion-type:jwt-be
 #[must_use]
 pub const fn grant_types(login: bool) -> &'static [&'static str] {
     if login {
-        &["authorization_code", "client_credentials", "refresh_token"]
+        &[
+            "authorization_code",
+            "client_credentials",
+            "refresh_token",
+            exchange::TOKEN_EXCHANGE,
+        ]
     } else {
         &["client_credentials", "refresh_token"]
     }
@@ -151,10 +159,12 @@ pub(crate) fn uses_basic(headers: &HeaderMap) -> bool {
 pub async fn token(
     State(state): State<Arc<AppState>>,
     Connected(from): Connected,
+    certificates: Option<axum::Extension<ferrohealth_server::tls::PeerCertificates>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let answer = issue(&state, &headers, &body, from).await;
+    let certificates = certificates.map(|axum::Extension(chain)| chain);
+    let answer = issue(&state, &headers, &body, from, certificates.as_ref()).await;
     // NOTE: a form that cannot be read names no client; the record then says so.
     let form = Params::parse(&body, &[]).ok();
     let endpoint = state.settings().endpoint_url(TOKEN_ROUTE);
@@ -300,6 +310,9 @@ pub struct TokenResponse {
     /// `online_access` (SMART App Launch 2.2.0, Obtain access token).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
+    /// The type of the token issued by a token exchange (RFC 8693 §2.2.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issued_token_type: Option<&'static str>,
     /// The launch context parameters of an app's grant, each a member of the
     /// response (SMART App Launch 2.2.0, Scopes and Launch Context, Launch
     /// context arrives with your `access_token`): `smart_style_url` when
@@ -334,6 +347,13 @@ pub(crate) struct Issued {
 }
 
 impl Issued {
+    /// Returns this answer as a token exchange's, naming the type issued
+    /// (RFC 8693 §2.2.1).
+    fn exchanged(mut self) -> Self {
+        self.response.issued_token_type = Some(exchange::ACCESS_TOKEN_TYPE);
+        self
+    }
+
     /// Returns the access token as the store records it.
     fn record(&self) -> IssuedToken<'_> {
         IssuedToken {
@@ -356,6 +376,7 @@ async fn issue(
     headers: &HeaderMap,
     body: &[u8],
     from: std::net::IpAddr,
+    certificates: Option<&ferrohealth_server::tls::PeerCertificates>,
 ) -> Result<Issued, Refusal> {
     let form = read_form(headers, body)?;
     let grant = form
@@ -368,10 +389,14 @@ async fn issue(
     if !grant_types(!state.providers().is_empty()).contains(&grant) {
         return Err(unsupported);
     }
+    let presented = sender::presented(state, headers, certificates).await?;
     match grant {
-        "client_credentials" => client_credentials(state, &form).await,
-        "authorization_code" => authorization_code(from, state, headers, &form).await,
-        "refresh_token" => crate::refresh::refresh(state, headers, &form, from).await,
+        "client_credentials" => client_credentials(state, &form, &presented).await,
+        "authorization_code" => authorization_code(from, state, headers, &form, &presented).await,
+        "refresh_token" => crate::refresh::refresh(state, headers, &form, from, &presented).await,
+        exchange::TOKEN_EXCHANGE => {
+            exchange::token_exchange(state, headers, &form, from, &presented).await
+        }
         _ => Err(unsupported),
     }
 }
@@ -422,7 +447,7 @@ pub(crate) fn own_jwt(
         return None;
     }
     let kid = header.kid?;
-    let published = settings.keys.published();
+    let published = settings.keys.ring().published();
     let jwk = published
         .get("keys")
         .and_then(Value::as_array)?

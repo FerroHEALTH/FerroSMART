@@ -3,26 +3,30 @@
 
 # The admin API
 
-The admin API changes the client registry while FerroSMART runs, so a new
-app, a changed redirect URI or a withdrawn approval needs no restart. It
-writes the PostgreSQL store every replica reads, and every change takes
-effect on the next request at every replica. SMART App Launch 2.2.0 leaves
-registration to the server (Register App with EHR), so the API is
-FerroSMART's own design.
+The admin API and the registration endpoint change the client registry
+while FerroSMART runs, so a new app, a changed redirect URI or a disabled
+client needs no restart. They write the PostgreSQL store every replica
+reads, and every change takes effect on the next request at every replica.
+Clients are registered and managed through RFC 7591 and RFC 7592, the
+process SMART App Launch 2.2.0 recommends (Register App with EHR); the
+admin routes keep what RFC 7592 has no operation for.
 
 ## Access
 
 Register a Backend Services client for your administration tool, with
-`system/admin` in its ceiling:
+`system/admin` in its ceiling. The first one has no API to go through, so
+apply its document with `ferrosmart client apply registry-admin.json`
+([the client registry](clients.md#the-client-registry)):
 
-```toml
-[[ferrosmart.client]]
-client_id = "registry-admin"
-name = "Registry administration"
-kind = "confidential_asymmetric"
-jwks_uri = "https://admin.example.org/jwks.json"
-scopes = ["system/admin"]
-grant_types = ["client_credentials"]
+```json
+{
+  "client_id": "registry-admin",
+  "client_name": "Registry administration",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "jwks_uri": "https://admin.example.org/jwks.json",
+  "scope": "system/admin",
+  "grant_types": ["client_credentials"]
+}
 ```
 
 The tool asks the token endpoint for `system/admin` with FerroSMART's own
@@ -42,56 +46,66 @@ revoked or expired, issued for its own issuer, and its client still
 registered and enabled. A request without a token answers `401
 invalid_token`, a token without `system/admin` `403 insufficient_scope`.
 
+## The OpenAPI document
+
+`GET {issuer}/admin/openapi.json` answers, without a token, the OpenAPI
+3.1 document of the registration endpoint, the admin routes and the audit
+records, with their request and answer schemas, their scopes and their
+refusals. Its server is your issuer, so a console or a client generator
+can read it straight from the deployment:
+
+```sh
+curl -s https://smart.example.org/admin/openapi.json
+```
+
+The standard endpoints (`/authorize`, `/token`, `/introspect`, `/revoke`
+and the discovery documents) are described by their RFCs and are not in
+it.
+
 ## The routes
 
 | Request | What it does |
 |---|---|
+| `POST /register` | Registers a client (RFC 7591 §3), the admin token as the initial access token; answers `201` |
+| `GET /register/{client_id}` | Reads one client (RFC 7592 §2.1) |
+| `PUT /register/{client_id}` | Replaces a client with the document sent, which names its `client_id` (RFC 7592 §2.2) |
+| `DELETE /register/{client_id}` | Deletes a client and ends everything it held; answers `204` (RFC 7592 §2.3) |
 | `GET /admin/clients` | Lists every client, disabled ones included |
-| `GET /admin/clients/{client_id}` | Reads one client |
-| `POST /admin/clients` | Registers a client; answers `201` with its `Location` |
-| `PUT /admin/clients/{client_id}` | Replaces a client with the document sent |
 | `POST /admin/clients/{client_id}/disable` | Disables a client and ends everything it holds |
 | `POST /admin/clients/{client_id}/enable` | Enables a disabled client |
-| `DELETE /admin/clients/{client_id}/organisation_approval` | Withdraws the client's organisation approval |
 | `GET /admin/keys` | Lists the token signing keys, each public key with its state |
 
 Every answer is JSON with `Cache-Control: no-store`.
 
 ## The client document
 
-The document carries the keys of a `[[ferrosmart.client]]` table
-([the client registry](clients.md#the-client-registry)), with two keys by
-value in place of the files:
-
-- `jwks`: a confidential asymmetric client's JWK Set, in place of
-  `jwks_file`;
-- `secret_hash`: the Argon2id hash of a confidential symmetric client's
-  secret (`ferrosmart client hash-secret` makes it), in place of
-  `secret_hash_file`. FerroSMART never stores or returns the secret, and an
-  answer never carries the hash. A `PUT` of a symmetric client without
-  `secret_hash` keeps the stored one.
+The registration endpoint takes the document `ferrosmart client apply`
+reads ([the client registry](clients.md#the-client-registry)) and ignores a
+member it does not read (RFC 7591 §2). An omitted
+`token_endpoint_auth_method` is `client_secret_basic` and omitted
+`grant_types` are `authorization_code`. An administrator's registration
+may name its `client_id`; without one FerroSMART issues it. For a client that
+authenticates with a secret, the answer that registers it carries the
+secret FerroSMART issued, once, as `client_secret` with
+`client_secret_expires_at` 0 (RFC 7591 §3.2.1); a `PUT` keeps the stored
+secret, and no answer repeats it.
 
 ```json
 {
   "client_id": "growth-chart",
-  "name": "Growth chart",
-  "kind": "public",
+  "client_name": "Growth chart",
+  "token_endpoint_auth_method": "none",
   "redirect_uris": ["https://growth-chart.example.org/callback"],
   "resources": ["https://ehr.example.org/fhir"],
-  "scopes": ["openid", "fhirUser", "launch", "user/Observation.rs"],
+  "scope": "openid fhirUser launch user/Observation.rs",
   "grant_types": ["authorization_code"],
-  "organisation_approval": {
-    "scopes": ["openid", "launch", "user/Observation.rs"],
-    "approved_by": "J. de Vries, information security"
-  }
+  "first_party": false
 }
 ```
 
-An approval without `approved_at` keeps the stored approval's time when its
-scopes, approver and `first_party` mark are unchanged, and takes the time of
-the request otherwise. FerroSMART checks every document by the rules it
-checks a table by at start. An answer adds `source`, `config` or `admin`,
-and `disabled_at` for a disabled client.
+An answer adds `registered_by`, `admin` or `self`
+for an app that registered itself (RFC 7591 §5), and `disabled_at` for a
+disabled client.
 
 ## Refusals
 
@@ -106,18 +120,39 @@ and `disabled_at` for a disabled client.
 | `404` | `not_found` | No client is registered under the id |
 | `409` | `client_exists` | A client is registered under the id already |
 | `409` | `launch_uri_taken` | Another client registers the launch URL |
-| `409` | `unchanged` | The client is in that state already: disabled, enabled, or without an approval |
+| `409` | `unchanged` | The client is in that state already: disabled or enabled |
 
 A refusal with a status below 500 carries an `error_description` that names
 the rule broken.
 
-## Withdrawing and disabling
+## Apps that register themselves
 
-A `PUT` whose approval differs from the stored one, or leaves it out, and a
-`DELETE` of the approval, withdraw the approval in the same transaction as
-the change: every grant issued on it is revoked with its refresh and access
-tokens, and its unredeemed codes are dropped. The person's next refresh
-fails, and introspection answers every revoked token inactive at once.
+With `[ferrosmart.registration] open = true`, `POST /register` also
+answers a request with no token: the app registers itself. FerroSMART
+issues its `client_id`, holds its `scope` to `[ferrosmart.registration]
+scope` (all of it when the app asks none), lets its tokens name every
+configured resource server, and refuses `resources`, `launch_uri`,
+`upstreams` and `first_party` with `invalid_client_metadata`. The answer
+carries a `registration_access_token` and the `registration_client_uri`
+where the app reads, changes and deletes its own registration with it
+(RFC 7592). The person always sees the consent page for such an app
+([the consent rules](consent.md)).
+
+```toml
+[ferrosmart.registration]
+open = true
+scope = "openid fhirUser launch/patient patient/Observation.rs offline_access"
+```
+
+The scope takes no `user/` or `system/` scope: an administrator registers
+professional and backend apps.
+
+## Clearing `first_party` and disabling
+
+A `PUT` that clears `first_party` revokes, in the same transaction, every
+grant issued on it with no page, with its refresh and access tokens, and
+drops its unredeemed codes. The person's next refresh fails, and
+introspection answers every revoked token inactive at once.
 
 Disabling a client ends everything it holds: every grant and access token
 is revoked with its refresh tokens, its codes, launches and pending
@@ -129,29 +164,91 @@ A resource server that checks each JWT itself, without introspection,
 still accepts a revoked access token until it expires, at most
 `access_token_lifetime` later (five minutes by default).
 
-## The configuration as the seed
-
-At every start a `[[ferrosmart.client]]` table writes its client, and a
-client the configuration wrote and no longer lists is removed. Once the API
-creates or changes a client (an update, a disable, an enable, a
-withdrawal), the store is its source: its table is no longer written, and
-FerroSMART logs a warning at start naming it. A client you disable or
-withdraw through the API stays so after a restart.
-
 ## Records
 
 Every change commits with an audit record that names the administration
-client as the requester and the client changed: `client-created`,
+client, or `ferrosmart client apply`, as the requester and the client
+changed: `client-created`,
 `client-updated`, `client-disabled` with how many grants, access tokens
-and consents it ended, `client-enabled`, and
-`organisation-approval-withdrawn` with how many grants it revoked
-([audit records](../operate/audit.md)). Every admin request also writes the
+and consents it ended, and `client-enabled`; a `client-updated` that
+cleared `first_party` names the grants it revoked ([audit records](../operate/audit.md)). Every admin request also writes the
 `ferrohealth_smart::audit` log line with the client and the route.
 
 ## The keys
 
-`GET /admin/keys` lists the token signing ring: the public JWK of each key
-with its state, `active` (signs), `next` (published ahead of a rotation)
-and `retiring` (the previous key, with whether it is still published). The
-private keys stay in the files `[ferrosmart.keys]` names; a rotation
-changes those files ([keys and rotation](../operate/keys.md)).
+`GET /admin/keys` lists the token signing ring the replica publishes: the
+public JWK of each key with its state, `active` (signs), `next` (published
+ahead of the rotation that makes it sign) and `retiring` (published until
+the tokens it signed have expired). The private keys stay in the files
+`[ferrosmart.keys]` names ([keys and rotation](../operate/keys.md)).
+
+## The upstream providers
+
+`GET /admin/upstreams` shows whether each provider people log in at can
+still be read, in configuration order, without reading the logs. Each
+entry carries the provider's `name`, `label`, `protocol` (`oidc` or
+`saml`), its `issuer` (the issuer identifier or the SAML entity ID), the
+`clients` that name it in their `upstreams` (a client that names none may
+use every provider), and its `documents`:
+
+- an OpenID Connect provider's `openid_configuration` and `jwks`, read
+  when the request is answered, since the key set is read at each login
+  and FerroSMART holds no copy of it;
+- a SAML provider's `saml_metadata` as this replica last read it, with
+  `last_good_read_at` (the copy in use) and the metadata's `valid_until`.
+
+Each document has `read_at`, `ok` and, for a failed read, `error`. A key
+set or metadata also lists `certificates_expire_at`, the `notAfter` of
+each signing certificate it carries. A failed SAML read leaves the last
+good copy in use until its `validUntil`. The providers' configuration and
+secrets stay in the file and are never answered.
+
+```json
+{
+  "upstreams": [
+    {
+      "name": "national",
+      "label": "National login",
+      "protocol": "saml",
+      "issuer": "https://idp.example.org/saml",
+      "clients": ["clinic"],
+      "documents": [
+        {
+          "document": "saml_metadata",
+          "read_at": "2026-11-23T10:00:00Z",
+          "ok": false,
+          "error": "the identity provider's metadata cannot be fetched",
+          "last_good_read_at": "2026-11-22T10:00:00Z",
+          "certificates_expire_at": ["2027-06-01T00:00:00Z"]
+        }
+      ]
+    }
+  ]
+}
+```
+## A person's access
+
+An administrator finds a person and ends their access through the API,
+as the person can on the management page. Withdrawing is as easy as
+giving (GDPR Art 7(3)), and each change commits with its record naming
+the admin client and the person.
+
+- `GET /admin/subjects?upstream=<name>&sub=<sub>` answers the person's
+  FerroSMART `subject`: the pairwise subject of their `sub` at the
+  provider `name`, as `ferrosmart subject` prints it.
+- `GET /admin/subjects/{subject}/grants` lists their live grants, newest
+  first (`grant_id`, `client_id`, `aud`, `scope`, `basis`, `access`,
+  `issued_at` and `last_used_at`, the last token issued under it), and the
+  `consents` they remembered (`client_id`, `aud`, `scope`, `granted_at`).
+  A grant is live while a refresh token or an access token under it is.
+- `DELETE /admin/subjects/{subject}/grants/{grant_id}` revokes one grant
+  with every token under it, answering `204`; a grant that is not the
+  person's or no longer live answers `404`.
+- `DELETE /admin/subjects/{subject}/consents/{client_id}` disconnects the
+  app from the person: their remembered consent is forgotten and every
+  grant and token of the app about them is revoked. The answer counts
+  them: `{"remembered": true, "grants": 1}`.
+- `DELETE /admin/subjects/{subject}/sessions` ends every upstream login
+  the person's grants were issued in, with the `online_access` grants in
+  them, as a logout at the provider would. `offline_access` grants stay.
+  The answer counts them: `{"sessions": 1, "grants": 1}`.

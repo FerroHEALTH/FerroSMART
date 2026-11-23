@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! The `[<lane>.credentials.onward]` table: one onward target per lane,
-//! loaded under the `rfc9068`, `entra` and `keycloak` presets and a
-//! `federation` issuer, authenticating with the lane's `oauth` grant, and
+//! The `[<lane>.credentials.onward]` table: one onward target per lane, at
+//! a SMART issuer or a `federation` issuer, authenticating with the lane's `oauth` grant, and
 //! every incomplete table refused at load naming its key.
 
 use ferrohealth_smart::client::onward::OnwardError;
@@ -12,15 +11,12 @@ use ferrohealth_smart::config::credentials::CredentialsSection;
 use ferrohealth_smart::config::onward::OnwardLane;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::profile::onward::OnwardGrant;
-use ferrohealth_smart::profile::onward::OnwardIndicator;
 use ferrohealth_smart::resource::ResourceError;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
 use super::ClientKey;
 use super::answer;
-use super::harness::ENTRA_CLIENT;
-use super::harness::ENTRA_TARGET;
 use super::harness::Flavor;
 use super::param;
 use super::received;
@@ -71,9 +67,9 @@ async fn a_standards_only_lane_loads_and_exchanges_at_its_token_endpoint() {
     let section = lane(
         &private_key_jwt(&client, "bridge"),
         &format!(
-            "issuer = \"https://as.example.org\"\nkind = \"persons\"\ntoken_endpoint = \"{}/token\"\n\
+            "issuer = \"https://as.example.org\"\ntoken_endpoint = \"{}/token\"\n\
              audiences = [\"https://ehr.example.org\"]\nindicators = [\"https://ehr.example.org/api\"]\n\
-             [onward.profile]\nmax_onward_lifetime = \"3600s\"\nfirst_party_clients = [\"portal\"]",
+             [onward.profile]\nmax_onward_lifetime = \"3600s\"",
             server.uri()
         ),
     );
@@ -114,9 +110,9 @@ async fn exchanges_for_two_calls(extra: &str) -> (bool, usize, Option<String>) {
     let section = lane(
         &private_key_jwt(&ClientKey::new(), "bridge"),
         &format!(
-            "issuer = \"https://as.example.org\"\nkind = \"persons\"\ntoken_endpoint = \"{}/token\"\n\
+            "issuer = \"https://as.example.org\"\ntoken_endpoint = \"{}/token\"\n\
              audiences = [\"https://ehr.example.org\"]\nindicators = [\"https://ehr.example.org/api\"]\n{extra}\n\
-             [onward.profile]\nmax_onward_lifetime = \"3600s\"\nfirst_party_clients = [\"portal\"]",
+             [onward.profile]\nmax_onward_lifetime = \"3600s\"",
             server.uri()
         ),
     );
@@ -215,9 +211,9 @@ async fn a_secret_or_mutual_tls_client_names_itself_the_actor_with_its_own_key()
         let section = lane(
             &with_actor_key(&client, client_auth),
             &format!(
-                "issuer = \"https://as.example.org\"\nkind = \"persons\"\ntoken_endpoint = \"{}/token\"\n\
+                "issuer = \"https://as.example.org\"\ntoken_endpoint = \"{}/token\"\n\
                  audiences = [\"https://ehr.example.org\"]\nindicators = [\"https://ehr.example.org/api\"]\nactor_assertion = true\n\
-                 [onward.profile]\nmax_onward_lifetime = \"3600s\"\nfirst_party_clients = [\"portal\"]",
+                 [onward.profile]\nmax_onward_lifetime = \"3600s\"",
                 server.uri()
             ),
         );
@@ -255,9 +251,9 @@ async fn a_secret_or_mutual_tls_client_names_itself_the_actor_with_its_own_key()
 fn a_private_key_file_that_signs_nothing_fails_to_load_naming_the_key() {
     let section = lane(
         &with_actor_key(&ClientKey::new(), "client_secret_basic"),
-        "issuer = \"https://as.example.org\"\nkind = \"persons\"\ntoken_endpoint = \"https://as.example.org/token\"\n\
+        "issuer = \"https://as.example.org\"\ntoken_endpoint = \"https://as.example.org/token\"\n\
          audiences = [\"https://ehr.example.org\"]\nindicators = [\"https://ehr.example.org/api\"]\n\
-         [onward.profile]\nmax_onward_lifetime = \"3600s\"\nfirst_party_clients = [\"portal\"]",
+         [onward.profile]\nmax_onward_lifetime = \"3600s\"",
     );
     let refused = resolved(&section);
     assert!(
@@ -277,10 +273,9 @@ fn a_private_key_file_that_signs_nothing_fails_to_load_naming_the_key() {
 fn the_actor_assertion_without_an_assertion_key_fails_to_load_naming_the_key() {
     let section = lane(
         &secret_file("requester-client"),
-        "issuer = \"https://kc.example.org/realms/test\"\nkind = \"persons\"\npreset = \"keycloak\"\n\
-         token_endpoint = \"https://kc.example.org/realms/test/protocol/openid-connect/token\"\n\
-         audiences = [\"target-client2\"]\nindicators = [\"target-client2\"]\nactor_assertion = true\n\
-         [onward.profile]\nmax_onward_lifetime = \"300s\"\napp_only = [{ subjects = [\"service-account-bridge\"] }]",
+        "issuer = \"https://smart.example.org\"\n\
+         audiences = [\"https://ehr.example.org\"]\nactor_assertion = true\n\
+         [onward.profile]\nmax_onward_lifetime = \"300s\"",
     );
     let refused = resolved(&section);
     assert!(
@@ -295,40 +290,7 @@ fn the_actor_assertion_without_an_assertion_key_fails_to_load_naming_the_key() {
 }
 
 #[test]
-fn an_entra_lane_loads_the_on_behalf_of_flow() {
-    let section = lane(
-        &private_key_jwt(&ClientKey::new(), ENTRA_CLIENT),
-        &format!(
-            "issuer = \"{}\"\nkind = \"persons\"\npreset = \"entra\"\n\
-             token_endpoint = \"https://login.microsoftonline.com/{}/oauth2/v2.0/token\"\n\
-             audiences = [\"{ENTRA_TARGET}\"]\nscope = \"api://{ENTRA_TARGET}/.default\"\n\
-             [onward.profile]\nmax_onward_lifetime = \"5400s\"",
-            Flavor::Entra.issuer(),
-            super::harness::TENANT
-        ),
-    );
-    let lane = resolved(&section).expect("the lane loads");
-    assert_eq!(
-        Some(format!("api://{ENTRA_TARGET}/.default").as_str()),
-        lane.target.scope()
-    );
-}
-
-#[test]
-fn a_keycloak_lane_loads_the_standard_exchange_with_a_secret_file() {
-    let section = lane(
-        &secret_file("requester-client"),
-        "issuer = \"https://kc.example.org/realms/test\"\nkind = \"persons\"\npreset = \"keycloak\"\n\
-         token_endpoint = \"https://kc.example.org/realms/test/protocol/openid-connect/token\"\n\
-         audiences = [\"target-client2\"]\nindicators = [\"target-client2\"]\nscope = \"optional-scope2\"\n\
-         [onward.profile]\nmax_onward_lifetime = \"300s\"\napp_only = [{ subjects = [\"service-account-bridge\"] }]",
-    );
-    let lane = resolved(&section).expect("the lane loads");
-    assert_eq!(&["target-client2".to_owned()], lane.target.indicators());
-}
-
-#[test]
-fn a_federation_lane_loads_its_table_over_the_preset() {
+fn a_federation_lane_loads_its_table() {
     let section = lane(
         &private_key_jwt(&ClientKey::new(), "bridge"),
         "issuer = \"https://sts.partner.example.org\"\nkind = \"federation\"\n\
@@ -357,8 +319,8 @@ fn an_unknown_key_fails_to_parse() {
     assert!(parsed.is_err(), "deny_unknown_fields");
 }
 
-/// A complete `persons` onward body, for the refusals to break.
-const COMPLETE: &str = "issuer = \"https://as.example.org\"\nkind = \"persons\"\n\
+/// A complete onward body, for the refusals to break.
+const COMPLETE: &str = "issuer = \"https://as.example.org\"\n\
     audiences = [\"https://ehr.example.org\"]\n[onward.profile]\nmax_onward_lifetime = \"3600s\"";
 
 #[test]
@@ -367,10 +329,6 @@ fn an_incomplete_table_fails_to_load_naming_its_key() {
         (
             "credentials.onward.issuer",
             COMPLETE.replacen("issuer = \"https://as.example.org\"\n", "", 1),
-        ),
-        (
-            "credentials.onward.kind",
-            COMPLETE.replacen("kind = \"persons\"\n", "", 1),
         ),
         (
             "credentials.onward.audiences",
@@ -412,10 +370,6 @@ fn an_issuer_the_onward_client_refuses_fails_to_load() {
         (
             "no max_onward_lifetime",
             COMPLETE.replacen("max_onward_lifetime = \"3600s\"", "", 1),
-        ),
-        (
-            "a machines issuer",
-            COMPLETE.replacen("kind = \"persons\"", "kind = \"machines\"", 1),
         ),
         (
             "a federation table without exchanges_from",
@@ -483,33 +437,5 @@ fn a_profile_key_the_rules_refuse_fails_to_load_naming_the_issuer() {
         matches!(&refused, Err(ConfigError::Issuer { issuer, source })
             if issuer == "https://as.example.org" && matches!(**source, ResourceError::Profile(_))),
         "{refused:?}"
-    );
-}
-
-#[test]
-fn the_presets_set_the_lanes_grant() {
-    let entra = lane(
-        &private_key_jwt(&ClientKey::new(), ENTRA_CLIENT),
-        &format!(
-            "issuer = \"{}\"\nkind = \"persons\"\npreset = \"entra\"\naudiences = [\"{ENTRA_TARGET}\"]\n\
-             [onward.profile]\nmax_onward_lifetime = \"5400s\"",
-            Flavor::Entra.issuer()
-        ),
-    );
-    let refused = resolved(&entra);
-    assert!(
-        matches!(&refused, Err(ConfigError::Onward { source }) if matches!(**source, OnwardError::NoScope)),
-        "the entra preset is the JWT bearer grant, which needs a scope: {refused:?}"
-    );
-    let keycloak = lane(
-        &secret_file("requester-client"),
-        "issuer = \"https://kc.example.org/realms/test\"\nkind = \"persons\"\npreset = \"keycloak\"\n\
-         audiences = [\"target-client2\"]\nindicators = [\"target-client2\"]\n\
-         [onward.profile]\nmax_onward_lifetime = \"300s\"\napp_only = [{ subjects = [\"service-account-bridge\"] }]",
-    );
-    assert!(
-        resolved(&keycloak).is_ok(),
-        "under keycloak an indicator is an audience, never a URI: {:?}",
-        OnwardIndicator::Audience
     );
 }

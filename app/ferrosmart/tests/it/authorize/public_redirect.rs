@@ -22,9 +22,7 @@ async fn start_first_party() -> Smart {
     Smart::start_redirecting(
         "[\"authorization_code\"]",
         "[\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n\
-         [ferrosmart.client.organisation_approval]\n\
-         scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\"]\n\
-         approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"\n\
+         \
          first_party = true",
         "[\"user/Observation.rs\"]",
         &[REDIRECT, CUSTOM, LOOPBACK],
@@ -34,7 +32,7 @@ async fn start_first_party() -> Smart {
 
 /// Runs the request to `redirect` asking for `scope` and the login of a
 /// patient, and returns the cookie and where the callback sends the browser.
-async fn login(smart: &Smart, redirect: &str, scope: &str) -> (String, Url) {
+pub(super) async fn login(smart: &Smart, redirect: &str, scope: &str) -> (String, Url) {
     let path = authorize_path(&[("redirect_uri", redirect), ("scope", scope)]);
     let (status, headers, body) = smart.get(&path, None).await;
     assert_eq!(StatusCode::SEE_OTHER, status, "on to the provider: {body}");

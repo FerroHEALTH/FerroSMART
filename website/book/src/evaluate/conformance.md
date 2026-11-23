@@ -98,10 +98,12 @@ the parameters about that login go there:
 | `prompt=consent` | Shows the consent page even when a remembered consent or an approval would answer |
 | `max_age` | Passed to the identity provider; a login older than it is begun again once with `prompt=login`, and one still older answers `login_required` |
 | `ui_locales` | Passed to the identity provider, and chooses the pages' language before the browser's |
-| `display`, `claims_locales`, `acr_values` | Taken without changing the flow |
+| `acr_values` | An eIDAS level URI is the level the login must reach, asked of the identity provider; a login below it answers `unmet_authentication_requirements` (RFC 9470 §5). Any other value is taken and ignored |
+| `display`, `claims_locales` | Taken without changing the flow |
 
 Every ID Token is signed `RS256` and carries `auth_time`, the time the
-person authenticated at the identity provider. FerroSMART has no UserInfo
+person authenticated at the identity provider, and `acr`, the eIDAS level
+of that login. FerroSMART has no UserInfo
 endpoint: the ID Token and its `fhirUser` claim identify the person.
 
 ## What SMART leaves open, and how FerroSMART decides
@@ -118,13 +120,12 @@ and the architecture records it as its own design:
   what the person approves ([clients, roles and consent](../configure/clients.md)).
 - **Consent where it protects the person.** A user flow shows the consent
   page unless the person remembered that choice for that client and
-  resource server, or an administrator approved the client and the
-  request stays within that approval: for the organisation's
-  professionals (with `patient/` scopes only in an EHR launch), and for
-  the organisation's own app (`first_party`) its patients too, lasting
-  access included (OpenID Connect Core 1.0 §3.1.2.4, "previous
-  administrative consent"). An app of another party always shows a
-  patient the page (SMART App Launch 2.2.0, Best Practices). A public
+  resource server, or the administrator's registration answers: for the
+  organisation's professionals, and for an app marked `first_party` its
+  patients too, lasting access included (OpenID Connect Core 1.0
+  §3.1.2.4, "previous administrative consent"). An app of another party
+  always shows a patient the page (SMART App Launch 2.2.0, Best
+  Practices; Regulation (EU) 2025/327 Art 3). A public
   client without a claimed `https` redirect, and an app's
   `prompt=consent`, always show the page (RFC 8252 §8.6; OpenID Connect
   Core 1.0 §3.1.2.1). Every app holding live access can be disconnected on

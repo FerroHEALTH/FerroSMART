@@ -5,9 +5,10 @@
 //!
 //! `serve` runs the server, `config check` reads and resolves the
 //! configuration the way `serve` would and exits, `healthcheck` asks the
-//! server on this host for its readiness, `client hash-secret` turns a
-//! confidential symmetric client's secret into the hash its
-//! `secret_hash_file` holds, `subject` prints a person's pairwise subject,
+//! server on this host for its readiness, `client apply` writes client
+//! documents to the registry, `client secret` issues a confidential
+//! symmetric client a new secret, `subject` prints a person's pairwise
+//! subject,
 //! and `upstream registration` prints what a provider must be configured
 //! with. No specification governs the command line: our own design, the
 //! family's.
@@ -75,9 +76,19 @@ pub enum UpstreamCommand {
 /// The `client` jobs.
 #[derive(Debug, Subcommand, PartialEq, Eq)]
 pub enum ClientCommand {
-    /// Reads a client secret from standard input and prints its Argon2id PHC
-    /// hash, for a confidential symmetric client's `secret_hash_file`.
-    HashSecret,
+    /// Writes each file's client document to the registry, creating the
+    /// client or replacing the one with its `client_id`.
+    Apply {
+        /// The files, each one JSON client document.
+        #[arg(required = true)]
+        files: Vec<std::path::PathBuf>,
+    },
+    /// Issues the confidential symmetric client `client_id` a new secret and
+    /// prints it once (RFC 7591 §3.2.1).
+    Secret {
+        /// The client.
+        client_id: String,
+    },
 }
 
 #[cfg(test)]
@@ -106,9 +117,19 @@ mod tests {
                 Command::Common(Common::Healthcheck),
             ),
             (
-                vec!["ferrosmart", "client", "hash-secret"],
+                vec!["ferrosmart", "client", "apply", "admin.json", "app.json"],
                 Command::Client {
-                    command: ClientCommand::HashSecret,
+                    command: ClientCommand::Apply {
+                        files: vec!["admin.json".into(), "app.json".into()],
+                    },
+                },
+            ),
+            (
+                vec!["ferrosmart", "client", "secret", "portal"],
+                Command::Client {
+                    command: ClientCommand::Secret {
+                        client_id: String::from("portal"),
+                    },
                 },
             ),
             (

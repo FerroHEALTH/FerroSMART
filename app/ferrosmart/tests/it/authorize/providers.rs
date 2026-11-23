@@ -26,18 +26,18 @@ impl Two {
             "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
              [[ferrosmart.upstream]]\nname = \"staff\"\nlabel = \"Hospital staff\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
-             fhir_user_claim = \"fhir_user\"\n{assertion}\
+             fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [[ferrosmart.upstream]]\nname = \"patients\"\nlabel = \"Patients\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
-             fhir_user_claim = \"fhir_user\"\n{assertion}\
+             fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = [\"user/Observation.rs\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"app\"\nclient_name = \"Synthetic App\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\", \"refresh_token\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\", \"online_access\"]\n\
+             scope = [\"openid\", \"fhirUser\", \"user/Observation.rs\", \"online_access\"]\n\
              upstreams = [\"staff\", \"patients\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"staff-app\"\nname = \"Staff App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"staff-app\"\nclient_name = \"Staff App\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\", \"user/Observation.rs\"]\nupstreams = [\"staff\"]",
+             scope = [\"openid\", \"user/Observation.rs\"]\nupstreams = [\"staff\"]",
             secrecy::ExposeSecret::expose_secret(&database.url),
             staff.server.uri(),
             patients.server.uri(),
@@ -49,10 +49,11 @@ impl Two {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let providers = crate::support::providers(&settings).await;
         let audit = audit(&settings);
         let state = AppState::new(settings.clone(), store.clone(), audit).with_login(providers);
+        let clients = crate::support::clients(&crate::support::reach_every_base(&text));
+        crate::support::apply(&state, &clients).await;
         Self {
             smart: Smart {
                 app: router(Arc::new(state)),
@@ -61,6 +62,7 @@ impl Two {
                 database,
                 _keys: keys,
                 settings,
+                clients,
             },
             patients,
         }
@@ -234,7 +236,7 @@ fn a_provider_table_is_checked_at_load() {
     let assertion = crate::support::upstream_assertion(keys.dir.path());
     let entry = |name: &str, issuer: &str| {
         format!(
-            "[[ferrosmart.upstream]]\nname = {name:?}\n\
+            "[[ferrosmart.upstream]]\nname = {name:?}\n{ASSURANCE}\
              [ferrosmart.upstream.oidc]\nissuer = {issuer:?}\nclient_id = \"ferrosmart\"\n{assertion}"
         )
     };
@@ -256,12 +258,6 @@ fn a_provider_table_is_checked_at_load() {
             "{base}[[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\n\
              issuer = \"https://idp.example.org\"\nclient_id = \"ferrosmart\"\n{assertion}\
              [ferrosmart.upstream.saml]\nentity_id = \"https://idp.example.org/saml\"\n"
-        ),
-        format!(
-            "{base}{}[[ferrosmart.client]]\nclient_id = \"app\"\nkind = \"public\"\n\
-             redirect_uris = [{REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\"]\nupstreams = [\"elsewhere\"]",
-            entry("idp", "https://idp.example.org")
         ),
     ];
     for text in refused {

@@ -10,7 +10,7 @@
 //! its signing keys and the documents that describe it.
 
 pub mod admin;
-pub mod approvals;
+pub mod assurance;
 pub mod audit;
 pub mod audit_feed;
 pub mod audit_log;
@@ -33,6 +33,7 @@ pub mod revoke;
 pub mod saml;
 pub mod scopes;
 pub mod server;
+pub mod signing;
 pub mod store;
 pub mod token;
 pub mod upstream;

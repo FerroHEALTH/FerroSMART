@@ -33,8 +33,12 @@ use crate::support::{Database, Keys, audit, from_client, rsa_key};
 
 /// The Entra ID example, run as published.
 const ENTRA: &str = include_str!("../../examples/entra/ferrosmart.toml");
+/// The Entra ID example's app.
+const ENTRA_APP: &str = include_str!("../../examples/entra/example-app.json");
 /// The Okta example, run as published.
 const OKTA: &str = include_str!("../../examples/okta/ferrosmart.toml");
+/// The Okta example's app.
+const OKTA_APP: &str = include_str!("../../examples/okta/example-app.json");
 /// The examples' SMART app and its redirect URI.
 const APP: &str = "example-app";
 /// The redirect URI of [`APP`].
@@ -42,7 +46,7 @@ const REDIRECT: &str = "https://app.example.org/callback";
 /// The examples' FHIR resource server.
 const RESOURCE: &str = "https://ehr.example.org/fhir";
 /// The `fhirUser` the provider holds for the person.
-const FHIR_USER: &str = "https://ehr.example.org/fhir/Practitioner/example-1";
+const FHIR_USER: &str = "https://ehr.example.org/fhir/RelatedPerson/example-1";
 /// The app's PKCE verifier and its S256 challenge (RFC 7636 Appendix B).
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 /// The challenge of [`VERIFIER`].
@@ -54,6 +58,8 @@ const KID: &str = "synthetic-key-1";
 struct Contract {
     /// The example configuration.
     example: &'static str,
+    /// The client document of its app.
+    app: &'static str,
     /// The paths its metadata is served at, each given the issuer path.
     discovery: fn(&str) -> Vec<String>,
     /// Its metadata, given the issuer.
@@ -79,6 +85,7 @@ struct Contract {
 fn entra() -> Contract {
     Contract {
         example: ENTRA,
+        app: ENTRA_APP,
         discovery: |path| vec![format!("{path}/.well-known/openid-configuration")],
         metadata: |issuer| {
             let tenant = issuer.trim_end_matches("/v2.0");
@@ -130,6 +137,7 @@ fn entra() -> Contract {
 fn okta() -> Contract {
     Contract {
         example: OKTA,
+        app: OKTA_APP,
         discovery: |path| {
             vec![
                 format!("/.well-known/oauth-authorization-server{path}"),
@@ -280,7 +288,7 @@ struct Smart {
 fn example_config(example: &str, keys: &Keys, database: Option<&Database>) -> Config {
     let mut environment = std::collections::BTreeMap::new();
     environment.insert(
-        String::from("FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILE"),
+        String::from("FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILES"),
         keys.current.display().to_string(),
     );
     let url = database.map_or_else(
@@ -336,10 +344,11 @@ impl Smart {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let providers = crate::support::providers(&settings).await;
         let audit = audit(&settings);
         let state = AppState::new(settings, store.clone(), audit).with_login(providers);
+        let app: Value = serde_json::from_str(contract.app).expect("the example's app");
+        crate::support::apply(&state, &[app]).await;
         Self {
             app: router(Arc::new(state)),
             provider,

@@ -8,13 +8,13 @@
 use super::*;
 
 /// The patient's identifier in the deployment's subject namespace.
-const SUBJECT: &str = "ins01";
+pub(super) const SUBJECT: &str = "ins01";
 /// The deployment's subject namespace.
 pub(super) const NAMESPACE: &str = "examples";
 /// The patient's EHR.
 pub(super) const EHR_ID: &str = "7d44b88c-4199-4bad-97dc-d78268e01398";
 /// The scope the app asks for at the openEHR server.
-const SCOPE: &str = "openid fhirUser launch/patient patient/composition-*.r";
+pub(super) const SCOPE: &str = "openid fhirUser launch/patient patient/composition-*.r";
 
 /// An openEHR server that holds the EHR [`EHR_ID`] of one subject, which
 /// only the person whose `fhirUser` is `Practitioner/synthetic-1` may see,
@@ -60,7 +60,7 @@ impl wiremock::Respond for OpenEhr {
 
 /// Starts FerroSMART over an openEHR server whose subjects are named in
 /// [`NAMESPACE`], and returns them with the claims the server sees.
-async fn ehr_launch() -> (Smart, String, Arc<std::sync::Mutex<Vec<Value>>>, MockServer) {
+pub(super) async fn ehr_launch() -> (Smart, String, Arc<std::sync::Mutex<Vec<Value>>>, MockServer) {
     let openehr = MockServer::start().await;
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     Mock::given(matchers::method("GET"))

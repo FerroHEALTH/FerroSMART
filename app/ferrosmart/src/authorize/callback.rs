@@ -14,19 +14,22 @@ use ferrohealth_smart::oidc::{Callback, PendingSignIn};
 use http::HeaderMap;
 use url::Url;
 
+use ferrohealth_smart::assurance::AssuranceLevel;
+
+use crate::assurance::Assurance;
 use crate::audit::Connected;
 use crate::audit::exchanges::{Person, login};
-use crate::clients::{Approval, Client};
+use crate::clients::Client;
 use crate::form::Params;
 use crate::pages::{self, Fault};
 use crate::server::AppState;
 use crate::store::{Asking, Login, Pending, Purpose};
 use crate::upstream::{Identity, LoginProvider};
 
-use super::consent::{Basis, FhirUser, approve, offer};
+use super::consent::{FhirUser, approve, offer, without_page};
 use super::{
-    Back, CONSENT_ROUTE, COOKIE, Denial, MANAGE_ROUTE, cookie, forget, found, now, random,
-    registered, see_other, set_cookie,
+    Back, CONSENT_ROUTE, COOKIE, Denial, MANAGE_ROUTE, cookie, deny_unsigned, forget, found, now,
+    random, registered, see_other, set_cookie,
 };
 
 /// `GET {issuer}/callback`, where the upstream provider sends the browser
@@ -68,7 +71,6 @@ pub async fn callback(
         return pages::fault(&state, Fault::BadRequest);
     };
     let upstream = provider.upstream();
-    let back = Back::of(&state, &pending);
     let sign_in = PendingSignIn::from_parts(
         pending.upstream_state.clone(),
         pending.upstream_nonce.clone(),
@@ -92,16 +94,18 @@ pub async fn callback(
             }
             // NOTE: RFC 6749 §4.1.2.1, a person who declined at the provider is
             // access_denied; any other failure is the server's.
-            if answer.error.is_some() {
-                return back.deny(Denial {
+            let denial = if answer.error.is_some() {
+                Denial {
                     error: "access_denied",
                     description: "the login was declined",
-                });
-            }
-            return back.deny(Denial {
-                error: "server_error",
-                description: "the login could not be completed",
-            });
+                }
+            } else {
+                Denial {
+                    error: "server_error",
+                    description: "the login could not be completed",
+                }
+            };
+            return deny_unsigned(&state, &pending, denial).await;
         }
     };
     let identity = Identity::from_id_token(&signed_in.claims);
@@ -131,18 +135,55 @@ pub(super) async fn complete(
             }
             // NOTE: OpenID Connect Core 1.0 §3.1.2.6: the person could not be
             // authenticated within max_age, so the request needs a login.
-            return back.deny(Denial {
+            let denial = Denial {
                 error: "login_required",
                 description: "the login is older than max_age",
-            });
+            };
+            return deny_unsigned(state, pending, denial).await;
         }
     };
+    let acr = upstream.assurance.level_of(identity.acr.as_deref());
+    if let Some(short) = short_of(&pending.asking, &upstream.assurance, acr) {
+        forget(state, pending).await;
+        if let Err(response) = record_login(state, upstream, Err(short.description)).await {
+            return *response;
+        }
+        if pending.purpose == Purpose::Manage {
+            return pages::fault(state, Fault::Assurance);
+        }
+        return deny_unsigned(state, pending, short).await;
+    }
     let signed_in = SignedIn {
         upstream,
         identity,
         auth_time,
+        acr,
     };
     proceed(state, pending, &back, &signed_in, from).await
+}
+
+/// Returns the refusal of a login at the eIDAS level `reached`, none when it
+/// reaches both the provider's minimum, the deployment's floor included,
+/// and the level the request asks.
+fn short_of(
+    asking: &Asking,
+    assurance: &Assurance,
+    reached: Option<AssuranceLevel>,
+) -> Option<Denial> {
+    let below = |needed: AssuranceLevel| reached.is_none_or(|level| level < needed);
+    // NOTE: RFC 6749 §4.1.2.1, the server's own minimum unmet is a denial of access.
+    if assurance.minimum().is_some_and(below) {
+        return Some(Denial {
+            error: "access_denied",
+            description: "the login does not reach the level of assurance required",
+        });
+    }
+    // NOTE: RFC 9470 §5, an acr value the request asks for and the login does not
+    // meet fails the request with unmet_authentication_requirements.
+    asking.acr.is_some_and(below).then_some(Denial {
+        error: "unmet_authentication_requirements",
+        description: "the login does not reach the level of assurance asked for",
+    })
 }
 
 /// A person's login at a provider, as the steps after it read it.
@@ -154,6 +195,9 @@ struct SignedIn<'a> {
     identity: &'a Identity,
     /// When the person authenticated, in seconds since the epoch.
     auth_time: i64,
+    /// The eIDAS level the login reached, when the provider's value maps
+    /// to one.
+    acr: Option<AssuranceLevel>,
 }
 
 /// When the person last authenticated, as the request's `max_age` judges
@@ -246,6 +290,7 @@ async fn proceed(
         upstream,
         identity,
         auth_time,
+        acr,
     } = *signed_in;
     let held = ferrohealth_smart::roles::from_claims(&identity.claims, &upstream.role_claims);
     let subject = crate::upstream::pairwise(&identity.issuer, &identity.subject);
@@ -266,6 +311,7 @@ async fn proceed(
         upstream_session,
         roles: mapped(&held, &state.settings().roles),
         person_claims: crate::store::PersonClaims::from_identity(identity),
+        acr,
     };
     let person = Person {
         issuer: &state.settings().issuer,
@@ -426,42 +472,10 @@ pub(crate) struct Asked<'a> {
     pub(crate) offered: &'a [&'a str],
 }
 
-/// Returns the organisation approval of the client that `asked` falls
-/// under.
-///
-/// The approval covers every scope offered and, unless the app is the
-/// organisation's own (first party), the person is a professional whose
-/// request names no `patient/` scope or comes from an EHR launch, whose
-/// patient the professional opened the app for (`docs/architecture.md`
-/// §13.6 item 6).
-fn approved<'a>(asked: &Asked<'a>) -> Option<&'a Approval> {
-    let approval = asked.client.approval.as_ref()?;
-    if approval.first_party {
-        return approval.covers(asked.offered).then_some(approval);
-    }
-    // NOTE: SMART App Launch 2.2.0, Scopes for requesting identity data, a
-    // fhirUser of these types is the patient or speaks for one: they decide.
-    let own_data = asked.fhir_user.is_some_and(|reference| {
-        ["Patient/", "RelatedPerson/", "Person/"]
-            .iter()
-            .any(|kind| reference.starts_with(kind))
-    });
-    let patient_scope = asked
-        .pending
-        .scope
-        .split(' ')
-        .any(|scope| scope.starts_with("patient/"));
-    // NOTE: OpenID Connect Core 1.0 §3.1.2.4, the approval is administrative consent;
-    // in an EHR launch (`launch` offered) it covers the staff member's patient/ scopes.
-    let ehr_launch = asked.offered.contains(&"launch");
-    (!own_data && (!patient_scope || ehr_launch) && approval.covers(asked.offered))
-        .then_some(approval)
-}
-
 /// Goes on once the person logged in and the context is complete: straight
-/// back to the app with a code when an approval or a remembered consent
-/// covers `offered` and the client's identity is assured, to the consent
-/// page otherwise.
+/// back to the app with a code when [`without_page`] answers for the person,
+/// or on the consent page a remembered consent covers `offered`, and the
+/// client's identity is assured; to the consent page otherwise.
 pub(crate) async fn onward(
     state: &AppState,
     asked: &Asked<'_>,
@@ -469,17 +483,23 @@ pub(crate) async fn onward(
     from: IpAddr,
 ) -> Response {
     // NOTE: OpenID Connect Core 1.0 §3.1.2.1: prompt=consent asks the person for
-    // consent, so neither an approval nor a remembered consent answers for them.
+    // consent, so neither the registration nor a remembered consent answers.
     if asked.pending.asking.prompt.consent {
         return see_other(&state.settings().endpoint(CONSENT_ROUTE));
     }
     // NOTE: RFC 8252 §8.6, no request is processed automatically unless the client's
-    // identity is assured: a confidential client, or a public one's claimed https redirect.
-    if !asked.client.assured_by(&asked.pending.redirect_uri) {
+    // identity is assured: a confidential client, or a public one's claimed https redirect;
+    // RFC 7591 §5, an app that registered itself asserts its own, so it never is.
+    if asked.client.registered_itself() || !asked.client.assured_by(&asked.pending.redirect_uri) {
         return see_other(&state.settings().endpoint(CONSENT_ROUTE));
     }
-    let basis = if let Some(approval) = approved(asked) {
-        Basis::Organisation(approval)
+    let skipped = without_page(
+        asked.client,
+        super::consent::Person::of(asked.fhir_user),
+        asked.offered,
+    );
+    let basis = if let Some(basis) = skipped {
+        basis
     } else {
         // NOTE: docs/architecture.md §13.6 item 6, a consent the person chose to
         // remember answers again, for this client at this resource server, while it covers every scope offered.
@@ -504,7 +524,7 @@ pub(crate) async fn onward(
         if !covered {
             return see_other(&state.settings().endpoint(CONSENT_ROUTE));
         }
-        Basis::Remembered
+        super::consent::Basis::Remembered
     };
     let pending = match found(state, state.store().finish(&asked.pending.id).await) {
         Ok(pending) => pending,

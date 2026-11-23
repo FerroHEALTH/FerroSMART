@@ -41,6 +41,8 @@ pub(crate) enum Found {
         jti: String,
         /// Its record.
         record: AccessRecord,
+        /// Its `cnf` claim, when it is sender-constrained.
+        cnf: Option<Value>,
     },
     /// A refresh token, found by the SHA-256 of its value.
     Refresh {
@@ -156,7 +158,9 @@ async fn answer(
     let found = find(state, token).await.map_err(Refused::Request)?;
     let inactive = json!({ "active": false });
     let answer = match found {
-        Some(Found::Access { record, .. }) if record.active => access_answer(state, &record),
+        Some(Found::Access { record, cnf, .. }) if record.active => {
+            access_answer(state, &record, cnf)
+        }
         Some(Found::Refresh { record, .. }) if record.active => refresh_answer(state, &record),
         _ => inactive,
     };
@@ -248,13 +252,16 @@ pub(crate) async fn bearer(state: &AppState, token: &str, scope: &str) -> Result
 /// token whose signature one of its own keys verifies, or a refresh token
 /// whose SHA-256 it recorded; none for any other value.
 pub(crate) async fn find(state: &AppState, token: &str) -> Result<Option<Found>, Refusal> {
-    if let Some(jti) = own_access_token(state, token) {
+    if let Some(claims) = crate::token::own_jwt(state.settings(), token, "at+jwt")
+        && let Some(jti) = claims.get("jti").and_then(Value::as_str).map(str::to_owned)
+    {
+        let cnf = claims.get("cnf").cloned();
         let record = state
             .store()
             .access_token(&jti)
             .await
             .map_err(|error| server_error("the token record cannot be read", &error))?;
-        return Ok(record.map(|record| Found::Access { jti, record }));
+        return Ok(record.map(|record| Found::Access { jti, record, cnf }));
     }
     let hash = crate::authorize::sha256(token);
     let record = state
@@ -280,7 +287,7 @@ pub(crate) fn own_access_token(state: &AppState, token: &str) -> Option<String> 
 /// RFC 7662 §2.2 names, and those SMART App Launch 2.2.0, Token
 /// Introspection, requires (`scope`, `client_id`, `exp`, the launch
 /// context, the ID Token's `iss`, `sub` and `fhirUser`).
-fn access_answer(state: &AppState, record: &AccessRecord) -> Value {
+fn access_answer(state: &AppState, record: &AccessRecord, cnf: Option<Value>) -> Value {
     let mut answer = Map::new();
     answer.insert(String::from("active"), json!(true));
     answer.insert(String::from("scope"), json!(record.scope));
@@ -290,6 +297,10 @@ fn access_answer(state: &AppState, record: &AccessRecord) -> Value {
     answer.insert(String::from("sub"), json!(record.subject));
     answer.insert(String::from("aud"), json!(record.audience));
     answer.insert(String::from("iss"), json!(state.settings().issuer));
+    // NOTE: RFC 9449 §6.2 and RFC 8705 §3.2, the answer carries the token's `cnf`.
+    if let Some(cnf) = cnf {
+        answer.insert(String::from("cnf"), cnf);
+    }
     if let Some(grant) = &record.grant {
         context(&mut answer, grant);
     }
@@ -331,5 +342,12 @@ fn context(answer: &mut Map<String, Value>, grant: &GrantRecord) {
         answer
             .entry(String::from("roles"))
             .or_insert_with(|| json!(grant.roles));
+    }
+    // NOTE: RFC 9470 §6.2, the introspection answer names the login's acr and auth_time.
+    if let Some(auth_time) = grant.auth_time {
+        answer.insert(String::from("auth_time"), json!(auth_time));
+    }
+    if let Some(acr) = grant.acr {
+        answer.insert(String::from("acr"), json!(crate::assurance::uri(acr)));
     }
 }

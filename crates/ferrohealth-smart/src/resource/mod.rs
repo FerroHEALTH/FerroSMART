@@ -36,7 +36,6 @@ mod token;
 mod verdict;
 
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -58,7 +57,6 @@ use crate::federation::FederationSection;
 use crate::kind::CallerKind;
 use crate::kind::IssuerKind;
 use crate::kind::Unclassified;
-use crate::kind::standing::StandingSource;
 use crate::metadata::DiscoveryError;
 use crate::metadata::ServerMetadata;
 use crate::profile::Profile;
@@ -104,14 +102,6 @@ pub struct Settings {
     pub jwks_file: Option<PathBuf>,
     /// How long one call to the authorization server may take.
     pub timeout: Duration,
-    /// The subjects a token with no clinical scope is granted system-wide
-    /// access for (a product's allowlist; no specification governs it: our
-    /// own design); refused beside a product's [`StandingSource::Product`].
-    pub scopeless_subjects: BTreeSet<String>,
-    /// Who answers the standing questions of the classification: the
-    /// profile's `first_party_clients` and `delegates` with
-    /// [`Settings::scopeless_subjects`], or the product ([`crate::kind::standing`]).
-    pub standing: StandingSource,
     /// The claims a token's roles are read from, each a dotted path
     /// (RFC 9068 §2.2.3.1; [`crate::roles`]).
     pub role_claims: Vec<String>,
@@ -185,13 +175,6 @@ pub enum ResourceError {
         "the issuer's [auth.issuer.<name>.federation] table requires sender_constraint = \"required\""
     )]
     SenderConstraintRequired,
-    /// A list the product's standing answers in its place is set beside
-    /// it ([`StandingSource::Product`]), so it would be read in two places.
-    #[error("{key} is set beside the product's standing, which answers it")]
-    ListedBesideStanding {
-        /// The list.
-        key: &'static str,
-    },
     /// A setting is refused on an issuer of this kind.
     #[error("{key} is refused on a {kind} issuer")]
     Kind {
@@ -513,9 +496,8 @@ pub struct Caller {
     client_id: Option<String>,
     /// Who stands behind the credential.
     kind: CallerKind,
-    /// The value of the issuer profile's person key and tenant claim, when
-    /// the token carries them.
-    person_key: (Option<String>, Option<String>),
+    /// The current RFC 8693 §4.1 actor the token names.
+    actor: Option<crate::kind::Actor>,
     /// What the token says about the authentication behind it, under the
     /// issuer's assurance mapping.
     assurance: Assessment,
@@ -525,9 +507,6 @@ pub struct Caller {
     scopes: Scopes,
     /// The `patient` launch context the token carries.
     patient: Option<String>,
-    /// Whether the subject is granted system-wide access without a clinical
-    /// scope.
-    scopeless: bool,
     /// The scheme the credential arrived with.
     via: Via,
     /// The issuer that signed the token, when one did.
@@ -553,12 +532,11 @@ impl PartialEq for Caller {
         self.subject == other.subject
             && self.client_id == other.client_id
             && self.kind == other.kind
-            && self.person_key == other.person_key
+            && self.actor == other.actor
             && self.assurance == other.assurance
             && self.scope == other.scope
             && self.scopes == other.scopes
             && self.patient == other.patient
-            && self.scopeless == other.scopeless
             && self.via == other.via
             && self.issuer == other.issuer
             && self.claims == other.claims

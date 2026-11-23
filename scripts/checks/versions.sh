@@ -281,7 +281,8 @@ done
 # ---- 3e. the cache-only and copy-free sources ------------------------------
 for tree in "okta:Okta OpenID Connect and OAuth 2.0 API" \
   "microsoft-graph:Microsoft Graph documentation" \
-  "sogis-acm:SOG-IS Agreed Cryptographic Mechanisms"; do
+  "sogis-acm:SOG-IS Agreed Cryptographic Mechanisms" \
+  "etsi-eudi:ETSI EUDI wallet specifications"; do
   dir="docs/specs/${tree%%:*}"
   item="${tree#*:}"
   if [ -f "$dir/PROVENANCE.md" ]; then
@@ -301,6 +302,7 @@ tracked="$(git ls-files .vendor-cache | head -n1)"
 
 # ---- 3f. the corpora pinned file by file by sha256 --------------------------
 for tree in "ehdsi-specifications:eHDSI specifications" "eu-law:EU legal acts" \
+  "openid4vc:OpenID for Verifiable Credentials texts" \
   "ihe-balp-pages:IHE BALP narrative pages" \
   "oasis-saml:OASIS SAML V2.0 standard" \
   "w3c-xmlsec:W3C XML security Recommendations" \
@@ -351,13 +353,13 @@ else
 fi
 
 # ---- 4b. the Keycloak test image -------------------------------------------
-keycloak_live="crates/ferrohealth-smart/tests/it/keycloak_live.rs"
+keycloak_compose="compose.keycloak.yaml"
 before="$failures"
 want="$(grep -oE 'sha256:[0-9a-f]{64}' <<< "$(corpus_pin_cell "Keycloak test image")" | head -n1)"
 [ -n "$want" ] || fail "docs/VERSIONS.md pins no Keycloak test image digest"
-grep -qF "@$want" "$keycloak_live" ||
-  fail "$keycloak_live does not run the Keycloak image $want"
-[ "$failures" -ne "$before" ] || ok "the live Keycloak case runs the image $want"
+grep -qF "@$want" "$keycloak_compose" ||
+  fail "$keycloak_compose does not run the Keycloak image $want"
+[ "$failures" -ne "$before" ] || ok "the Keycloak example runs the image $want"
 
 # ---- 4c. the PostgreSQL test image -----------------------------------------
 ci="./.github/workflows/ci.yml"

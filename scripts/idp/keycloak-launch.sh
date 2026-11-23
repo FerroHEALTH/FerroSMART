@@ -37,12 +37,13 @@ psql "$LANE_PG/postgres" -qc 'CREATE DATABASE ferrosmart_keycloak'
 
 "$root/scripts/idp/keycloak-up.sh" ferrosmart-keycloak "$password" "$fhir_user"
 
-"$root/target/debug/ferrosmart" --config "$example/ferrosmart.toml" \
-  --set server.listen=127.0.0.1:8080 \
-  --set "ferrosmart.keys.private_key_file=$LANE_DIR/signing.pem" \
-  --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem" \
-  --set "ferrosmart.database.url=$LANE_PG/ferrosmart_keycloak" \
-  serve > "$LANE_DIR/ferrosmart-keycloak.log" 2>&1 &
+ferrosmart=("$root/target/debug/ferrosmart" --config "$example/ferrosmart.toml"
+  --set server.listen=127.0.0.1:8080
+  --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+  --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem"
+  --set "ferrosmart.database.url=$LANE_PG/ferrosmart_keycloak")
+"${ferrosmart[@]}" client apply "$example/example-app.json"
+"${ferrosmart[@]}" serve > "$LANE_DIR/ferrosmart-keycloak.log" 2>&1 &
 smart=$!
 trap 'kill "$smart" 2> /dev/null || true; docker rm -f ferrosmart-keycloak > /dev/null 2>&1 || true' EXIT
 for _ in $(seq 1 30); do

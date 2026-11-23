@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 //! What the cases share: generated keys written to PEM files, a
-//! configuration over them, the audit lane and the records it stored.
+//! configuration over them, the client documents a case applies, the audit
+//! lane and the records it stored.
+//!
+//! A case writes its clients as `[[client]]` tables beside its
+//! configuration, each one client document in TOML: [`config`] leaves them
+//! out and [`clients`] reads them, which [`apply`] then writes as
+//! `ferrosmart client apply` does.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -40,6 +46,17 @@ fn pem(der: &[u8]) -> String {
         lines.join("\n")
     )
 }
+
+/// The `acr` the stub providers' ID Tokens carry.
+pub(crate) const SUBSTANTIAL_ACR: &str = "urn:synthetic:loa:substantial";
+
+/// The `[ferrosmart.upstream.assurance]` table of a stub provider: a value
+/// for each eIDAS level, [`SUBSTANTIAL_ACR`] at the deployment's default
+/// floor.
+pub(crate) const ASSURANCE: &str = "[ferrosmart.upstream.assurance]\n\
+     levels = { \"urn:synthetic:loa:low\" = \"low\", \
+     \"urn:synthetic:loa:substantial\" = \"substantial\", \
+     \"urn:synthetic:loa:high\" = \"high\" }\n";
 
 /// The `[ferrosmart.upstream.oidc.private_key_jwt.keys]` table of a case,
 /// with a fresh assertion key under `dir`: `private_key_jwt`, the client
@@ -98,10 +115,81 @@ pub(crate) const CLIENT_ADDRESS: &str = "192.0.2.10";
 /// The database URL a case that never reaches the database configures.
 pub(crate) const UNREACHED_DATABASE: &str = "postgres://ferrosmart@127.0.0.1:1/unreached";
 
-/// Returns the configuration `text` holds, with `[ferrosmart.keys]` naming
-/// `keys`' current key unless `text` names one, and
-/// [`UNREACHED_DATABASE`] as the database unless `text` names one.
+/// Returns `text` split into the configuration and the `[[client]]`
+/// tables with their subtables.
+fn split(text: &str) -> (String, String) {
+    let (mut config, mut clients) = (String::new(), String::new());
+    let mut in_client = false;
+    for line in text.lines() {
+        let header = line.trim();
+        if header.starts_with('[') {
+            in_client = header == "[[client]]" || header.starts_with("[client.");
+        }
+        let out = if in_client { &mut clients } else { &mut config };
+        out.push_str(line);
+        out.push('\n');
+    }
+    (config, clients)
+}
+
+/// Returns the client documents the `[[client]]` tables of `text` hold. A
+/// table may write `scope` as an array, which the document joins with
+/// spaces (RFC 7591 §2).
+pub(crate) fn clients(text: &str) -> Vec<Value> {
+    let (_, tables) = split(text);
+    let table: toml::Table = toml::from_str(&tables).expect("the client tables read");
+    let Some(clients) = table.get("client") else {
+        return Vec::new();
+    };
+    let mut documents: Vec<Value> =
+        serde_json::from_value(serde_json::to_value(clients).expect("the client tables convert"))
+            .expect("an array of tables");
+    for document in &mut documents {
+        if let Some(scopes) = document.get("scope").and_then(Value::as_array) {
+            let joined: Vec<&str> = scopes.iter().filter_map(Value::as_str).collect();
+            document["scope"] = Value::from(joined.join(" "));
+        }
+    }
+    documents
+}
+
+/// Gives the confidential symmetric client `client_id` the secret `secret`
+/// in `store`, as a case that holds a known secret needs.
+pub(crate) async fn set_secret(store: &Store, client_id: &str, secret: &str) {
+    let hash = ferrosmart::clients::SecretHash::from(
+        ferrosmart::clients::hash_secret(secret).expect("hashed"),
+    );
+    let mut tx = store.begin().await.expect("begins");
+    tx.set_secret(client_id, &hash).await.expect("written");
+    commit(tx).await;
+}
+
+/// Writes each of `documents` to the registry as `ferrosmart client apply`
+/// does.
+pub(crate) async fn apply(state: &ferrosmart::server::AppState, documents: &[Value]) {
+    for document in documents {
+        let document = serde_json::from_value(document.clone()).expect("a client document");
+        ferrosmart::admin::apply(state, document)
+            .await
+            .expect("the client applies");
+    }
+}
+
+/// Returns `value` as a TOML inline value, for a JWK Set a `[[client]]`
+/// table holds by value.
+pub(crate) fn inline(value: &Value) -> String {
+    toml::Value::try_from(value)
+        .expect("a TOML value")
+        .to_string()
+}
+
+/// Returns the configuration `text` holds, its `[[client]]` tables left
+/// out, with `[ferrosmart.keys]` naming `keys`' current key unless `text`
+/// names one, and [`UNREACHED_DATABASE`] as the database unless `text`
+/// names one.
 pub(crate) fn config(text: &str, keys: &Keys) -> Config {
+    let (text, _) = split(text);
+    let text = text.as_str();
     let mut environment = BTreeMap::new();
     if !text.contains("[ferrosmart.database]") {
         environment.insert(
@@ -117,7 +205,7 @@ pub(crate) fn config(text: &str, keys: &Keys) -> Config {
     }
     if !text.contains("[ferrosmart.keys]") {
         environment.insert(
-            String::from("FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILE"),
+            String::from("FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILES"),
             keys.current.display().to_string(),
         );
     }
@@ -144,7 +232,7 @@ pub(crate) fn resources_of(text: &str) -> String {
     format!("resources = {bases:?}\n")
 }
 
-/// Returns `text` with every `[[ferrosmart.client]]` table that sets no
+/// Returns `text` with every `[[client]]` table that sets no
 /// `resources` given [`resources_of`] `text`: a case's clients reach every
 /// base it configures unless a table says otherwise.
 pub(crate) fn reach_every_base(text: &str) -> String {
@@ -154,7 +242,7 @@ pub(crate) fn reach_every_base(text: &str) -> String {
     for (index, line) in lines.iter().enumerate() {
         out.push_str(line);
         out.push('\n');
-        if line.trim() == "[[ferrosmart.client]]" {
+        if line.trim() == "[[client]]" {
             let listed = lines
                 .iter()
                 .skip(index + 1)
@@ -173,8 +261,24 @@ pub(crate) fn audit(settings: &Settings) -> Audit {
     Audit::new(settings.audit.observer.clone())
 }
 
-/// Returns every `AuditEvent` `store` keeps, oldest first.
+/// Returns whether `record` is one [`apply`] wrote when the case started.
+pub(crate) fn applied(record: &Value) -> bool {
+    record
+        .pointer("/agent/0/who/display")
+        .and_then(Value::as_str)
+        == Some(ferrosmart::admin::APPLY_REQUESTER)
+}
+
+/// Returns every `AuditEvent` `store` keeps after the case's clients were
+/// applied, oldest first.
 pub(crate) async fn records(store: &Store) -> Vec<Value> {
+    let mut records = all_records(store).await;
+    records.retain(|record| !applied(record));
+    records
+}
+
+/// Returns every `AuditEvent` `store` keeps, oldest first.
+pub(crate) async fn all_records(store: &Store) -> Vec<Value> {
     let mut records = store
         .audit_records(&AuditQuery {
             limit: 1000,
@@ -500,10 +604,9 @@ pub(crate) fn bases(records: &[Value]) -> Vec<String> {
 const OWN_EVENTS: &str = "urn:ferrosmart:audit-event";
 
 /// Returns the caller `token` is read as by a resource server for
-/// `audience` that trusts FerroSMART's `issuer` under the `ferrosmart`
-/// preset with the deployment's `keys` over it, with the published JWK Set
-/// `jwks` as its key set.
-pub(crate) async fn read_under_preset(
+/// `audience` that trusts FerroSMART's `issuer` with the deployment's `keys`
+/// over the defaults, with the published JWK Set `jwks` as its key set.
+pub(crate) async fn read_at_resource_server(
     jwks: &Value,
     issuer: &str,
     audience: &str,
@@ -511,32 +614,19 @@ pub(crate) async fn read_under_preset(
     keys: &ferrohealth_smart::profile::ProfileKeys,
     token: &str,
 ) -> Result<ferrohealth_smart::resource::Caller, ferrohealth_smart::resource::Rejection> {
-    use ferrohealth_smart::profile::{Preset, Profile};
+    use ferrohealth_smart::profile::Profile;
     use ferrohealth_smart::resource::{ResourceServer, Settings as ResourceSettings};
 
     let dir = tempfile::tempdir().expect("a directory");
     let path = dir.path().join("ferrosmart-jwks.json");
     std::fs::write(&path, jwks.to_string()).expect("written");
     let mut settings = ResourceSettings::new(issuer, audience, kind);
-    settings.profile = Profile::resolve(Preset::Ferrosmart, keys).expect("the preset reads");
+    settings.profile = Profile::default().with_keys(keys.clone());
     settings.jwks_file = Some(path);
     let server = ResourceServer::discover(settings)
         .await
         .expect("the resource server starts");
     server.authenticate(token).await
-}
-
-/// The profile keys of `docs/architecture.md` §13.21's one `persons` table
-/// for FerroSMART: the `ferrosmart` preset with the SMART app `app` listed
-/// as a delegate, which reads a person through `app` as delegated and a
-/// Backend Services token as the system.
-pub(crate) fn one_table(app: &str) -> ferrohealth_smart::profile::ProfileKeys {
-    ferrohealth_smart::profile::ProfileKeys {
-        delegates: Some(vec![ferrohealth_smart::profile::Delegate::Client(
-            app.to_owned(),
-        )]),
-        ..ferrohealth_smart::profile::ProfileKeys::default()
-    }
 }
 
 /// Moves the rotation of the refresh token `token` in the database at `url`

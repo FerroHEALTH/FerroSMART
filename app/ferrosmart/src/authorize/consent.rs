@@ -13,7 +13,7 @@ use axum::response::Response;
 use http::HeaderMap;
 
 use crate::audit::{self, Connected};
-use crate::clients::{Approval, Client, GrantType};
+use crate::clients::{Client, GrantType};
 use crate::form::Params;
 use crate::launch::context::Context;
 use crate::pages::{self, Fault};
@@ -180,13 +180,19 @@ pub async fn consent_post(
     if !constant_eq(sent.as_bytes(), pending.form_token.as_bytes()) {
         return pages::fault(&state, Fault::BadRequest);
     }
+    let client = match registered(&state, &pending).await {
+        Ok(client) => client,
+        Err(response) => return *response,
+    };
     let pending = match found(&state, state.store().finish(&pending.id).await) {
         Ok(pending) => pending,
         Err(response) => return *response,
     };
     let back = Back::of(&state, &pending);
     let mut response = if form.get("decision") == Some("approve") {
-        let remember = form.get("remember") == Some("yes");
+        // NOTE: RFC 7591 §5, an app that registered itself is shown the page every
+        // time, so no consent to it is remembered.
+        let remember = form.get("remember") == Some("yes") && !client.registered_itself();
         let basis = Basis::Person { remember };
         approve(&state, &pending, &form.all("scope"), basis, &back, from).await
     } else {
@@ -206,8 +212,8 @@ pub async fn consent_post(
 }
 
 /// What a code is issued on (`docs/architecture.md` §13.6 item 6).
-#[derive(Debug, Clone, Copy)]
-pub(super) enum Basis<'a> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Basis {
     /// The person approved on the consent page, and chose whether to
     /// remember it.
     Person {
@@ -216,21 +222,81 @@ pub(super) enum Basis<'a> {
     },
     /// A consent the person remembered covers the request.
     Remembered,
-    /// The client's organisation approval covers the request, and the
-    /// person saw no page.
-    Organisation(&'a Approval),
+    /// An administrator registered the client, the organisation's
+    /// consent for its professionals, and the person saw no page.
+    Administrative,
+    /// The client is the controller's own or acts for it, and the person
+    /// saw no page.
+    FirstParty,
 }
 
-impl Basis<'_> {
-    /// The basis as the `code-issued` record names it: `page`,
-    /// `remembered`, `organisation` or `first-party`.
-    pub(super) const fn code(self) -> &'static str {
+impl Basis {
+    /// The basis as the code, the grant and the `code-issued` record name
+    /// it: `page`, `remembered`, `administrative` or `first-party`.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
         match self {
             Self::Person { .. } => "page",
             Self::Remembered => "remembered",
-            Self::Organisation(approval) if approval.first_party => "first-party",
-            Self::Organisation(_) => "organisation",
+            Self::Administrative => "administrative",
+            Self::FirstParty => "first-party",
         }
+    }
+}
+
+/// Who the person is, by the resource type their `fhirUser` names (SMART
+/// App Launch 2.2.0, Scopes and Launch Context, `fhirUser`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Person {
+    /// A `Practitioner` or `PractitionerRole`.
+    Professional,
+    /// A `Patient`, a `RelatedPerson` or a `Person`: the person whose data
+    /// it is, or one who speaks for them (Regulation (EU) 2025/327 Art 4(2)).
+    Represented,
+    /// No `fhirUser`, or one of another type.
+    Unstated,
+}
+
+impl Person {
+    /// Returns the person `fhir_user` names, a reference whose last two path
+    /// segments are the resource type and id.
+    #[must_use]
+    pub fn of(fhir_user: Option<&str>) -> Self {
+        match fhir_user.and_then(|reference| reference.rsplit('/').nth(1)) {
+            Some("Practitioner" | "PractitionerRole") => Self::Professional,
+            Some("Patient" | "RelatedPerson" | "Person") => Self::Represented,
+            _ => Self::Unstated,
+        }
+    }
+}
+
+/// Returns the basis on which `person` gets a code for `client` with no
+/// consent page, or `None` when they see it.
+///
+/// An administrator's registration is the organisation's consent for its
+/// professionals: RFC 6749 §4.1.1 lets the server establish approval "via
+/// other means", OpenID Connect Core 1.0 §3.1.2.4 names "previous
+/// administrative consent", and SMART App Launch 2.2.0 (Best Practices,
+/// Considerations for Scope Consent) asks the user's consent where the
+/// client and the resource server are not from the same organization. A
+/// patient or their representative decides which other party's app reads
+/// their data (Regulation (EU) 2025/327 Art 3, 4(2), 7(1)), so they skip the
+/// page only for a first-party app. An app that registered itself asserts
+/// its own metadata (RFC 7591 §5) and always shows the page. Every offered
+/// scope lies within the registration's ceiling.
+#[must_use]
+pub fn without_page(client: &Client, person: Person, offered: &[&str]) -> Option<Basis> {
+    if client.registered_itself()
+        || !offered
+            .iter()
+            .all(|scope| crate::scopes::admits(&client.scopes, scope))
+    {
+        return None;
+    }
+    match person {
+        Person::Professional => Some(Basis::Administrative),
+        Person::Represented if client.first_party() => Some(Basis::FirstParty),
+        Person::Represented | Person::Unstated => None,
     }
 }
 
@@ -240,7 +306,7 @@ pub(super) async fn approve(
     state: &AppState,
     pending: &Pending,
     selected: &[&str],
-    basis: Basis<'_>,
+    basis: Basis,
     back: &Back,
     from: IpAddr,
 ) -> Response {
@@ -293,12 +359,10 @@ pub(super) async fn approve(
         expires_at: now().saturating_add(CODE_SECONDS),
         launch_context: launch_context.cloned(),
         upstream_session: pending.upstream_session.clone(),
-        approved_at: match basis {
-            Basis::Organisation(approval) => Some(approval.approved_at),
-            Basis::Person { .. } | Basis::Remembered => None,
-        },
+        basis: Some(String::from(basis.code())),
         roles: pending.roles.clone(),
         person_claims: pending.person_claims.granted(&granted.join(" ")),
+        acr: pending.acr,
     };
     if let Err(error) = issue_code(state, &hash, &grant, basis, from).await {
         tracing::error!(error = %ferrohealth_server::run::chain(&error), "the code could not be stored");
@@ -311,13 +375,13 @@ pub(super) async fn approve(
 }
 
 /// Stores the code `grant` under `hash`, with the person's consent when
-/// they chose to remember it and the organisation approval it rests on
-/// when it skipped the page, each with its record in one transaction.
+/// they chose to remember it and the record of the registration it rests
+/// on when it skipped the page, in one transaction.
 async fn issue_code(
     state: &AppState,
     hash: &str,
     grant: &Code,
-    basis: Basis<'_>,
+    basis: Basis,
     from: IpAddr,
 ) -> Result<(), audit::RecordFailure> {
     let endpoint = state.settings().endpoint_url(CONSENT_ROUTE);
@@ -339,22 +403,13 @@ async fn issue_code(
     tx.issue_code(hash, grant)
         .await
         .map_err(audit::RecordFailure::Store)?;
-    if let Basis::Organisation(approval) = basis {
-        // NOTE: docs/architecture.md §13.6 item 6, the record names which approval
-        // skipped the page: the organisation's for its staff, or its own app's.
-        let event = if approval.first_party {
-            audit::Event::ConsentFirstParty
-        } else {
-            audit::Event::ConsentApproved
-        };
-        let approved = audit::happened(&happening(
-            event,
-            vec![
-                ("scope", grant.scope.clone()),
-                ("approved_by", approval.approved_by.clone()),
-                ("approved_at", approval.approved_at.to_string()),
-            ],
-        ));
+    let skipped = match basis {
+        Basis::Administrative => Some(audit::Event::ConsentAdministrative),
+        Basis::FirstParty => Some(audit::Event::ConsentFirstParty),
+        Basis::Person { .. } | Basis::Remembered => None,
+    };
+    if let Some(event) = skipped {
+        let approved = audit::happened(&happening(event, vec![("scope", grant.scope.clone())]));
         tx.record(&lane.row(
             &approved,
             event.code(),

@@ -13,7 +13,7 @@ use axum::Router;
 use axum::body::Body;
 use ferrosmart::authorize::COOKIE;
 use ferrosmart::authorize::consent::{FhirUser, offer};
-use ferrosmart::clients::{ClientKind, ClientSection, GrantType, resolve};
+use ferrosmart::clients::{AuthMethod, ClientMetadata, GrantType, Material, resolve};
 use ferrosmart::picker::Reach;
 use ferrosmart::server::{AppState, router};
 use ferrosmart::store::Store;
@@ -27,7 +27,8 @@ use url::Url;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 
 use crate::support::{
-    Database, Keys, RESOURCE, audit, bases, commit, config, events, from_client, iua_71, records,
+    ASSURANCE, Database, Keys, RESOURCE, SUBSTANTIAL_ACR, audit, bases, commit, config, events,
+    from_client, iua_71, records,
 };
 
 /// FerroSMART's issuer in every case.
@@ -35,6 +36,8 @@ const ISSUER: &str = "https://smart.example.org";
 /// The app's redirect URI.
 const REDIRECT: &str = "https://app.example.org/callback";
 const POST_LOGOUT: &str = "https://app.example.org/logged-out";
+/// The `fhirUser` of the person a case logs in as unless it names another.
+pub(crate) const PERSON: &str = "RelatedPerson/synthetic-1";
 /// FerroSMART's client id at the provider.
 pub(crate) const UPSTREAM_CLIENT: &str = "ferrosmart";
 /// The deployment's SMART style document.
@@ -91,9 +94,10 @@ impl Provider {
     }
 
     /// Mounts the code exchange answering an ID Token with `nonce` for a
-    /// person holding `roles`.
+    /// person holding `roles`, a `RelatedPerson` and so one the consent page
+    /// asks (`docs/architecture.md` §13.6 item 6).
     async fn answer(&self, nonce: &str, roles: &[&str]) {
-        self.answer_as(nonce, roles, "synthetic-person", "Practitioner/synthetic-1")
+        self.answer_as(nonce, roles, "synthetic-person", PERSON)
             .await;
     }
 
@@ -118,7 +122,8 @@ impl Provider {
     pub(crate) async fn answer_claims(&self, claims: &Value) {
         let now = jiff::Timestamp::now().as_second();
         let mut body = json!({
-            "iss": self.server.uri(), "aud": UPSTREAM_CLIENT, "iat": now, "exp": now + 300
+            "iss": self.server.uri(), "aud": UPSTREAM_CLIENT, "iat": now, "exp": now + 300,
+            "acr": SUBSTANTIAL_ACR
         });
         if let (Some(base), Some(over)) = (body.as_object_mut(), claims.as_object()) {
             base.extend(over.clone());
@@ -173,6 +178,8 @@ struct Smart {
     _keys: Keys,
     /// The settings it runs on.
     settings: ferrosmart::config::settings::Settings,
+    /// The client documents it was given.
+    clients: Vec<Value>,
 }
 
 impl Smart {
@@ -228,20 +235,33 @@ impl Smart {
         resource: &str,
         redirects: &[&str],
     ) -> Self {
+        Self::start_setting(grants, ceiling, role, resource, redirects, "").await
+    }
+
+    /// Starts the server of [`Smart::start_full`] with the `[ferrosmart]`
+    /// keys `settings`, each a line.
+    async fn start_setting(
+        grants: &str,
+        ceiling: &str,
+        role: &str,
+        resource: &str,
+        redirects: &[&str],
+        settings: &str,
+    ) -> Self {
         let provider = Provider::start().await;
         let keys = Keys::new();
         let database = Database::create().await;
         let assertion = crate::support::upstream_assertion(keys.dir.path());
         let text = format!(
-            "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
-             [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\nfhir_user_claim = \"fhir_user\"\n{assertion}\
+            "[ferrosmart]\nissuer = {ISSUER:?}\n{settings}[ferrosmart.database]\nurl = {:?}\n\
+             [[ferrosmart.upstream]]\nname = \"idp\"\n[ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\nfhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [ferrosmart.branding]\nsmart_style_url = {STYLE:?}\n{resource}\
              [[ferrosmart.role]]\nname = \"clinician\"\nscopes = {role}\n\
-             [[ferrosmart.client]]\nclient_id = \"app\"\nname = \"Synthetic App\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"app\"\nclient_name = \"Synthetic App\"\ntoken_endpoint_auth_method = \"none\"\n\
              client_uri = \"https://app.example.org/\"\nlogo_uri = \"https://cdn.example.org/app.png\"\n\
              policy_uri = \"https://app.example.org/privacy\"\ntos_uri = \"https://app.example.org/terms\"\n\
              redirect_uris = {redirects:?}\npost_logout_redirect_uris = [{POST_LOGOUT:?}]\n\
-             {listing}grant_types = {grants}\nscopes = {ceiling}",
+             {listing}grant_types = {grants}\nscope = {ceiling}",
             secrecy::ExposeSecret::expose_secret(&database.url),
             provider.server.uri(),
             listing = crate::support::resources_of(resource),
@@ -251,10 +271,11 @@ impl Smart {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let providers = crate::support::providers(&settings).await;
         let audit = audit(&settings);
         let state = AppState::new(settings.clone(), store.clone(), audit).with_login(providers);
+        let clients = crate::support::clients(&text);
+        crate::support::apply(&state, &clients).await;
         Self {
             app: router(Arc::new(state)),
             provider,
@@ -262,6 +283,7 @@ impl Smart {
             database,
             _keys: keys,
             settings,
+            clients,
         }
     }
 
@@ -582,7 +604,7 @@ async fn a_standalone_launch_logs_in_upstream_asks_consent_and_issues_tokens() {
     assert_eq!(json!(ISSUER), claims["iss"]);
     assert_eq!(json!("app"), claims["aud"]);
     assert_eq!(json!("synthetic-nonce"), claims["nonce"]);
-    assert_eq!(json!("Practitioner/synthetic-1"), claims["fhirUser"]);
+    assert_eq!(json!(PERSON), claims["fhirUser"]);
     assert_ne!(
         json!("synthetic-person"),
         claims["sub"],
@@ -652,7 +674,7 @@ async fn a_person_without_a_granting_role_sees_which_role_is_missing() {
     );
     assert!(page.contains("A role that would: clinician."), "{page}");
     assert!(
-        !page.contains("synthetic-person") && !page.contains("Practitioner/synthetic-1"),
+        !page.contains("synthetic-person") && !page.contains(PERSON),
         "no claim value: {page}"
     );
     assert!(
@@ -800,7 +822,7 @@ async fn with_claims(smart: &Smart, scope: &str, extra: &Value) -> Value {
     let cookie = set_cookie(&headers);
     let mut claims = json!({
         "sub": "synthetic-person", "roles": ["clinician"],
-        "fhir_user": "Practitioner/synthetic-1",
+        "fhir_user": PERSON,
         "nonce": param(&upstream, "nonce").expect("a nonce")
     });
     if let (Some(base), Some(over)) = (claims.as_object_mut(), extra.as_object()) {
@@ -1279,19 +1301,21 @@ async fn a_person_is_granted_an_extension_scope_that_the_ceiling_and_a_role_list
 
 #[test]
 fn an_extension_scope_needs_the_ceiling_and_a_role() {
-    let client = resolve(&[ClientSection {
-        client_id: String::from("app"),
-        kind: ClientKind::Public,
-        redirect_uris: vec![String::from(REDIRECT)],
-        grant_types: vec![GrantType::AuthorizationCode],
-        scopes: ["openid", "__ferroehr.platform", "__ferroehr.audit", "admin"]
-            .into_iter()
-            .map(String::from)
-            .collect(),
-        ..ClientSection::default()
-    }])
-    .expect("admitted")
-    .remove(0);
+    let client = resolve(
+        &ClientMetadata {
+            client_id: String::from("app"),
+            auth_method: AuthMethod::None,
+            redirect_uris: vec![String::from(REDIRECT)],
+            grant_types: vec![GrantType::AuthorizationCode],
+            scopes: ["openid", "__ferroehr.platform", "__ferroehr.audit", "admin"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            ..ClientMetadata::default()
+        },
+        Material::default(),
+    )
+    .expect("admitted");
     let roles = [(
         String::from("administrator"),
         vec![
@@ -1333,25 +1357,27 @@ fn an_extension_scope_needs_the_ceiling_and_a_role() {
 
 #[test]
 fn the_consent_page_offers_what_the_ceiling_and_the_roles_allow() {
-    let client = resolve(&[ClientSection {
-        client_id: String::from("app"),
-        kind: ClientKind::Public,
-        redirect_uris: vec![String::from(REDIRECT)],
-        grant_types: vec![GrantType::AuthorizationCode],
-        scopes: [
-            "openid",
-            "fhirUser",
-            "user/Observation.rs",
-            "user/Patient.rs",
-            "offline_access",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect(),
-        ..ClientSection::default()
-    }])
-    .expect("admitted")
-    .remove(0);
+    let client = resolve(
+        &ClientMetadata {
+            client_id: String::from("app"),
+            auth_method: AuthMethod::None,
+            redirect_uris: vec![String::from(REDIRECT)],
+            grant_types: vec![GrantType::AuthorizationCode],
+            scopes: [
+                "openid",
+                "fhirUser",
+                "user/Observation.rs",
+                "user/Patient.rs",
+                "offline_access",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+            ..ClientMetadata::default()
+        },
+        Material::default(),
+    )
+    .expect("admitted");
     let roles = [(
         String::from("clinician"),
         vec![String::from("user/Observation.rs")],
@@ -1689,7 +1715,7 @@ async fn an_offline_access_launch_issues_a_refresh_token_that_rotates() {
     )
     .expect("claims");
     // NOTE: docs/architecture.md §13.6 item 2, fhirUser rides in the access token.
-    assert_eq!(json!("Practitioner/synthetic-1"), access["fhirUser"]);
+    assert_eq!(json!(PERSON), access["fhirUser"]);
     let second = renewed["refresh_token"].as_str().expect("rotated");
     assert_ne!(first, second);
     // NOTE: RFC 9700 §4.14.2, the rotated token presented again after the repeat
@@ -1759,19 +1785,21 @@ async fn withdrawing_a_consent_revokes_the_grants_it_covered() {
 
 #[test]
 fn offline_and_online_access_are_offered_to_a_client_that_refreshes() {
-    let client = resolve(&[ClientSection {
-        client_id: String::from("app"),
-        kind: ClientKind::Public,
-        redirect_uris: vec![String::from(REDIRECT)],
-        grant_types: vec![GrantType::AuthorizationCode, GrantType::RefreshToken],
-        scopes: ["openid", "offline_access", "online_access"]
-            .into_iter()
-            .map(String::from)
-            .collect(),
-        ..ClientSection::default()
-    }])
-    .expect("admitted")
-    .remove(0);
+    let client = resolve(
+        &ClientMetadata {
+            client_id: String::from("app"),
+            auth_method: AuthMethod::None,
+            redirect_uris: vec![String::from(REDIRECT)],
+            grant_types: vec![GrantType::AuthorizationCode, GrantType::RefreshToken],
+            scopes: ["openid", "offline_access", "online_access"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            ..ClientMetadata::default()
+        },
+        Material::default(),
+    )
+    .expect("admitted");
     let roles = std::collections::BTreeMap::new();
     assert_eq!(
         vec!["openid", "offline_access", "online_access"],
@@ -1988,7 +2016,9 @@ async fn to_picker_asking(
     subject: &str,
     fhir_user: &str,
 ) -> String {
-    let path = authorize_path(&[("aud", base), ("scope", scope)]);
+    // NOTE: OpenID Connect Core 1.0 §3.1.2.1, prompt=consent drives the page that a
+    // professional's administered app would spare, which the picker cases go on to.
+    let path = authorize_path(&[("aud", base), ("scope", scope), ("prompt", "consent")]);
     let (_, headers, _) = smart.get(&path, None).await;
     let upstream = location(&headers);
     let cookie = set_cookie(&headers);
@@ -2115,12 +2145,12 @@ async fn a_patient_gets_their_own_record_in_context_with_no_picker_and_no_role()
         // NOTE: docs/architecture.md §3.13, a resource server reads the patient's
         // own token under the `ferrosmart` preset as the person (#681).
         let (_, _, jwks) = smart.get("/jwks", None).await;
-        let caller = crate::support::read_under_preset(
+        let caller = crate::support::read_at_resource_server(
             &serde_json::from_str(&jwks).expect("a JWK Set"),
             ISSUER,
             &base,
-            ferrohealth_smart::kind::IssuerKind::Persons,
-            &crate::support::one_table("app"),
+            ferrohealth_smart::kind::IssuerKind::Smart,
+            &ferrohealth_smart::profile::ProfileKeys::default(),
             body["access_token"].as_str().expect("a token"),
         )
         .await
@@ -2506,7 +2536,7 @@ async fn a_token_response_is_readable_from_the_app_s_origin_alone() {
     smart.stop().await;
 }
 
-mod approval;
+mod assurance;
 mod consent_basis;
 mod core_op;
 mod ehr_picker;
@@ -2514,12 +2544,17 @@ mod encounter_picker;
 mod fhir_user_lookup;
 mod logout;
 mod paired_picker;
+mod par;
 mod picker_purpose;
+mod picker_shortcuts;
 mod preset;
 mod providers;
 mod public_redirect;
+mod registration;
 mod saml;
 mod secret_basic;
+mod self_registered;
+mod token_exchange;
 
 /// The capabilities FerroSMART supports with a FHIR resource server and a
 /// SMART style document configured, each with the case that exercises it
@@ -2616,7 +2651,12 @@ async fn with_a_login_every_listed_grant_is_served_and_every_served_one_listed()
         .await;
     let listed = read(metadata);
     assert_eq!(
-        vec!["authorization_code", "client_credentials", "refresh_token"],
+        vec![
+            "authorization_code",
+            "client_credentials",
+            "refresh_token",
+            "urn:ietf:params:oauth:grant-type:token-exchange"
+        ],
         listed
     );
     let (_, _, openid) = smart.get("/.well-known/openid-configuration", None).await;
@@ -2730,19 +2770,21 @@ async fn what_the_document_leaves_out_the_server_refuses() {
         !listed.contains(&json!("smart-app-state")),
         "App State lives at the resource server"
     );
-    let client = resolve(&[ClientSection {
-        client_id: String::from("app"),
-        kind: ClientKind::Public,
-        redirect_uris: vec![String::from(REDIRECT)],
-        grant_types: vec![GrantType::AuthorizationCode],
-        scopes: vec![
-            String::from("launch/patient"),
-            String::from("launch/encounter"),
-        ],
-        ..ClientSection::default()
-    }])
-    .expect("admitted")
-    .remove(0);
+    let client = resolve(
+        &ClientMetadata {
+            client_id: String::from("app"),
+            auth_method: AuthMethod::None,
+            redirect_uris: vec![String::from(REDIRECT)],
+            grant_types: vec![GrantType::AuthorizationCode],
+            scopes: vec![
+                String::from("launch/patient"),
+                String::from("launch/encounter"),
+            ],
+            ..ClientMetadata::default()
+        },
+        Material::default(),
+    )
+    .expect("admitted");
     let roles = std::collections::BTreeMap::new();
     assert_eq!(
         vec!["launch/patient"],
@@ -2818,16 +2860,18 @@ async fn an_authorization_request_by_post_is_the_get_s_twin() {
 // FHIR Resources: v1 scopes are processed as v2 and returned as v1.
 #[test]
 fn a_v1_scope_is_offered_by_its_v2_form_and_granted_as_asked() {
-    let client = resolve(&[ClientSection {
-        client_id: String::from("app"),
-        kind: ClientKind::Public,
-        redirect_uris: vec![String::from(REDIRECT)],
-        grant_types: vec![GrantType::AuthorizationCode],
-        scopes: vec![String::from("user/Observation.rs")],
-        ..ClientSection::default()
-    }])
-    .expect("admitted")
-    .remove(0);
+    let client = resolve(
+        &ClientMetadata {
+            client_id: String::from("app"),
+            auth_method: AuthMethod::None,
+            redirect_uris: vec![String::from(REDIRECT)],
+            grant_types: vec![GrantType::AuthorizationCode],
+            scopes: vec![String::from("user/Observation.rs")],
+            ..ClientMetadata::default()
+        },
+        Material::default(),
+    )
+    .expect("admitted");
     let roles = [(
         String::from("clinician"),
         vec![String::from("user/Observation.rs")],

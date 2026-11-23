@@ -20,14 +20,15 @@ use jsonwebtoken::Algorithm;
 use secrecy::SecretString;
 use url::Url;
 
-use crate::clients::Client;
 use crate::upstream::{
     AssertionKeys, Authentication, Effective, OidcSection, OidcUpstream, PrivateKeyJwtSection,
     Protocol, Upstream, UpstreamSection,
 };
 
 use crate::config::error::Error;
-use crate::config::{AuditSection, BrandingSection, Config, KeysSection};
+use crate::config::{AuditSection, BrandingSection, Config, KeysSection, SigningKeysSection};
+use crate::signing::SigningKeys;
+use crate::store::signing::Schedule;
 
 /// The settings the server runs on.
 #[derive(Debug, Clone)]
@@ -46,14 +47,12 @@ pub struct Settings {
     pub refresh_idle: Duration,
     /// How long an `online_access` refresh token lasts unused.
     pub online_idle: Duration,
-    /// The keys that sign every token.
-    pub keys: Arc<KeyRing>,
+    /// The keys that sign every token, in rotation.
+    pub keys: Arc<SigningKeys>,
     /// The connection URL of the database.
     pub database_url: SecretString,
     /// The most connections one replica holds.
     pub max_connections: u32,
-    /// The clients the configuration registers.
-    pub clients: Vec<Client>,
     /// The base URLs of the resource servers, each as configured.
     pub resources: Vec<String>,
     /// The base URLs among them that serve openEHR.
@@ -67,6 +66,12 @@ pub struct Settings {
     /// The `fhirUser` lookups of each FHIR base that names any
     /// (`docs/architecture.md` §13.6 item 9).
     pub fhir_user_lookups: BTreeMap<String, Vec<crate::config::FhirUserLookupSection>>,
+    /// The search each FHIR base that names one lists a professional's
+    /// assigned patients by.
+    pub assigned: BTreeMap<String, crate::config::Assigned>,
+    /// How long a chosen patient stays on the person's recent list; zero
+    /// keeps none.
+    pub recent_retention: Duration,
     /// The upstream providers people log in at, in configuration order.
     pub upstreams: Vec<Upstream>,
     /// FerroSMART as a SAML 2.0 service provider, when `[ferrosmart.saml]`
@@ -74,8 +79,15 @@ pub struct Settings {
     pub saml: Option<Arc<crate::upstream::saml::ServiceProviderSettings>>,
     /// The scopes each role may be granted.
     pub roles: BTreeMap<String, Vec<String>>,
-    /// The deployment's name and words on the pages.
+    /// Whether every authorization request arrives pushed (RFC 9126 §4).
+    pub require_pushed_authorization_requests: bool,
+    /// The deployment's name.
+    pub name: String,
+    /// The deployment's words on the pages.
     pub branding: BrandingSection,
+    /// The scopes an app that registered itself may be granted at most,
+    /// when the deployment lets apps register themselves.
+    pub registration: Option<Vec<String>>,
     /// The User Access Brands Bundle, when the deployment publishes one.
     pub brand: Option<crate::brands::Brands>,
     /// Where every login and token is recorded.
@@ -175,7 +187,10 @@ impl Config {
                 .map(ferrohealth_secret::secret::Secret::to_secret_string),
             section.database.url_file.as_deref(),
         )?;
-        let keys = Arc::new(key_ring(&section.keys, &TOKEN_KEYS, Algorithm::RS256)?);
+        let keys = Arc::new(signing_keys(
+            &section.keys,
+            section.access_token_lifetime.get(),
+        )?);
         Ok(Settings {
             server: self.server.clone(),
             issuer: section.issuer.clone(),
@@ -186,7 +201,6 @@ impl Config {
             keys: Arc::clone(&keys),
             database_url,
             max_connections: section.database.max_connections,
-            clients: clients_of(&section.client, &section.upstream, &section.resource)?,
             resources: resources(&section.resource)?,
             openehr_resources: section
                 .resource
@@ -198,31 +212,49 @@ impl Config {
             pairings: pairings(&section.resource)?,
             purposes: purposes(&section.resource)?,
             fhir_user_lookups: fhir_user_lookups(&section.resource)?,
-            upstreams: upstreams(&section.upstream, &keys)?,
+            assigned: assigned(&section.resource)?,
+            recent_retention: section.picker.recent_retention.get(),
+            upstreams: upstreams(&section.upstream, &keys, section.assurance_minimum)?,
             saml: service_provider(section)?,
             roles: roles(&section.role)?,
+            require_pushed_authorization_requests: section.require_pushed_authorization_requests,
+            name: section.name.clone(),
             branding: branding(&section.branding)?,
-            brand: section
-                .brand
-                .as_ref()
-                .map(|brand| {
-                    let fhir: Vec<String> = section
-                        .resource
-                        .iter()
-                        .filter(|resource| resource.kind == crate::config::ResourceKind::Fhir)
-                        .map(|resource| resource.base.clone())
-                        .collect();
-                    let bundle = format!(
-                        "{}{}",
-                        section.issuer.trim_end_matches('/'),
-                        crate::brands::BRANDS_ROUTE
-                    );
-                    crate::brands::Brands::resolve(brand, &fhir, &bundle)
-                })
-                .transpose()?,
+            registration: registration(&section.registration)?,
+            brand: brand(section)?,
             audit: audit(&section.audit, &issuer)?,
         })
     }
+}
+
+/// Returns the User Access Brand `section` publishes over its FHIR bases,
+/// named by the deployment's name when it names none of its own.
+fn brand(
+    section: &crate::config::FerroSmartSection,
+) -> Result<Option<crate::brands::Brands>, Error> {
+    section
+        .brand
+        .as_ref()
+        .map(|brand| {
+            let fhir: Vec<String> = section
+                .resource
+                .iter()
+                .filter(|resource| resource.kind == crate::config::ResourceKind::Fhir)
+                .map(|resource| resource.base.clone())
+                .collect();
+            let bundle = format!(
+                "{}{}",
+                section.issuer.trim_end_matches('/'),
+                crate::brands::BRANDS_ROUTE
+            );
+            let mut brand = brand.clone();
+            if brand.name.trim().is_empty() {
+                brand.name.clone_from(&section.name);
+            }
+            crate::brands::Brands::resolve(&brand, &fhir, &bundle)
+        })
+        .transpose()
+        .map_err(Error::from)
 }
 
 /// Returns the audit lane `section` describes for the server at `issuer`.
@@ -273,6 +305,42 @@ fn branding(section: &BrandingSection) -> Result<BrandingSection, Error> {
     Ok(section.clone())
 }
 
+/// Returns the ceiling of an app that registers itself, when `section`
+/// opens the registration endpoint: scope tokens that are neither `user/` nor
+/// `system/`, since professional and backend apps are an administrator's to
+/// register (RFC 7591 §5 keeps an app's own metadata self-asserted).
+fn registration(
+    section: &crate::config::RegistrationSection,
+) -> Result<Option<Vec<String>>, Error> {
+    if !section.open {
+        return Ok(None);
+    }
+    let rule = |rule| Error::Registration { rule };
+    let scopes: Vec<String> = section
+        .scope
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    if scopes.is_empty() {
+        return Err(rule("an open registration names its `scope`"));
+    }
+    if scopes
+        .iter()
+        .any(|scope| !ferrohealth_smart::scope::is_scope_token(scope))
+    {
+        return Err(rule(
+            "`scope` holds a value outside the RFC 6749 §3.3 character set",
+        ));
+    }
+    if scopes
+        .iter()
+        .any(|scope| scope.starts_with("user/") || scope.starts_with("system/"))
+    {
+        return Err(rule("`scope` holds a `user/` or `system/` scope"));
+    }
+    Ok(Some(scopes))
+}
+
 /// The configuration keys of one ring's three files, for its errors.
 struct RingNames {
     /// The current key's file.
@@ -283,13 +351,6 @@ struct RingNames {
     next: &'static str,
 }
 
-/// The names of `[ferrosmart.keys]`, the ring that signs tokens.
-const TOKEN_KEYS: RingNames = RingNames {
-    current: "ferrosmart.keys.private_key_file",
-    previous: "ferrosmart.keys.previous_private_key_file",
-    next: "ferrosmart.keys.next_private_key_file",
-};
-
 /// The names of `[ferrosmart.upstream.oidc.private_key_jwt.keys]`, the ring that
 /// signs client assertions to the upstream provider.
 const ASSERTION_KEYS: RingNames = RingNames {
@@ -297,6 +358,38 @@ const ASSERTION_KEYS: RingNames = RingNames {
     previous: "ferrosmart.upstream.oidc.private_key_jwt.keys.previous_private_key_file",
     next: "ferrosmart.upstream.oidc.private_key_jwt.keys.next_private_key_file",
 };
+
+/// Returns the signing keys `section` names, rotating so a key is published
+/// a JWK Set cache lifetime before it signs and stays published for the
+/// longest token it signed after that (`docs/architecture.md` §13.11).
+fn signing_keys(
+    section: &SigningKeysSection,
+    access_token_lifetime: Duration,
+) -> Result<SigningKeys, Error> {
+    const KEY: &str = "ferrosmart.keys.private_key_files";
+    let mut pool: Vec<AssertionKey> = Vec::with_capacity(section.private_key_files.len());
+    for path in &section.private_key_files {
+        let key = read_key(KEY, path, None, Algorithm::RS256)?;
+        if pool.iter().any(|other| other.kid() == key.kid()) {
+            return Err(Error::RepeatedKey {
+                kid: key.kid().to_owned(),
+            });
+        }
+        pool.push(key);
+    }
+    let lead = crate::server::JWKS_MAX_AGE.saturating_add(crate::signing::REFRESH_INTERVAL);
+    let schedule = Schedule {
+        period: section.rotation_period.get(),
+        lead,
+        retirement: lead.saturating_add(access_token_lifetime),
+    };
+    if schedule.period < schedule.retirement {
+        return Err(Error::RotationPeriod {
+            shortest: schedule.retirement,
+        });
+    }
+    SigningKeys::new(pool, schedule).map_err(|_empty| Error::Missing { key: KEY })
+}
 
 /// Returns the ring `keys` names: the current key, the previous one for its
 /// overlap and the next one, each read to sign with `algorithm`.
@@ -435,6 +528,26 @@ pub struct Pairing {
     pub subject_system: String,
 }
 
+/// Returns the assigned-patient search of each FHIR base in `sections` that
+/// names one.
+fn assigned(
+    sections: &[crate::config::ResourceSection],
+) -> Result<BTreeMap<String, crate::config::Assigned>, Error> {
+    let mut assigned = BTreeMap::new();
+    for section in sections {
+        let Some(search) = section.assigned else {
+            continue;
+        };
+        if section.kind != crate::config::ResourceKind::Fhir {
+            return Err(Error::Resource {
+                rule: "`assigned` is for a FHIR base",
+            });
+        }
+        assigned.insert(section.base.clone(), search);
+    }
+    Ok(assigned)
+}
+
 /// Returns the pairing of each openEHR base in `sections` that names a
 /// `fhir_base`.
 fn pairings(
@@ -567,46 +680,18 @@ fn purposes(
     Ok(purposes)
 }
 
-/// Returns the clients `sections` register, each naming only providers
-/// `upstreams` configures and bases `resources` configures.
-fn clients_of(
-    sections: &[crate::clients::ClientSection],
-    upstreams: &[UpstreamSection],
-    resources: &[crate::config::ResourceSection],
-) -> Result<Vec<Client>, Error> {
-    let clients = crate::clients::resolve(sections)?;
-    for client in &clients {
-        if let Some(unknown) = client
-            .resources
-            .iter()
-            .find(|base| !resources.iter().any(|resource| &resource.base == *base))
-        {
-            return Err(Error::UnknownResource {
-                client_id: client.client_id.clone(),
-                base: unknown.clone(),
-            });
-        }
-        if let Some(unknown) = client
-            .upstreams
-            .iter()
-            .find(|name| !upstreams.iter().any(|upstream| &upstream.name == *name))
-        {
-            return Err(Error::UnknownUpstream {
-                client_id: client.client_id.clone(),
-                name: unknown.clone(),
-            });
-        }
-    }
-    Ok(clients)
-}
-
 /// Returns the providers `sections` name, each by a name of its own and an
 /// issuer of its own (OpenID Connect Discovery 1.0 §4.3 holds each issuer
-/// to its metadata), checking each assertion ring against `keys`.
-fn upstreams(sections: &[UpstreamSection], keys: &KeyRing) -> Result<Vec<Upstream>, Error> {
+/// to its metadata), checking each assertion ring against `keys` and each
+/// provider's assurance against the deployment's `floor`.
+fn upstreams(
+    sections: &[UpstreamSection],
+    keys: &SigningKeys,
+    floor: crate::assurance::Floor,
+) -> Result<Vec<Upstream>, Error> {
     let mut resolved: Vec<Upstream> = Vec::with_capacity(sections.len());
     for section in sections {
-        let upstream = upstream(section, keys)?;
+        let upstream = upstream(section, keys, floor)?;
         if resolved.iter().any(|other| other.name == upstream.name) {
             return Err(Error::Upstream {
                 rule: "each entry has a name of its own",
@@ -626,7 +711,11 @@ fn upstreams(sections: &[UpstreamSection], keys: &KeyRing) -> Result<Vec<Upstrea
 }
 
 /// Returns the provider `section` names.
-fn upstream(section: &UpstreamSection, keys: &KeyRing) -> Result<Upstream, Error> {
+fn upstream(
+    section: &UpstreamSection,
+    keys: &SigningKeys,
+    floor: crate::assurance::Floor,
+) -> Result<Upstream, Error> {
     let named = !section.name.is_empty()
         && section
             .name
@@ -664,6 +753,13 @@ fn upstream(section: &UpstreamSection, keys: &KeyRing) -> Result<Upstream, Error
             });
         }
     };
+    let assurance =
+        crate::assurance::Assurance::resolve(&section.assurance, floor).map_err(|source| {
+            Error::Assurance {
+                name: section.name.clone(),
+                source,
+            }
+        })?;
     let named = |claim: &String| !claim.is_empty();
     Ok(Upstream {
         name: section.name.clone(),
@@ -674,6 +770,7 @@ fn upstream(section: &UpstreamSection, keys: &KeyRing) -> Result<Upstream, Error
         },
         fhir_user_claim: Some(fhir_user_claim).filter(named),
         role_claims: role_claims.into_iter().filter(named).collect(),
+        assurance,
         protocol,
     })
 }
@@ -716,7 +813,7 @@ fn service_provider(
 fn oidc_upstream(
     section: &OidcSection,
     effective: &Effective,
-    keys: &KeyRing,
+    keys: &SigningKeys,
 ) -> Result<OidcUpstream, Error> {
     if section.issuer.is_empty() || section.client_id.is_empty() {
         return Err(Error::Upstream {
@@ -760,7 +857,7 @@ fn oidc_upstream(
 fn assertion_keys(
     section: &PrivateKeyJwtSection,
     algorithm: &str,
-    tokens: &KeyRing,
+    tokens: &SigningKeys,
 ) -> Result<AssertionKeys, Error> {
     const KEY: &str = "ferrosmart.upstream.oidc.private_key_jwt";
     let algorithm = algorithm
@@ -771,7 +868,11 @@ fn assertion_keys(
     let ring = key_ring(&section.keys, &ASSERTION_KEYS, algorithm)?;
     // NOTE: RFC 8725 §3.12: a key that signs client assertions never signs a
     // token, so the two rings share no key.
-    if shares_key(&ring.published(), &tokens.published()) {
+    let pool: Vec<&AssertionKey> = tokens.pool().iter().collect();
+    if shares_key(
+        &ring.published(),
+        &ferrohealth_smart::client::assertion::jwk_set(&pool),
+    ) {
         return Err(Error::Upstream {
             rule: "the assertion keys share no key with `[ferrosmart.keys]`",
         });

@@ -6,7 +6,7 @@ resolver = "3"
 members = ["crates/*", "app/*", "tools/*"]
 
 [workspace.package]
-version = "0.33.1"
+version = "0.34.0"
 edition = "2024"
 rust-version = "1.98"
 license = "BUSL-1.1"
@@ -20,6 +20,8 @@ authors = ["Ruben Talstra"]
 # FerroHEALTH products resolve, so the library adds no second copy to any of
 # them. Verified against crates.io on 2026-10-19.
 [workspace.dependencies]
+# The JSON Schema check of FerroSMART's answers against its OpenAPI document.
+jsonschema = { version = "0.61.1", default-features = false }
 jsonwebtoken = { version = "11.1.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "http2"] }
 argon2 = { version = "0.6.0", default-features = false, features = ["password-hash", "alloc"] }
@@ -46,7 +48,7 @@ ferrohealth-server = { version = "0.12.0", default-features = false, features = 
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
 # ferrohealth-authz reads the subject ferrohealth-smart authenticates; the
 # path is the workspace member, the version the one it publishes.
-ferrohealth-smart = { path = "crates/ferrohealth-smart", version = "0.33.0", default-features = false }
+ferrohealth-smart = { path = "crates/ferrohealth-smart", version = "0.34.0", default-features = false }
 # ferrohealth-authz: the engine seam, the embedded Cedar engine and its
 # hot-swapped policy set. Verified against crates.io on 2026-10-25.
 async-trait = "0.1.92"
@@ -66,8 +68,8 @@ ferrobridge-validator = "0.16.0"
 fhir-types = { version = "0.1.131", default-features = false, features = ["r4"] }
 # ferrohealth-session: the private (AES-256-GCM) cookie jar of the sealed
 # store, and the session-watch wire FerroUI's script reads. Verified against
-# crates.io on 2026-11-04.
-cookie = { version = "0.18.2", default-features = false, features = ["private"] }
+# crates.io on 2026-11-23.
+cookie = { version = "0.18.3", default-features = false, features = ["private"] }
 ferrohealth-ui = { version = "0.6.6", default-features = false }
 # The framework integrations, each behind its feature.
 tower = { version = "0.5.3", default-features = false }
@@ -94,8 +96,7 @@ sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio
 # framework tests, and the JSON formatter the audit line is read back through.
 wiremock = "0.6.5"
 http-body-util = "0.1.5"
-# The reader of the issuer profile presets ferrohealth-smart ships under
-# profiles/, and of the configuration cases.
+# The reader of the configuration cases and of the book's example tables.
 toml = { version = "1.1.8", default-features = false, features = ["std", "parse", "display", "serde"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "fmt", "json"] }
 # ferrohealth-smart's `client::PresentedTls`, the rustls client configuration

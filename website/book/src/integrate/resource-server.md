@@ -84,82 +84,54 @@ at the server finds FerroSMART.
 
 Every FerroHEALTH product does this through `ferrohealth-smart`, the crate
 the FerroSMART repository publishes. It trusts FerroSMART in one named
-issuer table under the `ferrosmart` preset. The preset makes the issuer a
-`persons` issuer and keeps every RFC 9068 default except these: `typ` is
-`at+jwt` alone, `scope` is required, a patient's own token is read as the
-patient, the `patient` claim is the launch context (`patient_context`), and
-a token from FerroSMART's own patient picker, whose client is the issuer
-itself, is the signed-in person with no app. The audience is the product's
-own base URL unless the table names another. `delegates` lists the SMART
-apps the product admits for a person, a patient's apps among them:
+issuer table that names only the issuer. The crate reads every token by
+RFC 9068 and SMART App Launch 2.2: `typ` is `at+jwt`, `scope` is required,
+and the `patient` claim is the launch context. The audience is the
+product's own base URL unless the table names another:
 
 ```toml
 [auth.issuer.smart]
 issuer = "https://smart.example.org"
-preset = "ferrosmart"
-
-[auth.issuer.smart.profile]
-delegates = [{ client = "growth-chart" }]
 ```
 
-An app can instead be registered once, at FerroSMART. Give each
-`[[ferrosmart.client]]` the bases its tokens may name in `resources`
+An app is registered once, at FerroSMART. Give each client document the
+bases its tokens may name in `resources`
 ([clients](../configure/clients.md#the-client-registry)); FerroSMART then
-refuses a token for any other base with `invalid_target`. A product's table
-can admit every app whose token names the product in `aud`, in place of
-listing each one:
-
-```toml
-[auth.issuer.smart.profile]
-audience_delegates = true
-```
-
-Each table makes its own choice: `delegates` keeps the product's own list,
-`audience_delegates` reads every app of a FerroSMART token for the product
-as a delegate, the listed ones included. The key is refused on an issuer
-under any other preset, because only FerroSMART is known to issue an app's
-tokens just for the bases it lists. A product whose own data decides which
-apps it admits, such as FerroEHR with its CDR grant, takes neither key, and
-its own access policy still decides every request.
+refuses a token for any other base with `invalid_target`. A token that names
+the product in `aud` was issued for it (RFC 9068 §4, RFC 8707), so the
+product admits its app and keeps no list of apps of its own. The app is
+recorded with each request, and the product's own access policy still
+decides every request.
 
 The same table reads a Backend Services token as a system caller, because
-its `sub` is its `client_id`. A token through a listed app is the patient's
-own access when its `fhirUser` is `Patient/<x>`, its `patient` is `x`, and
-its scopes are `patient/` with no `user/` or `system/` scope; any other
-person's token, a professional's with `patient/` scopes included, is read as
-the professional's. The product's own SMART document describes
+its `sub` is its `client_id`. A user is named by the resource type of their
+`fhirUser`: a `Patient`, a `Practitioner`, a `PractitionerRole`, a
+`RelatedPerson` or a `Person`, and a user of no stated type when the token
+carries none. A token is the patient's own access when its `fhirUser` is
+`Patient/<x>`, its `patient` is `x`, and it names no actor; a
+`RelatedPerson` with a patient in context is that patient's representative.
+An RFC 8693 `act` names the actor beside the user, as FerroSMART asserts
+it. The product's own SMART document describes
 FerroSMART, and its own rules still apply on top of the token's scopes.
 Every other key names the issuer by its table's name (`smart` here), and
-the environment form does too: `FERROEHR__AUTH__ISSUER__SMART__PROFILE__DELEGATES`.
+the environment form does too: `FERROEHR__AUTH__ISSUER__SMART__AUDIENCE`.
 An unknown name is refused at start, with the known names listed.
 Each product's book has the details of its `[auth]` section.
 
-### Issuer profiles
+### Federation issuers
 
-An issuer table names a `preset`: `rfc9068` (the standards alone, the
-default), `keycloak`, `entra`, `okta` or `ferrosmart`. A deployment whose
-issuer needs more than a preset carries, such as a national binding or an
-IdP of its own, writes the profile in a file of the same form and names it
-with `profile_file`. Keys in the issuer's `[auth.issuer.<name>.profile]`
-table win over both:
+Every issuer is read from the standard claims of a SMART App Launch 2.2
+token unless its table declares `kind = "federation"`: another party's
+issuer, whose tokens name its professionals or its organisation. Its
+`[auth.issuer.<name>.federation]` table says how they are read, and its
+`[auth.issuer.<name>.profile]` table may name the token types and the
+required claims it writes.
 
-```toml
-[auth.issuer.provider_a]
-issuer = "https://care-provider-a.example.org"
-profile_file = "/etc/ferro/profiles/nl-annex-b.toml"
-audience = ["https://fhir.example.org/fhir"]
-sender_constraint = "required"
-
-[auth.issuer.provider_a.profile]
-token_types = ["at+jwt"]
-
-[auth.issuer.provider_a.federation.fields]
-"provider.healthcare_provider_identifier" = [{ constant = "87654321", system = "urn:oid:2.16.528.1.1007.3.3" }]
-```
-
-The products ship no country content. This example file maps the Dutch
+The products ship no country content. This example table maps the Dutch
 harmonised authentication of the openEHR Federation Tier specification
-1.0.1 Annex B §B.4a, each value with its source:
+1.0.1 Annex B §B.4a, each value with its source. A deployment copies it,
+adds the issuer, its audience, the `token_types` it observes and its URA in
+`[auth.issuer.nl.federation.fields]`:
 
 ```toml
 {{#include profiles/nl-annex-b.toml}}
@@ -222,15 +194,12 @@ Basic challenge carries none either. The codes:
 | `scope-not-granted` | the token holds and grants nothing for the request (`403`) |
 | `route-unclassified` | the route is one the server does not classify (`403`) |
 | `party-source-unavailable` | the party source could not answer (`503`, log only) |
-| `claim-unexpected`, `user-claim-missing` | a claim the profile expects holds another value, or a user claim is absent |
-| `impersonation`, `app-only-markers-disagree`, `scope-form` | the profile's impersonation marker, app-only markers or scope form |
-| `not-patient-context`, `patient-actor-refused` | a patients token that does not name only its subject, or names an actor |
-| `not-app-only`, `client-missing` | a machines token that is not app-only, a persons token with no client |
-| `delegate-not-granted`, `actor-not-granted` | the client, or the `act` actor, is neither first party nor a delegate |
-| `actor-chain-refused`, `representation-with-act`, `representation-through-delegate` | the `act` chain, or a representation claim beside it |
+| `scope-form`, `client-missing` | `scope` is not one string, or a user's token names no client |
+| `fhir-user-refused` | `fhirUser` names no `Patient`, `Practitioner`, `PractitionerRole`, `RelatedPerson` or `Person` |
+| `actor-chain-refused` | the `act` chain is deeper than admitted or malformed |
 | `professional-incomplete`, `required-fields-missing`, `attribute-out-of-bounds`, `attribute-refused`, `sources-disagree` | a federation token's attributes |
 | `authorization-details-refused`, `organisation-statement-missing`, `assurance-too-low`, `presentations-unreadable`, `contact-point-refused` | a federation token's grants and assertions |
-| `kind-unclassified` | no step classifies a token of the issuer's kind |
+| `kind-unclassified` | a federation issuer has no federation table to read its token under |
 | `refused-unbound`, `refused-wrong-marker`, `refused-ambiguous`, `refused-inactive`, `refused-abandoned`, `refused-deprovisioned`, `refused-key-claim-missing`, `refused-groups-unavailable` | the product refuses the login's party binding (`403`) |
 | `dpop-…`, `certificate-…`, `confirmation-unknown`, `sender-constraint-required` | a `DPoP` proof or a sender-constrained token (RFC 9449, RFC 8705) |
 

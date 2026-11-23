@@ -120,13 +120,12 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
   `fapi2` (the FAPI 2.0 Security Profile on a grant), `authorization_details`
   (RFC 9396) and `onward` (the token exchange and JWT bearer onward
   grants with their check and cache), `kind` (the caller
-  classification), `profile` (the issuer profile with its `onward` keys, its
-  presets under `profiles/`), `federation`
+  classification), `profile` (the issuer profile with its `onward` keys), `federation`
   (what a `federation` issuer asserts, with `assertion`, the eHDSI IdA and
   TRC check behind `ehdsi-assertion`), `sender` (sender-constrained tokens,
   with `proof`, the DPoP proof check, and `replay`, the proof replay store),
   `party` (the login's party through a product `PartySource`, with
-  `binding`, `source`, `config` and `adapter`), `assurance`,
+  `binding`, `source` and `config`), `assurance`,
   `audit`, `refusal`, `config`, `oidc` behind `oidc`, `xml` behind `xml` (the
   bounded XML reader and Exclusive XML Canonicalization the eHDSI check and
   FerroSMART's SAML login share), and `guard` and
@@ -164,7 +163,11 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
   FerroSMART's ZITADEL example and the role claim reader cite, the eHDSI
   specifications the owner supplied with SOG-IS ACM 1.3 recorded by sha256
   and never copied, Implementing Regulation (EU)
-  2026/2099, the GDPR and Commission Decision 2011/833/EU, and the
+  2026/2099 and 2015/1502, the GDPR and Commission Decision 2011/833/EU,
+  Regulation (EU) 2024/1183 with the wallet implementing acts and their 2026
+  amendments, OpenID4VC HAIP 1.0 and OpenID4VP 1.0 with the SD-JWT VC and
+  Token Status List drafts, the ETSI wallet profiles recorded by sha256 and
+  never copied, and the
   Federation Tier Annex B, and the openEHR RM Common chapter the party
   states cite, each with a `PROVENANCE.md`; `okta/` and `microsoft-graph/`
   hold only the provenance of cache-only pages, fetched into the ignored
@@ -235,6 +238,9 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
 - **NEVER add AI or Claude attribution** to a commit, PR, issue, comment, or
   code comment. A `PreToolUse` hook blocks a commit or PR command carrying
   one.
+- **The schema changes in place.** `app/ferrosmart/migrations/` is one
+  baseline file per area; a schema change edits that file and never adds a
+  numbered migration (owner 2026-11-23, `.claude/memory/migrations-in-place.md`).
 - **Never weaken, skip, or delete a test** (`.claude/rules/testing.md`).
 - **Keep the changelog** with a fragment, never an edit of `[Unreleased]`:
   a change a product sees adds

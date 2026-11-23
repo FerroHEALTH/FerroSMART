@@ -26,7 +26,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate, matchers};
 use crate::authorize::{
     CHALLENGE, Provider, UPSTREAM_CLIENT, VERIFIER, form_token, location, param, set_cookie,
 };
-use crate::support::{Database, Keys, audit, config, from_client};
+use crate::support::{ASSURANCE, Database, Keys, audit, config, from_client};
 
 /// The clinician app's redirect URI.
 const WARD_REDIRECT: &str = "https://ward.example.org/callback";
@@ -122,29 +122,29 @@ impl Stack {
         let database = Database::create().await;
         let assertion = crate::support::upstream_assertion(keys.dir.path());
         let text = format!(
-            "[ferrosmart]\nissuer = {issuer:?}\n[ferrosmart.database]\nurl = {:?}\n\
+            "[ferrosmart]\nname = \"Example Hospital\"\nissuer = {issuer:?}\n[ferrosmart.database]\nurl = {:?}\n\
              [[ferrosmart.upstream]]\nname = \"idp\"\nlabel = \"Hospital staff\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
-             fhir_user_claim = \"fhir_user\"\n{assertion}\
+             fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [[ferrosmart.upstream]]\nname = \"portal\"\nlabel = \"Patient portal\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
-             fhir_user_claim = \"fhir_user\"\n{assertion}\
-             [ferrosmart.branding]\nname = \"Example Hospital\"\n\
+             fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
+             [ferrosmart.branding]\n\
              consent_text = \"Example Hospital records every access to your record.\"\n\
              [[ferrosmart.resource]]\nbase = {base:?}\n\
              [[ferrosmart.role]]\nname = \"clinician\"\n\
              scopes = [\"user/Observation.rs\", \"user/Patient.rs\", \"patient/Observation.rs\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"ward-overview\"\nname = \"Ward Overview\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"ward-overview\"\nclient_name = \"Ward Overview\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{WARD_REDIRECT:?}]\ngrant_types = [\"authorization_code\", \"refresh_token\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\", \"user/Patient.rs\", \"offline_access\"]\n\
+             scope = [\"openid\", \"fhirUser\", \"user/Observation.rs\", \"user/Patient.rs\", \"offline_access\"]\n\
              upstreams = [\"idp\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"growth-chart\"\nname = \"Growth Chart\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"growth-chart\"\nclient_name = \"Growth Chart\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{CHART_REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]\n\
+             scope = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]\n\
              upstreams = [\"idp\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"my-record\"\nname = \"My Record\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"my-record\"\nclient_name = \"My Record\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [{WARD_REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
-             scopes = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]",
+             scope = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]",
             secrecy::ExposeSecret::expose_secret(&database.url),
             provider.server.uri(),
             portal.server.uri()
@@ -156,10 +156,14 @@ impl Stack {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let providers = crate::support::providers(&settings).await;
         let audit = audit(&settings);
         let state = AppState::new(settings, store.clone(), audit).with_login(providers);
+        crate::support::apply(
+            &state,
+            &crate::support::clients(&crate::support::reach_every_base(&text)),
+        )
+        .await;
         let app = router(Arc::new(state));
         let served = tokio::spawn({
             let app = app.clone();
@@ -322,9 +326,14 @@ impl Stack {
 
     /// Brings the clinician app's consent page about and returns its cookie.
     pub(crate) async fn clinician_consent(&self) -> String {
-        let path = self.authorize_path(
-            "ward-overview",
-            "openid fhirUser user/Observation.rs user/Patient.rs offline_access",
+        // NOTE: OpenID Connect Core 1.0 §3.1.2.1, a clinician sees the page of an
+        // administered app when the request asks with prompt=consent.
+        let path = format!(
+            "{}&prompt=consent",
+            self.authorize_path(
+                "ward-overview",
+                "openid fhirUser user/Observation.rs user/Patient.rs offline_access",
+            )
         );
         let (cookie, next) = self.log_in(&path).await;
         assert_eq!("/consent", next, "to the consent page");

@@ -18,9 +18,7 @@ use ferrohealth_smart::federation::Field;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::kind::Unclassified;
-use ferrohealth_smart::profile::Preset;
 use ferrohealth_smart::profile::ProfileError;
-use ferrohealth_smart::profile::ProfileFile;
 use ferrohealth_smart::refusal::Reason;
 use ferrohealth_smart::resource::Caller;
 use ferrohealth_smart::resource::Rejection;
@@ -90,10 +88,31 @@ fn token(entry: &Value) -> Value {
     })
 }
 
-/// The book's example profile file, which the cases load.
-fn profile_file() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../website/book/src/integrate/profiles/nl-annex-b.toml")
+/// The book's example issuer table, which the cases load.
+fn example() -> Result<toml::Table, Box<dyn StdError>> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../website/book/src/integrate/profiles/nl-annex-b.toml");
+    let mut file: toml::Table = std::fs::read_to_string(path)?.parse()?;
+    let nl = file
+        .remove("auth")
+        .and_then(|auth| auth.get("issuer")?.get("nl").cloned())
+        .ok_or("the example names [auth.issuer.nl]")?;
+    match nl {
+        toml::Value::Table(table) => Ok(table),
+        _ => Err("[auth.issuer.nl] is a table".into()),
+    }
+}
+
+/// Sets every key of `over` over `base`, table by table.
+fn merge(base: &mut toml::Table, over: toml::Table) {
+    for (key, value) in over {
+        match (base.get_mut(&key), value) {
+            (Some(toml::Value::Table(lower)), toml::Value::Table(upper)) => merge(lower, upper),
+            (_, value) => {
+                base.insert(key, value);
+            }
+        }
+    }
 }
 
 /// The issuer of the cases, configured with the book's example profile file.
@@ -114,35 +133,34 @@ impl Harness {
         Self { key, jwks }
     }
 
-    /// Returns the configuration of the issuer, its issuer table carrying
-    /// `issuer`, its profile table `profile` and its federation table
-    /// `federation`.
-    fn config(&self, issuer: &str, profile: &str, federation: &str) -> String {
-        format!(
-            r#"[issuer.i1]
-issuer = "{ISSUER}"
-profile_file = "{file}"
-audience = ["{AUDIENCE}"]
-jwks_file = "{jwks}"
-{issuer}
-
-[issuer.i1.profile]
-{profile}
-
-[issuer.i1.federation]
-{federation}
-"#,
+    /// Returns the configuration of the book's example issuer table as
+    /// `i1`, with the deployment's issuer, audience and key set, and the
+    /// keys of `over` set over it, a TOML text relative to the issuer table.
+    fn config(&self, over: &str) -> String {
+        let mut table = example().expect("the book's example reads");
+        let deployment = format!(
+            "issuer = \"{ISSUER}\"\naudience = [\"{AUDIENCE}\"]\njwks_file = \"{jwks}\"\n{over}",
             jwks = self.jwks,
-            file = profile_file().display(),
-        )
+        );
+        merge(&mut table, deployment.parse().expect("the keys parse"));
+        let mut issuer = toml::Table::new();
+        issuer.insert(String::from("i1"), toml::Value::Table(table));
+        let mut section = toml::Table::new();
+        section.insert(String::from("issuer"), toml::Value::Table(issuer));
+        toml::to_string(&section).expect("the section renders")
     }
 
     /// The configuration a deployment of the profile writes.
     fn deployed(&self) -> String {
-        self.config(
-            "kind = \"federation\"\nsender_constraint = \"required\"",
-            "token_types = [\"at+jwt\"]",
-            &format!("[issuer.i1.federation.fields]\n\"provider.healthcare_provider_identifier\" = [{{ constant = \"{URA}\", system = \"{URA_SYSTEM}\" }}]"),
+        self.config(&Self::deployment(""))
+    }
+
+    /// The keys a deployment sets, after `extra`, a text whose own table
+    /// headers end before them.
+    fn deployment(extra: &str) -> String {
+        format!(
+            "{extra}\n[profile]\ntoken_types = [\"at+jwt\"]\n\
+             [federation.fields]\n\"provider.healthcare_provider_identifier\" = [{{ constant = \"{URA}\", system = \"{URA_SYSTEM}\" }}]\n"
         )
     }
 
@@ -242,14 +260,9 @@ async fn the_directed_sending_example_lacks_the_organisation_type_a_query_needs(
 #[tokio::test]
 async fn a_deployment_that_only_receives_directed_sending_relaxes_the_required_fields() -> Outcome {
     let h = Harness::new();
-    let config = h.config(
-        "kind = \"federation\"\nsender_constraint = \"required\"",
-        "token_types = [\"at+jwt\"]",
-        &format!(
-            "required_fields = [\"purpose_of_use\", \"provider.healthcare_provider_identifier\"]\n\
-             [issuer.i1.federation.fields]\n\"provider.healthcare_provider_identifier\" = [{{ constant = \"{URA}\", system = \"{URA_SYSTEM}\" }}]"
-        ),
-    );
+    let config = h.config(&Harness::deployment(
+        "[federation]\nrequired_fields = [\"purpose_of_use\", \"provider.healthcare_provider_identifier\"]",
+    ));
     let caller = h.admit(&config, &token(&directed())).await?;
     assert!(
         matches!(caller.kind(), CallerKind::ExternalOrganisation(_)),
@@ -314,7 +327,7 @@ async fn the_profile_requires_sender_constrained_tokens() -> Outcome {
         ),
         "an unbound token is refused by the sender constraint"
     );
-    let unconstrained = h.deployed().replace("sender_constraint = \"required\"", "");
+    let unconstrained = h.config(&Harness::deployment("sender_constraint = \"none\""));
     assert!(matches!(
         Harness::refusal(&unconstrained),
         Some(ResourceError::SenderConstraintRequired)
@@ -327,18 +340,16 @@ async fn the_profile_requires_sender_constrained_tokens() -> Outcome {
 #[test]
 fn the_profile_fails_to_load_without_the_type_or_the_ura() {
     let h = Harness::new();
-    let untyped = h.deployed().replace("token_types = [\"at+jwt\"]", "");
+    let untyped = h.config(&format!(
+        "[federation.fields]\n\"provider.healthcare_provider_identifier\" = [{{ constant = \"{URA}\", system = \"{URA_SYSTEM}\" }}]"
+    ));
     assert!(matches!(
         Harness::refusal(&untyped),
         Some(ResourceError::Profile(ProfileError::Empty {
             key: "token_types"
         }))
     ));
-    let no_ura = h.config(
-        "kind = \"federation\"\nsender_constraint = \"required\"",
-        "token_types = [\"at+jwt\"]",
-        "",
-    );
+    let no_ura = h.config("[profile]\ntoken_types = [\"at+jwt\"]");
     assert!(matches!(
         Harness::refusal(&no_ura),
         Some(ResourceError::Federation(FederationError::NoSource {
@@ -348,31 +359,22 @@ fn the_profile_fails_to_load_without_the_type_or_the_ura() {
 }
 
 #[test]
-fn the_profile_is_refused_on_an_issuer_of_another_kind() {
+fn the_federation_table_is_refused_on_a_smart_issuer() {
     let h = Harness::new();
-    let persons = h
-        .deployed()
-        .replace("kind = \"federation\"", "kind = \"persons\"")
-        .replace("[issuer.i1.federation]\n", "")
-        .replace(
-            &format!("[issuer.i1.federation.fields]\n\"provider.healthcare_provider_identifier\" = [{{ constant = \"{URA}\", system = \"{URA_SYSTEM}\" }}]"),
-            "",
-        );
+    let smart = h.deployed().replace("kind = \"federation\"\n", "");
+    let section: AuthSection = toml::from_str(&smart).expect("the section parses");
     assert!(matches!(
-        Harness::refusal(&persons),
-        Some(ResourceError::Kind {
-            key: "federation",
-            ..
-        })
+        section.resolve(&[]),
+        Err(ConfigError::Federation { .. })
     ));
 }
 
 #[test]
-fn the_books_example_file_carries_the_annex_values() -> Outcome {
-    let file = ProfileFile::read(&profile_file())?;
-    assert_eq!(Some(Vec::new()), file.keys.token_types);
-    assert_eq!(Some(IssuerKind::Federation), file.kind);
-    let federation = file.federation.ok_or("a federation table")?;
+fn the_books_example_carries_the_annex_values() -> Outcome {
+    let section: AuthSection = toml::from_str(&Harness::new().deployed())?;
+    let entry = section.issuer.get("i1").ok_or("the issuer table")?;
+    assert_eq!(Some(IssuerKind::Federation), entry.kind);
+    let federation = entry.federation.as_ref().ok_or("a federation table")?;
     assert_eq!(
         Some(String::from("nl-gis-v1")),
         federation.authorization_details_type
@@ -385,14 +387,5 @@ fn the_books_example_file_carries_the_annex_values() -> Outcome {
     assert!(federation.attests_authorization_details);
     assert!(federation.requires_sender_constraint);
     assert_eq!(Some(false), federation.contact_point);
-    for preset in [
-        Preset::Rfc9068,
-        Preset::Entra,
-        Preset::Keycloak,
-        Preset::Okta,
-        Preset::Ferrosmart,
-    ] {
-        assert!(preset.federation()?.is_none(), "{preset:?}");
-    }
     Ok(())
 }

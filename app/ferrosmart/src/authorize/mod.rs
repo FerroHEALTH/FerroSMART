@@ -16,6 +16,7 @@ pub mod choose;
 pub mod consent;
 pub mod manage;
 mod oidc;
+pub mod par;
 pub mod request;
 pub mod saml;
 
@@ -99,14 +100,24 @@ async fn registered(state: &AppState, pending: &Pending) -> Result<Client, Box<R
     }
 }
 
-/// Returns the request a store lookup `looked` found, or the page that says
-/// it lapsed or that the store failed.
-fn found(
-    state: &AppState,
-    looked: Result<Option<Pending>, StoreError>,
-) -> Result<Pending, Box<Response>> {
+/// Sends the browser back to `pending`'s app with `denial`, given before
+/// the person's login was accepted; an app that registered itself gets the
+/// page that refuses its request instead.
+async fn deny_unsigned(state: &AppState, pending: &Pending, denial: Denial) -> Response {
+    // NOTE: RFC 9700 §4.11.2, the server authenticates the person before it redirects;
+    // no administrator vouched for the redirect URI of an app that registered itself.
+    match registered(state, pending).await {
+        Ok(client) if client.registered_itself() => pages::fault(state, Fault::Refused),
+        Ok(_) => Back::of(state, pending).deny(denial),
+        Err(response) => *response,
+    }
+}
+
+/// Returns what a store lookup `looked` found, or the page that says it
+/// lapsed or that the store failed.
+fn found<T>(state: &AppState, looked: Result<Option<T>, StoreError>) -> Result<T, Box<Response>> {
     match looked {
-        Ok(Some(pending)) => Ok(pending),
+        Ok(Some(found)) => Ok(found),
         Ok(None) => Err(Box::new(pages::fault(state, Fault::Lapsed))),
         Err(error) => Err(Box::new(pages::server_error(state, &error))),
     }

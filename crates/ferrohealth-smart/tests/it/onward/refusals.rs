@@ -194,7 +194,7 @@ async fn a_token_from_another_issuer_with_another_sub_is_refused() {
 
 #[tokio::test]
 async fn under_the_standards_only_profile_another_sub_is_refused() {
-    for flavor in [Flavor::Generic, Flavor::Keycloak] {
+    for flavor in FLAVORS {
         let (error, _) = refused(flavor, |issued| {
             issued["sub"] = json!("someone-else");
         })
@@ -204,73 +204,6 @@ async fn under_the_standards_only_profile_another_sub_is_refused() {
             "{flavor:?}: {error:?}"
         );
     }
-}
-
-#[tokio::test]
-async fn under_entra_another_sub_with_the_same_oid_and_tid_is_accepted() {
-    // NOTE: Microsoft, "Access token claims reference": `sub` "is a pairwise
-    // identifier that's unique to a particular application ID", `oid` is not.
-    let harness = Harness::start(Flavor::Entra).await;
-    let (subject, claims) = harness.person();
-    let issued = Flavor::Entra.issued_claims(&claims, harness.now());
-    assert_ne!(
-        claims["sub"], issued["sub"],
-        "the fixture's sub is pairwise"
-    );
-    harness.issue(&issued, None).await;
-    assert!(harness.token(&subject, None).await.is_ok());
-}
-
-#[tokio::test]
-async fn under_entra_another_oid_or_tid_is_refused() {
-    for claim in ["oid", "tid"] {
-        let (error, _) = refused(Flavor::Entra, |issued| {
-            issued[claim] = json!("99999999-9999-9999-9999-999999999999");
-        })
-        .await;
-        assert!(
-            matches!(&error, OnwardError::Rejected(Rejected::Person { claim: differs }) if differs == claim),
-            "{claim}: {error:?}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn under_entra_a_token_missing_the_expected_ver_is_refused() {
-    // NOTE: Microsoft, "Access token claims reference", `ver`: the `entra`
-    // preset expects 2.0, the version that carries `azp`.
-    for ver in [None, Some("1.0")] {
-        let (error, _) = refused(Flavor::Entra, |issued| match ver {
-            Some(ver) => issued["ver"] = json!(ver),
-            None => {
-                issued.as_object_mut().map(|claims| claims.remove("ver"));
-            }
-        })
-        .await;
-        assert!(
-            matches!(&error, OnwardError::Rejected(Rejected::Expected { claim }) if claim == "ver"),
-            "{ver:?}: {error:?}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn a_deployments_expect_holds_the_standards_only_profile_too() {
-    let mut settings = Flavor::Generic.settings(3600);
-    settings
-        .profile
-        .expect
-        .insert(String::from("token_use"), String::from("onward"));
-    let harness = Harness::with_settings(Flavor::Generic, settings).await;
-    let (subject, claims) = harness.person();
-    harness
-        .issue(&Flavor::Generic.issued_claims(&claims, harness.now()), None)
-        .await;
-    let error = harness.token(&subject, None).await.expect_err("refused");
-    assert!(
-        matches!(&error, OnwardError::Rejected(Rejected::Expected { claim }) if claim == "token_use"),
-        "{error:?}"
-    );
 }
 
 #[tokio::test]
@@ -317,9 +250,9 @@ async fn offline_access_is_never_asked_for() {
 
 #[tokio::test]
 async fn the_jwt_bearer_grant_refuses_a_system_subject_before_sending() {
-    // NOTE: Microsoft, "On-behalf-of flow", Client limitations: "the OBO flow
-    // only works for user principals".
-    for flavor in [Flavor::GenericJwtBearer, Flavor::Entra] {
+    // NOTE: RFC 7523 §3: the assertion's `sub` names the principal the token
+    // is requested for, a user; a system authenticates for itself.
+    for flavor in [Flavor::GenericJwtBearer] {
         let harness = Harness::start(flavor).await;
         let claims = flavor.subject_claims(harness.now());
         let subject = harness.subject(&claims, CallerKind::System);
@@ -387,13 +320,13 @@ async fn an_actor_token_without_an_act_in_the_issued_token_is_refused() {
 
 #[tokio::test]
 async fn the_jwt_bearer_grant_carries_no_actor_token() {
-    let harness = Harness::start(Flavor::Entra).await;
+    let harness = Harness::start(Flavor::GenericJwtBearer).await;
     let (subject, _) = harness.person();
     let actor = ActorToken::new(
         SecretString::from("synthetic-actor-token"),
         Actor {
-            issuer: Flavor::Entra.issuer(),
-            sub: String::from(Flavor::Entra.client_id()),
+            issuer: Flavor::GenericJwtBearer.issuer(),
+            sub: String::from(Flavor::GenericJwtBearer.client_id()),
         },
     );
     let error = harness
@@ -405,15 +338,15 @@ async fn the_jwt_bearer_grant_carries_no_actor_token() {
 }
 
 #[tokio::test]
-async fn under_keycloak_delegation_is_preview_and_refused() {
-    // NOTE: Keycloak 26.8.2 token-exchange.adoc, "Token exchange delegation"
-    // carries the Preview notice: "is not fully supported".
-    let harness = Harness::start(Flavor::Keycloak).await;
+async fn a_delegation_the_profile_labels_preview_is_refused() {
+    let mut settings = Flavor::Generic.settings(3600);
+    settings.profile.onward_preview = vec![PreviewVariant::ActorToken];
+    let harness = Harness::with_settings(Flavor::Generic, settings).await;
     let (subject, _) = harness.person();
     let actor = ActorToken::new(
         SecretString::from("synthetic-actor-token"),
         Actor {
-            issuer: Flavor::Keycloak.issuer(),
+            issuer: Flavor::Generic.issuer(),
             sub: String::from("service-account-synthetic"),
         },
     );
@@ -435,8 +368,10 @@ async fn under_keycloak_delegation_is_preview_and_refused() {
 
 #[tokio::test]
 async fn a_subject_token_not_addressed_to_the_client_is_refused_where_the_profile_asks() {
-    for flavor in [Flavor::Entra, Flavor::Keycloak] {
-        let harness = Harness::start(flavor).await;
+    for flavor in FLAVORS {
+        let mut settings = flavor.settings(3600);
+        settings.profile.onward_subject_audience = true;
+        let harness = Harness::with_settings(flavor, settings).await;
         let mut claims = flavor.subject_claims(harness.now());
         claims["aud"] = json!("someone-else");
         let subject = harness.subject(&claims, CallerKind::Person);
@@ -461,7 +396,6 @@ async fn a_caller_without_a_verified_token_is_refused_before_anything_is_sent() 
         None,
         "user/*.rs",
         None,
-        false,
         CallerKind::Person,
     );
     assert!(matches!(
@@ -641,16 +575,16 @@ async fn a_target_without_audiences_is_refused_before_sending() {
 
 #[tokio::test]
 async fn the_jwt_bearer_grant_names_its_target_in_scope_alone() {
-    let harness = Harness::start(Flavor::Entra).await;
+    let harness = Harness::start(Flavor::GenericJwtBearer).await;
     let (subject, _) = harness.person();
-    let unscoped = ferrohealth_smart::client::onward::Target::new([super::harness::ENTRA_TARGET]);
+    let unscoped = ferrohealth_smart::client::onward::Target::new(["https://ehr.example.org"]);
     let error = harness
         .onward
         .token(&subject, None, &unscoped)
         .await
         .expect_err("refused");
     assert!(matches!(error, OnwardError::NoScope), "{error:?}");
-    let indicated = Flavor::Entra
+    let indicated = Flavor::GenericJwtBearer
         .target()
         .with_indicator("https://downstream.example.org");
     let error = harness

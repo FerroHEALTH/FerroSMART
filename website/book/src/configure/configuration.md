@@ -54,10 +54,13 @@ secret or an assertion.
 
 | Key | Default | What it is |
 |---|---|---|
+| `name` | `FerroSMART` | The deployment's name, such as the hospital's: every page carries it, and the User Access Brand's name when `[ferrosmart.brand]` names none |
 | `issuer` | required | The issuer identifier (RFC 8414 §2): an `https` URL with no query or fragment, or `http` on a loopback host. Its path is `[server] base_path`. Every document repeats it exactly |
 | `access_token_lifetime` | `5min` | How long an access token lives, for every grant; at most one hour (SMART App Launch 2.2.0, App Launch) |
 | `refresh_idle` | `30d` | How long an `offline_access` refresh token lasts unused; each refresh starts it again |
 | `online_idle` | `8h` | How long an `online_access` refresh token lasts unused, and never past the person's login at the identity provider |
+| `assurance_minimum` | `substantial` | The eIDAS level of assurance every person's login reaches: `none`, `low`, `substantial` or `high`. `substantial` is the least Implementing Regulation (EU) 2026/2099 admits; a deployment outside the eIDAS area sets `none`. Each provider's `[ferrosmart.upstream.assurance]` must map a value that reaches it |
+| `require_pushed_authorization_requests` | `false` | Whether every authorization request arrives pushed to `POST {issuer}/par` (RFC 9126 §4); `false` still holds a client whose own `require_pushed_authorization_requests` is `true` to it |
 
 None of the three lifetimes may be zero.
 
@@ -74,16 +77,13 @@ one. Migrations ship in the binary and run at start.
 
 ## `[ferrosmart.keys]`
 
-The RSA keys that sign every access token and ID Token under `RS256`
-([keys and rotation](../operate/keys.md)).
+The RSA keys that sign every access token and ID Token under `RS256`, each
+in turn ([keys and rotation](../operate/keys.md)).
 
 | Key | Default | What it is |
 |---|---|---|
-| `private_key_file` | required | The PEM file of the key that signs |
-| `kid` | its RFC 7638 thumbprint | The `kid` the key is published under |
-| `next_private_key_file` | none | The key a rotation makes current, published ahead and never signing |
-| `previous_private_key_file` | none | The key that signed before a rotation, published and never signing |
-| `previous_key_overlap` | `0s` | How long the previous key stays published; `"0s"` for as long as it is configured |
+| `private_key_files` | required | The PEM files of the keys, in the order they take over; each is published under its RFC 7638 thumbprint |
+| `rotation_period` | `90d` | How long a key signs before the next one takes over; at least `access_token_lifetime` plus an hour and a minute |
 
 ## `[[ferrosmart.resource]]`
 
@@ -100,6 +100,7 @@ of the tokens issued for it. At least one is required, and no base twice.
 | `fhir_user_lookup` | FHIR only, a list of tables: how to find a person's `fhirUser` when the identity provider sends none (below) |
 | `purpose` | openEHR only, a list of tables: the purposes of use the server accepts, one of which a professional chooses on the patient picker (below). Empty, a lookup declares none |
 | `purpose_header` | openEHR only, with `purpose`: the header a picker lookup declares the purpose in. Default `x-purpose-of-use`, FerroEHR's default `[audit] purpose_header` |
+| `assigned` | FHIR only: the search the patient picker lists a professional's assigned patients by, `care_team` (their active care teams) or `encounter` (their encounters in progress), each by the FHIR R4 `participant` search parameter and the person's `fhirUser`, for a `fhirUser` that names a `Practitioner` or `PractitionerRole`. Unset, the picker lists none |
 
 When the identity provider sends no `fhirUser` claim, FerroSMART can find
 the person at a FHIR server by an identifier. Each
@@ -171,6 +172,17 @@ The table present names the protocol: `[ferrosmart.upstream.oidc]` for
 OpenID Connect or `[ferrosmart.upstream.saml]` for SAML 2.0, exactly one
 per entry.
 
+`[ferrosmart.upstream.assurance]` says what the provider's logins are
+worth. A login below the minimum is refused with `access_denied`, and every
+token issued on a login carries its level as `acr`, the eIDAS URI
+`http://eidas.europa.eu/LoA/low`, `/substantial` or `/high`, beside
+`auth_time`.
+
+| Key | What it is |
+|---|---|
+| `levels` | A table of the provider's value to its eIDAS level (`low`, `substantial`, `high`): an OpenID Connect provider's `acr`, a SAML provider's `AuthnContextClassRef`. A value it does not name carries no level |
+| `minimum` | The level every login at this provider reaches, above `assurance_minimum`; none by default |
+
 Each entry has its own issuer, and two entries never share one. A client
 lists the providers its people may log in at in `upstreams`; with none
 listed it may use every provider. With one provider the browser goes
@@ -219,7 +231,7 @@ The `private_key_jwt` table:
 |---|---|
 | `algorithm` | The JWS algorithm the provider's registration names; the preset's, else `RS256` |
 | `certificate_file` | The X.509 certificate of the current assertion key, for a provider that knows the key by its certificate; each assertion then names it by `x5t#S256` |
-| `[ferrosmart.upstream.oidc.private_key_jwt.keys]` | The assertion ring, with the same keys as `[ferrosmart.keys]`; it may share no key with the token ring. Its `kid` is the id the provider knows the key by, such as ZITADEL's key id |
+| `[ferrosmart.upstream.oidc.private_key_jwt.keys]` | The assertion ring: `private_key_file` (the key that signs), `kid` (the id the provider knows it by, such as ZITADEL's key id; its RFC 7638 thumbprint when empty), `next_private_key_file`, `previous_private_key_file` and `previous_key_overlap` (`0s` keeps the previous key published while it is configured). It may share no key with the token keys |
 
 `[ferrosmart.upstream.saml]`, for a SAML 2.0 identity provider
 ([SAML 2.0 providers](../install/upstream.md#saml-20)):
@@ -257,10 +269,24 @@ FerroSMART as one SAML 2.0 service provider, which every `protocol =
 | `[[ferrosmart.saml.decryption]]` | `key_file` and `certificate_file` of an RSA key a provider encrypts assertions, identifiers and attributes for |
 | `[ferrosmart.saml.tls]` | `client_identity_file`, the certificate and key artifact resolution presents, and `trust_roots_file`, roots beside the platform's for every call to a provider |
 
-## `[[ferrosmart.role]]` and `[[ferrosmart.client]]`
+## `[[ferrosmart.role]]`
 
-The policy: what each role may be granted and which clients exist.
-[Clients, roles and consent](clients.md) describes both tables.
+The policy: what each role may be granted. The clients live in the
+database, never in the configuration. [Clients, roles and consent](clients.md)
+describes both.
+
+## `[ferrosmart.registration]`
+
+Whether an app may register itself at `POST {issuer}/register` with no
+initial access token (RFC 7591 §3), and the most it may hold.
+
+| Key | What it is |
+|---|---|
+| `open` | `true` lets an app register itself; `false` by default, when only an administrator registers |
+| `scope` | The ceiling of an app that registered itself, space-separated; no `user/` or `system/` scope. Required when `open` |
+
+[The admin API](admin-api.md#apps-that-register-themselves) describes the
+registration.
 
 ## `[ferrosmart.branding]`
 
@@ -268,7 +294,6 @@ The deployment's own words on the pages. Content, never code.
 
 | Key | What it is |
 |---|---|
-| `name` | The name the pages carry, such as the hospital's |
 | `consent_text` | The deployment's words on the consent page, such as what it does with the access a person gives |
 | `smart_style_url` | The `smart_style_url` every token response carries: an `https` URL of the deployment's SMART style document; empty for none |
 
@@ -286,7 +311,7 @@ The table is the primary brand. Every FHIR server it publishes is a
 
 | Key | What it is |
 |---|---|
-| `name` | The name people recognize the brand by. Required |
+| `name` | The name people recognize the brand by; `[ferrosmart] name` when absent. An affiliate names its own |
 | `website` | The brand's own `https` website, apart from any portal. Required |
 | `identifier` | The identifiers apps merge brands by, each `{ system, value }`; SMART recommends `system = "urn:ietf:rfc:3986"` with the website's origin, without `www.`, as `value`. An identifier belongs to one brand |
 | `alias` | Other names people may search by, such as a former name |
@@ -325,6 +350,12 @@ fhir_version = ["4.0.1"]
 contact = ["https://developer.example.org"]
 ```
 
+## `[ferrosmart.picker]`
+
+| Key | Default | What it is |
+|---|---|---|
+| `recent_retention` | `30d` | How long a patient a person chose stays on their recent list, which the picker offers again; `0s` keeps no list. FerroSMART keeps a person's ten latest choices at each server, and the person forgets them on the management page |
+
 ## `[ferrosmart.audit]`
 
 How FerroSMART names itself in its [audit records](../operate/audit.md), and
@@ -340,13 +371,14 @@ where it forwards them.
 
 ```toml
 [ferrosmart]
+name = "Example Hospital"
 issuer = "https://smart.example.org"
 
 [ferrosmart.database]
 url_file = "/run/secrets/ferrosmart-db-url"
 
 [ferrosmart.keys]
-private_key_file = "/run/secrets/rs256.pem"
+private_key_files = ["/run/secrets/rs256-1.pem", "/run/secrets/rs256-2.pem"]
 
 [[ferrosmart.resource]]
 base = "https://ehr.example.org/fhir"
@@ -366,18 +398,6 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 [[ferrosmart.role]]
 name = "clinician"
 scopes = ["user/Patient.rs", "user/Observation.rs"]
-
-[[ferrosmart.client]]
-client_id = "growth-chart"
-name = "Growth chart"
-kind = "public"
-resources = ["https://ehr.example.org/fhir"]
-redirect_uris = ["https://growth-chart.example.org/callback"]
-scopes = ["openid", "fhirUser", "launch", "launch/patient", "patient/Observation.rs"]
-grant_types = ["authorization_code"]
-
-[ferrosmart.branding]
-name = "Example Hospital"
 
 [ferrosmart.audit]
 site = "Example Hospital"

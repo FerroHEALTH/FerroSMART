@@ -81,7 +81,7 @@ jobs:
       # and trivy even when no SBOM travelled with it
       # (https://github.com/rust-secure-code/cargo-auditable).
       - name: Install cargo-auditable
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-auditable@0.7.5
 
@@ -118,7 +118,7 @@ jobs:
       # transitive edges, and the syft document below reads what the shipped
       # binary carries.
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-cyclonedx@0.5.9
       - name: Generate the dependency SBOM
@@ -147,7 +147,7 @@ jobs:
           echo "SBOM=$sbom" >> "$GITHUB_ENV"
 
       - name: Install syft
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: syft@1.51.1
       - name: Generate the build SBOM from the shipped binary

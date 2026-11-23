@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
+use ferrohealth_smart::assurance::AssuranceLevel;
 use ferrohealth_smart::client::assertion::AssertionKey;
 use ferrosmart::authorize::sha256;
 use ferrosmart::config::settings::Settings;
@@ -25,6 +26,9 @@ use tower::ServiceExt as _;
 use crate::support::{
     Database, Keys, RESOURCE, audit, commit, config, ec_key, from_client, rsa_key,
 };
+
+/// When the person of every recorded grant logged in.
+const LOGGED_IN: i64 = 1_790_000_000;
 
 /// The issuer every case configures.
 pub(crate) const ISSUER: &str = "https://smart.example.org";
@@ -43,7 +47,7 @@ pub(crate) type Answer = (StatusCode, http::HeaderMap, Value);
 /// a public one; and `admin`, the client of the admin API.
 pub(crate) struct Server {
     /// The application.
-    app: Router,
+    pub(crate) app: Router,
     /// The key both confidential clients sign their assertions with.
     client_key: AssertionKey,
     /// The server's own signing key, for tokens a case issues under a grant.
@@ -65,47 +69,39 @@ impl Server {
     }
 
     /// Starts the server with `extra` appended to its configuration, such
-    /// as its own `[[ferrosmart.resource]]` tables.
+    /// as its own `[[ferrosmart.resource]]` tables, logging people in at
+    /// the providers it configures.
     pub(crate) async fn start_with(extra: &str) -> Self {
         let keys = Keys::new();
         let pem = std::fs::read(ec_key(keys.dir.path(), "client.pem")).expect("the key reads");
         let client_key =
             AssertionKey::from_pem(&pem, Some(Algorithm::ES384), Some(String::from("client-1")))
                 .expect("a client key");
-        let set = keys.dir.path().join("client-jwks.json");
-        std::fs::write(&set, json!({"keys": [client_key.public_jwk()]}).to_string())
-            .expect("written");
-        let set = set.display().to_string();
+        let set = crate::support::inline(&json!({"keys": [client_key.public_jwk()]}));
         let own = std::fs::read(&keys.current).expect("the server key reads");
         let signing_key =
             AssertionKey::from_pem(&own, Some(Algorithm::RS256), None).expect("the server's key");
         let database = Database::create().await;
-        let secret_hash = keys.dir.path().join("vault.phc");
-        std::fs::write(&secret_hash, phc(VAULT_SECRET)).expect("written");
-        let secret_hash = secret_hash.display().to_string();
-        let gateway_hash = keys.dir.path().join("gateway.phc");
-        std::fs::write(&gateway_hash, phc(GATEWAY_SECRET)).expect("written");
-        let gateway_hash = gateway_hash.display().to_string();
         let text = format!(
             "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
-             [[ferrosmart.client]]\nclient_id = \"export\"\nkind = \"confidential_asymmetric\"\njwks_file = {set:?}\n\
-             scopes = [\"system/Patient.rs\", \"system/Observation.rs\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"rs\"\nkind = \"confidential_asymmetric\"\njwks_file = {set:?}\n\
-             scopes = [\"system/introspect\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"portal\"\nkind = \"confidential_asymmetric\"\njwks_file = {set:?}\n\
+             [[client]]\nclient_id = \"export\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
+             scope = [\"system/Patient.rs\", \"system/Observation.rs\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"rs\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
+             scope = [\"system/introspect\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"portal\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
              redirect_uris = [\"https://portal.example.org/callback\"]\n\
              grant_types = [\"authorization_code\", \"refresh_token\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"vault\"\nkind = \"confidential_symmetric\"\n\
-             secret_hash_file = {secret_hash:?}\nredirect_uris = [\"https://vault.example.org/callback\"]\n\
+             [[client]]\nclient_id = \"vault\"\ntoken_endpoint_auth_method = \"client_secret_basic\"\n\
+             redirect_uris = [\"https://vault.example.org/callback\"]\n\
              grant_types = [\"authorization_code\", \"refresh_token\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"gateway\"\nkind = \"confidential_symmetric\"\n\
-             secret_hash_file = {gateway_hash:?}\nredirect_uris = [\"https://gateway.example.org/callback\"]\n\
-             scopes = [\"system/introspect\"]\ngrant_types = [\"authorization_code\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"app\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"gateway\"\ntoken_endpoint_auth_method = \"client_secret_basic\"\n\
+             redirect_uris = [\"https://gateway.example.org/callback\"]\n\
+             scope = [\"system/introspect\"]\ngrant_types = [\"authorization_code\"]\n\
+             [[client]]\nclient_id = \"app\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://app.example.org/callback\"]\n\
              grant_types = [\"authorization_code\", \"refresh_token\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"admin\"\nkind = \"confidential_asymmetric\"\njwks_file = {set:?}\n\
-             scopes = [\"system/admin\"]\ngrant_types = [\"client_credentials\"]\n{extra}",
+             [[client]]\nclient_id = \"admin\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
+             scope = [\"system/admin\"]\ngrant_types = [\"client_credentials\"]\n{extra}",
             secrecy::ExposeSecret::expose_secret(&database.url)
         );
         let settings = config(&crate::support::reach_every_base(&text), &keys)
@@ -115,13 +111,18 @@ impl Server {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let audit = audit(&settings);
-        let app = router(Arc::new(AppState::new(
-            settings.clone(),
-            store.clone(),
-            audit,
-        )));
+        let providers = crate::support::providers(&settings).await;
+        let state =
+            Arc::new(AppState::new(settings.clone(), store.clone(), audit).with_login(providers));
+        crate::support::apply(
+            &state,
+            &crate::support::clients(&crate::support::reach_every_base(&text)),
+        )
+        .await;
+        crate::support::set_secret(&store, "vault", VAULT_SECRET).await;
+        crate::support::set_secret(&store, "gateway", GATEWAY_SECRET).await;
+        let app = router(state);
         Self {
             app,
             client_key,
@@ -140,10 +141,6 @@ impl Server {
         let store = Store::connect(&self.settings.database_url, 2)
             .await
             .expect("connects");
-        store
-            .register(&self.settings.clients)
-            .await
-            .expect("registered");
         let audit = audit(&self.settings);
         let app = router(Arc::new(AppState::new(
             self.settings.clone(),
@@ -325,11 +322,13 @@ impl Server {
                 audience: RESOURCE,
                 scope: "openid fhirUser launch/patient patient/Observation.rs offline_access",
                 context,
-                auth_time: Some(jiff::Timestamp::now().as_second()),
+                auth_time: Some(LOGGED_IN),
                 access,
                 upstream_session: session,
-                approved_at: None,
+                basis: None,
                 roles: &[],
+                acr: Some(AssuranceLevel::Substantial),
+                dpop_jkt: None,
             })
             .await
             .expect("recorded");
@@ -469,6 +468,12 @@ async fn a_token_issued_under_a_grant_carries_its_launch_context() {
     assert_eq!(json!("alice"), answer["sub"]);
     assert_eq!(json!(ISSUER), answer["iss"]);
     assert_eq!(json!("Practitioner/7"), answer["fhirUser"]);
+    // NOTE: RFC 9470 §6.2, the login's acr and auth_time.
+    assert_eq!(
+        json!("http://eidas.europa.eu/LoA/substantial"),
+        answer["acr"]
+    );
+    assert_eq!(json!(LOGGED_IN), answer["auth_time"]);
     server.stop().await;
 }
 
@@ -607,7 +612,9 @@ async fn a_person_s_token_answers_their_mapped_roles() {
             access: None,
             upstream_session: None,
             roles: &roles,
-            approved_at: None,
+            basis: None,
+            acr: None,
+            dpop_jkt: None,
         })
         .await
         .expect("recorded");

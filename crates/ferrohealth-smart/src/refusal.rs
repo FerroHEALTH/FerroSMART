@@ -686,41 +686,10 @@ mod tests {
     fn unclassified_codes() -> Vec<(String, &'static str)> {
         let mut codes = Vec::new();
         let unclassified = [
-            (
-                Unclassified::Expected {
-                    claim: String::from("c"),
-                },
-                "claim-unexpected",
-            ),
-            (
-                Unclassified::UserClaim {
-                    claim: String::from("c"),
-                },
-                "user-claim-missing",
-            ),
-            (Unclassified::Impersonation, "impersonation"),
-            (Unclassified::MarkersDisagree, "app-only-markers-disagree"),
-            (
-                Unclassified::ScopeForm {
-                    claim: String::from("c"),
-                },
-                "scope-form",
-            ),
-            (Unclassified::NotPatientContext, "not-patient-context"),
-            (Unclassified::PatientActor, "patient-actor-refused"),
-            (Unclassified::NotAppOnly, "not-app-only"),
+            (Unclassified::ScopeForm, "scope-form"),
             (Unclassified::NoClient, "client-missing"),
-            (Unclassified::UnlistedClient, "delegate-not-granted"),
-            (Unclassified::UnlistedActor, "actor-not-granted"),
+            (Unclassified::FhirUser, "fhir-user-refused"),
             (Unclassified::ActorChain, "actor-chain-refused"),
-            (
-                Unclassified::RepresentationWithAct,
-                "representation-with-act",
-            ),
-            (
-                Unclassified::RepresentationThroughDelegate,
-                "representation-through-delegate",
-            ),
             (
                 Unclassified::ExternalIncomplete { missing: vec![] },
                 "professional-incomplete",
@@ -757,7 +726,7 @@ mod tests {
             ),
             (
                 Unclassified::NoStep {
-                    kind: crate::kind::IssuerKind::Machines,
+                    kind: crate::kind::IssuerKind::Federation,
                 },
                 "kind-unclassified",
             ),
@@ -866,11 +835,11 @@ mod tests {
             expired.challenge(Some("ferro"))
         );
         let delegate = Denied::from(&Rejection::Unclassified {
-            reason: Unclassified::UnlistedClient,
+            reason: Unclassified::ActorChain,
         });
         assert_eq!(
             Some(String::from(
-                "Bearer error=\"invalid_token\", error_description=\"delegate-not-granted\""
+                "Bearer error=\"invalid_token\", error_description=\"actor-chain-refused\""
             )),
             delegate.challenge(None)
         );
@@ -1004,7 +973,6 @@ mod tests {
                 None,
                 "",
                 None,
-                false,
                 crate::kind::CallerKind::Person,
             )
             .with_claims(claims)

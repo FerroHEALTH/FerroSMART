@@ -23,8 +23,11 @@
 //! online_idle = "8h"
 //!
 //! [ferrosmart.keys]
-//! private_key_file = "/run/secrets/ferrosmart-rs256.pem"
-//! next_private_key_file = "/run/secrets/ferrosmart-rs256-next.pem"
+//! private_key_files = [
+//!     "/run/secrets/ferrosmart-rs256-1.pem",
+//!     "/run/secrets/ferrosmart-rs256-2.pem",
+//! ]
+//! rotation_period = "90d"
 //!
 //! [ferrosmart.database]
 //! url_file = "/run/secrets/ferrosmart-database-url"
@@ -115,6 +118,10 @@ pub struct Config {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FerroSmartSection {
+    /// The deployment's name, such as the hospital's: what every page
+    /// carries, and the User Access Brand's `Organization.name` when
+    /// `[ferrosmart.brand]` names none.
+    pub name: String,
     /// The issuer identifier (RFC 8414 §2): an `https` URL with no query and
     /// no fragment, whose path is `[server] base_path`.
     pub issuer: String,
@@ -131,12 +138,17 @@ pub struct FerroSmartSection {
     /// by default, and never past the end of the person's upstream login
     /// (`docs/architecture.md` §13.6 item 7).
     pub online_idle: Span,
-    /// `[ferrosmart.keys]`: the key ring that signs every token.
-    pub keys: KeysSection,
+    /// The eIDAS level every person's login reaches; `substantial` by
+    /// default (`docs/architecture.md` §13.28).
+    pub assurance_minimum: crate::assurance::Floor,
+    /// Whether every authorization request arrives pushed (RFC 9126 §4,
+    /// §5); `false` by default, when a client's own
+    /// `require_pushed_authorization_requests` still holds it to PAR.
+    pub require_pushed_authorization_requests: bool,
+    /// `[ferrosmart.keys]`: the keys that sign every token, in rotation.
+    pub keys: SigningKeysSection,
     /// `[ferrosmart.database]`: the PostgreSQL database of the state.
     pub database: DatabaseSection,
-    /// `[[ferrosmart.client]]`: the registered clients.
-    pub client: Vec<crate::clients::ClientSection>,
     /// `[[ferrosmart.resource]]`: the FHIR and openEHR servers a token may
     /// be for, each its own audience.
     pub resource: Vec<ResourceSection>,
@@ -151,8 +163,8 @@ pub struct FerroSmartSection {
     /// `[[ferrosmart.role]]`: the scopes each upstream role may be granted,
     /// the policy as content (`docs/architecture.md` §13.6 item 5).
     pub role: Vec<RoleSection>,
-    /// `[ferrosmart.branding]`: the deployment's name and words on the
-    /// pages, content and never code (13.15).
+    /// `[ferrosmart.branding]`: the deployment's words on the pages,
+    /// content and never code (13.15).
     pub branding: BrandingSection,
     /// `[ferrosmart.brand]`: the User Access Brands Bundle the deployment
     /// publishes; without it the server serves none.
@@ -160,30 +172,54 @@ pub struct FerroSmartSection {
     pub brand: Option<crate::brands::BrandSection>,
     /// `[ferrosmart.audit]`: where every login and token is recorded.
     pub audit: AuditSection,
+    /// `[ferrosmart.registration]`: whether an app may register itself.
+    pub registration: RegistrationSection,
+    /// `[ferrosmart.picker]`: what the patient picker keeps of a person's
+    /// choices.
+    pub picker: PickerSection,
+}
+
+/// `[ferrosmart.registration]`: an app's own registration at `POST
+/// {issuer}/register` without an initial access token (RFC 7591 §3).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RegistrationSection {
+    /// Whether the endpoint answers a request without an initial access
+    /// token; off by default.
+    pub open: bool,
+    /// The most an app that registered itself may be granted,
+    /// space-separated: patient-facing scopes, since professional apps are
+    /// registered by an administrator.
+    pub scope: String,
+}
+
+/// `[ferrosmart.picker]` (`docs/architecture.md` §13.6 item 4).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PickerSection {
+    /// How long a patient a person chose stays on their recent list; zero
+    /// keeps no list.
+    pub recent_retention: Span,
+}
+
+impl Default for PickerSection {
+    fn default() -> Self {
+        Self {
+            recent_retention: Span::from_days(30),
+        }
+    }
 }
 
 /// `[ferrosmart.branding]`.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BrandingSection {
-    /// The name the pages carry, such as the hospital's.
-    pub name: String,
     /// The deployment's own words on the consent page, such as what it does
     /// with the access a person gives; empty for none.
     pub consent_text: String,
     /// The `smart_style_url` an app's token response carries: an https URL
     /// of the deployment's SMART style document; empty for none.
     pub smart_style_url: String,
-}
-
-impl Default for BrandingSection {
-    fn default() -> Self {
-        Self {
-            name: String::from("FerroSMART"),
-            consent_text: String::new(),
-            smart_style_url: String::new(),
-        }
-    }
 }
 
 /// `[ferrosmart.audit]`: how FerroSMART names itself in its audit records,
@@ -252,6 +288,22 @@ pub struct ResourceSection {
     /// a professional chooses on the patient picker (`docs/architecture.md`
     /// §13.6 item 4); empty, the lookup declares none.
     pub purpose: Vec<PurposeSection>,
+    /// For a FHIR server, the search the patient picker lists a
+    /// professional's assigned patients by; unset, it lists none.
+    pub assigned: Option<Assigned>,
+}
+
+/// The search that lists the patients assigned to a professional, by the
+/// `participant` search parameter of FHIR R4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Assigned {
+    /// The active care teams the professional takes part in
+    /// (`CareTeam?participant=…&status=active`).
+    CareTeam,
+    /// The encounters in progress the professional takes part in
+    /// (`Encounter?participant=…&status=in-progress`).
+    Encounter,
 }
 
 /// One `[[ferrosmart.resource.purpose]]` table: a purpose of use an openEHR
@@ -338,13 +390,15 @@ pub enum ResourceKind {
 impl Default for FerroSmartSection {
     fn default() -> Self {
         Self {
+            name: String::from("FerroSMART"),
             issuer: String::new(),
             access_token_lifetime: Span::from_mins(5),
             refresh_idle: Span::from_days(30),
             online_idle: Span::from_hours(8),
-            keys: KeysSection::default(),
+            assurance_minimum: crate::assurance::Floor::Substantial,
+            require_pushed_authorization_requests: false,
+            keys: SigningKeysSection::default(),
             database: DatabaseSection::default(),
-            client: Vec::new(),
             resource: Vec::new(),
             upstream: Vec::new(),
             saml: None,
@@ -352,13 +406,37 @@ impl Default for FerroSmartSection {
             branding: BrandingSection::default(),
             brand: None,
             audit: AuditSection::default(),
+            registration: RegistrationSection::default(),
+            picker: PickerSection::default(),
         }
     }
 }
 
-/// `[ferrosmart.keys]`: the RSA keys that sign under `RS256`, the one
-/// algorithm RFC 9068 §2.1 and OpenID Connect Discovery §3 have every
-/// authorization server support.
+/// `[ferrosmart.keys]`: the RSA keys that sign in turn (`docs/architecture.md` §13.11).
+///
+/// They sign under `RS256`, the one algorithm RFC 9068 §2.1 and OpenID
+/// Connect Discovery §3 have every authorization server support.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SigningKeysSection {
+    /// The PEM files of the keys, in the order they take over; each is
+    /// published under its RFC 7638 thumbprint.
+    pub private_key_files: Vec<PathBuf>,
+    /// How long a key signs before the next one takes over.
+    pub rotation_period: Span,
+}
+
+impl Default for SigningKeysSection {
+    fn default() -> Self {
+        Self {
+            private_key_files: Vec::new(),
+            rotation_period: Span::from_days(90),
+        }
+    }
+}
+
+/// `[ferrosmart.upstream.oidc.private_key_jwt.keys]`: the ring of keys
+/// FerroSMART signs its own client assertions with.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct KeysSection {

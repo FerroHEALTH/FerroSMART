@@ -53,8 +53,20 @@ pub(super) async fn choose(
         Err(response) => return *response,
     };
     match context_of(state, &kept, from, pairing, (id, declared)).await {
-        Ok(Some(context)) => enter(state, &kept, &context, from).await,
-        Ok(None) => pages::picker(state, headers, &kept, None, None, Some(NO_EHR)),
+        Ok(Some(context)) => match super::shortcuts::remember(state, &kept, id).await {
+            Ok(()) => enter(state, &kept, &context, from).await,
+            Err(error) => pages::server_error(state, &error),
+        },
+        Ok(None) => match super::shortcuts::fhir(state, &kept, from, &pairing.fhir_base).await {
+            Ok(offered) => pages::picker(
+                state,
+                headers,
+                &kept,
+                None,
+                pages::Listed::Offered(&offered, Some(NO_EHR)),
+            ),
+            Err(error) => pages::server_error(state, &error),
+        },
         Err(response) => *response,
     }
 }
@@ -94,6 +106,37 @@ pub(super) async fn context_of(
         Ok(None) => Ok(None),
         Err(error) => Err(Box::new(pages::server_error(state, &error))),
     }
+}
+
+/// Returns the id of the EHR of the patient `id` at the openEHR `base`
+/// paired by `pairing`, read as `person`: the patient read at the FHIR
+/// server, their subject id, and their EHR looked up by it; none when the
+/// patient has no EHR the person may see.
+///
+/// # Errors
+/// Returns the [`PickerError`] of a read or lookup that failed.
+pub(super) async fn ehr_of(
+    state: &AppState,
+    person: &super::Person<'_>,
+    from: IpAddr,
+    (base, pairing): (&str, &Pairing),
+    id: &str,
+) -> Result<Option<String>, PickerError> {
+    let Some(namespace) = state.settings().subject_namespaces.get(base) else {
+        return Ok(None);
+    };
+    let url = super::patient_url(&pairing.fhir_base, Some(id)).map_err(PickerError::Url)?;
+    let ask = super::fhir_ask(&url, &pairing.fhir_base, super::Action::Read);
+    let patient = super::as_the(state, person, from, &ask).await?;
+    if patient.get("id").and_then(Value::as_str) != Some(id) {
+        return Err(PickerError::Unreadable);
+    }
+    let Some(subject_id) = subject_id(&patient, &pairing.subject_system)? else {
+        return Ok(None);
+    };
+    let found =
+        openehr::by_subject_as(state, person, from, (base, namespace), (subject_id, None)).await?;
+    Ok(found.map(|found| found.ehr_id))
 }
 
 /// Returns the subject id of the EHR of `patient`: the value of its one

@@ -21,6 +21,13 @@
 # that URL, so no client secret exists.
 # Sign in as `clinician` with the password in secrets/keycloak_user_password.
 #
+# CLIENTS. The example's public SMART app is the client document
+# app/ferrosmart/examples/keycloak/example-app.json. Apply it once
+# FerroSMART's database is up:
+#
+#   docker compose -f compose.yaml -f compose.keycloak.yaml run --rm \
+#     ferrosmart client apply /etc/ferrosmart-example/example-app.json
+#
 # NETWORK. FerroSMART shares Keycloak's network namespace, so both reach each
 # other on `localhost`, exactly as the browser does through the published
 # ports: http://localhost:8080 is FerroSMART and http://localhost:8180 is
@@ -75,6 +82,8 @@ services:
       keycloak:
         condition: service_started
     environment:
+      # A workforce login with no eIDAS level of assurance (docs/architecture.md §13.28).
+      FERROSMART__FERROSMART__ASSURANCE_MINIMUM: none
       # The upstream login and its claims (ferrosmart.toml of the example).
       FERROSMART__FERROSMART__UPSTREAM__0__NAME: keycloak
       # The keycloak preset brings the scope, the two claims and RS256.
@@ -86,21 +95,15 @@ services:
       FERROSMART__FERROSMART__ROLE__0__NAME: clinician
       FERROSMART__FERROSMART__ROLE__0__SCOPES__0: user/Patient.rs
       FERROSMART__FERROSMART__ROLE__0__SCOPES__1: user/Observation.rs
-      # An example public SMART app, PKCE alone.
-      FERROSMART__FERROSMART__CLIENT__0__CLIENT_ID: example-app
-      FERROSMART__FERROSMART__CLIENT__0__NAME: Example SMART app
-      FERROSMART__FERROSMART__CLIENT__0__KIND: public
-      FERROSMART__FERROSMART__CLIENT__0__REDIRECT_URIS__0: http://localhost:9000/callback
-      FERROSMART__FERROSMART__CLIENT__0__SCOPES__0: openid
-      FERROSMART__FERROSMART__CLIENT__0__SCOPES__1: fhirUser
-      FERROSMART__FERROSMART__CLIENT__0__SCOPES__2: user/Patient.rs
-      FERROSMART__FERROSMART__CLIENT__0__SCOPES__3: user/Observation.rs
-      FERROSMART__FERROSMART__CLIENT__0__GRANT_TYPES__0: authorization_code
-      FERROSMART__FERROSMART__CLIENT__0__RESOURCES__0: ${FERROSMART_RESOURCE:-http://localhost:8090/fhir}
     secrets:
       - database_url
       - signing_key
       - upstream_assertion_key
+    volumes:
+      - type: bind
+        source: ./app/ferrosmart/examples/keycloak/example-app.json
+        target: /etc/ferrosmart-example/example-app.json
+        read_only: true
 
 secrets:
   upstream_assertion_key:

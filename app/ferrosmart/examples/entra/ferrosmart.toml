@@ -9,6 +9,10 @@
 
 [ferrosmart]
 issuer = "https://smart.example.org"
+# A workforce login with no eIDAS level of assurance; an EU deployment keeps the
+# substantial floor and maps its provider's values under
+# [ferrosmart.upstream.assurance] (docs/architecture.md §13.28).
+assurance_minimum = "none"
 
 [[ferrosmart.resource]]
 base = "https://ehr.example.org/fhir"
@@ -39,9 +43,8 @@ client_id = "00001111-aaaa-2222-bbbb-3333cccc4444"
 [ferrosmart.upstream.oidc.private_key_jwt]
 certificate_file = "/run/secrets/upstream-assertion.crt"
 
-# The assertion ring, read as [ferrosmart.keys] is; a rotation uploads the
-# next key's certificate to the registration before the ring makes it
-# current.
+# The assertion ring; a rotation uploads the next key's certificate to the
+# registration before the ring makes it current.
 [ferrosmart.upstream.oidc.private_key_jwt.keys]
 private_key_file = "/run/secrets/upstream-assertion.pem"
 
@@ -51,13 +54,5 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 name = "clinician"
 scopes = ["user/Patient.rs", "user/Observation.rs"]
 
-# The example's SMART app: a public client, PKCE alone (SMART App Launch
-# 2.2.0, Client Types, client-public).
-[[ferrosmart.client]]
-client_id = "example-app"
-name = "Example SMART app"
-kind = "public"
-redirect_uris = ["https://app.example.org/callback"]
-scopes = ["openid", "fhirUser", "user/Patient.rs", "user/Observation.rs"]
-resources = ["https://ehr.example.org/fhir"]
-grant_types = ["authorization_code"]
+# The example's SMART app is the client document example-app.json beside
+# this file, which `ferrosmart client apply example-app.json` registers.

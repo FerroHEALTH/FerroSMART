@@ -16,7 +16,8 @@ use crate::form::Params;
 use crate::server::AppState;
 
 use super::assertion::authenticate;
-use super::mint::{Grant, Identity, mint};
+use super::mint::{Authentication, Grant, Identity, mint};
+use super::sender::{Confirmation, Presented};
 use super::{Issued, Refusal, server_error};
 
 /// The longest a Backend Services access token lives: five minutes, the
@@ -25,14 +26,14 @@ pub const BACKEND_LIFETIME: std::time::Duration = std::time::Duration::from_secs
 
 /// The client credentials grant (RFC 6749 §4.4; SMART App Launch 2.2.0,
 /// Backend Services).
-pub(super) async fn client_credentials(state: &AppState, form: &Params) -> Result<Issued, Refusal> {
+pub(super) async fn client_credentials(
+    state: &AppState,
+    form: &Params,
+    presented: &Presented,
+) -> Result<Issued, Refusal> {
     let client = authenticate(state, form).await?;
-    if !client.grant_types.contains(&GrantType::ClientCredentials) {
-        return Err(Refusal {
-            error: "unauthorized_client",
-            description: "the client may not use this grant",
-        });
-    }
+    let confirmation = presented.bind(&client)?;
+    may_use(&client, GrantType::ClientCredentials)?;
     let scope = granted_scope(&client, form.get("scope"))?;
     let audience = audience(state, &client, form.get("resource"))?;
     mint(
@@ -53,6 +54,8 @@ pub(super) async fn client_credentials(state: &AppState, form: &Params) -> Resul
             context: &Map::new(),
             // NOTE: RFC 9068 §2.2.3.1, roles are a person's; Backend Services has none.
             roles: &[],
+            login: None,
+            confirmation: &confirmation,
         },
     )
 }
@@ -69,14 +72,16 @@ pub(super) async fn authorization_code(
     state: &AppState,
     headers: &http::HeaderMap,
     form: &Params,
+    presented: &Presented,
 ) -> Result<Issued, Refusal> {
-    let client = identify(state, headers, form).await?;
-    if !client.grant_types.contains(&GrantType::AuthorizationCode) {
-        return Err(Refusal {
-            error: "unauthorized_client",
-            description: "the client may not use this grant",
-        });
-    }
+    let (client, confirmation) = admitted(
+        state,
+        headers,
+        form,
+        presented,
+        GrantType::AuthorizationCode,
+    )
+    .await?;
     let invalid = |description| Refusal {
         error: "invalid_grant",
         description,
@@ -144,7 +149,7 @@ pub(super) async fn authorization_code(
         .fhir_user
         .as_deref()
         .filter(|_| grant.scope.split(' ').any(|scope| scope == "fhirUser"));
-    let launch = crate::refresh::open(state, &client, &grant).await?;
+    let launch = crate::refresh::open(state, &client, &grant, presented).await?;
     let mut issued = mint(
         state,
         &client,
@@ -160,6 +165,11 @@ pub(super) async fn authorization_code(
             under: Some(&launch.grant_id),
             context: &launch.context,
             roles: &grant.roles,
+            login: Some(Authentication {
+                auth_time: Some(grant.auth_time),
+                acr: grant.acr,
+            }),
+            confirmation: &confirmation,
         },
     )?;
     issued.response.refresh_token = launch.refresh_token;
@@ -201,6 +211,39 @@ fn identity(grant: &crate::store::Code) -> Identity<'_> {
     }
 }
 
+/// Returns the refusal of a client that may not use the grant it asked for
+/// (RFC 6749 §5.2).
+pub(crate) const fn unauthorized_client() -> Refusal {
+    Refusal {
+        error: "unauthorized_client",
+        description: "the client may not use this grant",
+    }
+}
+
+/// Returns the client a token request for `grant` identifies, once it is
+/// registered with the grant, and the `cnf` its token is bound to.
+pub(crate) async fn admitted(
+    state: &AppState,
+    headers: &http::HeaderMap,
+    form: &Params,
+    presented: &Presented,
+    grant: GrantType,
+) -> Result<(Client, Confirmation), Refusal> {
+    let client = identify(state, headers, form).await?;
+    may_use(&client, grant)?;
+    let confirmation = presented.bind(&client)?;
+    Ok((client, confirmation))
+}
+
+/// Refuses `client` the grant `grant` unless it is registered with it.
+pub(crate) fn may_use(client: &Client, grant: GrantType) -> Result<(), Refusal> {
+    if client.grant_types.contains(&grant) {
+        Ok(())
+    } else {
+        Err(unauthorized_client())
+    }
+}
+
 /// Returns the client of `headers` and `form`: authenticated by its secret
 /// (RFC 6749 §2.3.1) or its assertion, or a registered public client named
 /// by `client_id`, which cannot
@@ -221,7 +264,7 @@ pub(crate) async fn identify(
         .get("client_id")
         .ok_or(Refusal::client("the request names no client"))?;
     match state.store().client(client_id).await {
-        Ok(Some(client)) if client.kind == ClientKind::Public => Ok(client),
+        Ok(Some(client)) if client.kind() == ClientKind::Public => Ok(client),
         Ok(_) => Err(Refusal::client(
             "the client is not a registered public client",
         )),

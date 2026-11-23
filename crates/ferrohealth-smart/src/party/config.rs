@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! The `[auth.issuer.<name>.party]` table, one per `persons` issuer whose logins are
-//! bound, and the rules it is loaded under.
+//! The `[auth.issuer.<name>.party]` table, one per SMART issuer whose logins
+//! are bound, and the rules it is loaded under.
 
 use std::collections::BTreeMap;
 
@@ -10,18 +10,16 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::kind::IssuerKind;
-use crate::profile::Profile;
 
-/// One `[auth.issuer.<name>.party]` table: where the logins of one `persons` issuer are
-/// looked up.
+/// One `[auth.issuer.<name>.party]` table: where the logins of one SMART
+/// issuer are looked up.
 ///
-/// It names no key claim: the issuer profile's `person_key` is the key, so
-/// the binding, the classification and `person_equality` read one claim.
+/// It names no key claim: the token's `sub` is the key.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct PartySection {
-    /// The `persons` issuer whose logins the table binds: `[auth]` sets it
+    /// The SMART issuer whose logins the table binds: `[auth]` sets it
     /// from the `[auth.issuer.<name>]` table it sits under. It renders with
     /// any userinfo masked, as [`SecretUrl`](ferrohealth_secret::secret_url::SecretUrl) renders itself.
     #[cfg_attr(feature = "schema", schemars(skip))]
@@ -33,8 +31,8 @@ pub struct PartySection {
     pub identifier_issuer: String,
     /// The type of those identifiers, which declares the key's canonical
     /// form: `guid` or `uuid` is compared in lower case, any other type
-    /// exactly. Empty for the issuer profile's `party_identifier_type`,
-    /// which `[auth]` sets.
+    /// exactly. Empty for `pairwise`, FerroSMART's pairwise `sub`, which
+    /// `[auth]` sets.
     pub identifier_type: String,
     /// The claim naming the groups the token asserts, an array of strings;
     /// empty to read no group.
@@ -42,18 +40,15 @@ pub struct PartySection {
     /// The issuer of the group identifiers the group claim names; set with
     /// `group_claim`.
     pub group_identifier_issuer: String,
-    /// Whether a guest of the issuer is looked up; a guest is not by
-    /// default.
-    pub guests: bool,
 }
 
 /// A party binding that breaks a rule, naming the table.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum PartyError {
-    /// A table names no trusted `persons` issuer.
-    #[error("the party table of {issuer:?} names no trusted persons issuer")]
-    NotPersons {
+    /// A table names no trusted SMART issuer.
+    #[error("the party table of {issuer:?} names no trusted SMART issuer")]
+    NotSmart {
         /// The table's issuer.
         issuer: String,
         /// Its kind, when the section trusts it.
@@ -96,23 +91,6 @@ pub enum PartyError {
         /// The table's issuer.
         issuer: String,
     },
-    /// The issuer profile's `person_key` is a claim never accepted as a key
-    /// (OpenID Connect Core 1.0 §5.7, or the profile's `unstable_claims`).
-    #[error("the person_key {claim:?} of {issuer:?} is never accepted as a key")]
-    UnstableKey {
-        /// The table's issuer.
-        issuer: String,
-        /// The claim.
-        claim: String,
-    },
-    /// The issuer profile names an adapter the binding has not registered.
-    #[error("the profile of {issuer:?} names the adapter {adapter:?}, which is not registered")]
-    Adapter {
-        /// The table's issuer.
-        issuer: String,
-        /// The adapter.
-        adapter: String,
-    },
     /// A Basic user is mapped twice, or to an identifier issuer no table
     /// names.
     #[error("the Basic user {user:?} is mapped twice or to an identifier issuer no table names")]
@@ -128,22 +106,17 @@ pub enum PartyError {
     },
 }
 
-/// Checks the `tables` of a section whose issuers `issuer` describes, by
-/// identifier, as its kind and its profile.
-pub(crate) fn check_tables<'p>(
+/// Checks the `tables` of a section whose issuers `kind` names, by
+/// identifier.
+pub(crate) fn check_tables(
     tables: &[PartySection],
-    issuer: impl Fn(&str) -> Option<(IssuerKind, &'p Profile)>,
+    kind: impl Fn(&str) -> Option<IssuerKind>,
 ) -> Result<(), PartyError> {
     let mut by_identifier: BTreeMap<&str, &ferrohealth_secret::secret_url::SecretUrl> =
         BTreeMap::new();
     let mut seen = Vec::new();
     for table in tables {
-        let described = issuer(table.issuer.expose());
-        check_table(
-            table,
-            described.map(|(kind, _)| kind),
-            described.map(|(_, profile)| profile),
-        )?;
+        check_table(table, kind(table.issuer.expose()))?;
         if seen.contains(&table.issuer.expose()) {
             return Err(PartyError::DuplicateIssuer {
                 issuer: crate::config::shown(&table.issuer),
@@ -161,19 +134,18 @@ pub(crate) fn check_tables<'p>(
     Ok(())
 }
 
-/// Checks one table against its issuer's `kind` and `profile`.
+/// Checks one table against its issuer's `kind`.
 pub(crate) fn check_table(
     table: &PartySection,
     kind: Option<IssuerKind>,
-    profile: Option<&Profile>,
 ) -> Result<(), PartyError> {
     let issuer = || crate::config::shown(&table.issuer);
-    let (Some(IssuerKind::Persons), Some(profile)) = (kind, profile) else {
-        return Err(PartyError::NotPersons {
+    if kind != Some(IssuerKind::Smart) {
+        return Err(PartyError::NotSmart {
             issuer: issuer(),
             kind,
         });
-    };
+    }
     for (key, value) in [
         (
             "auth.issuer.party.identifier_issuer",
@@ -190,12 +162,6 @@ pub(crate) fn check_table(
     }
     if table.group_claim.trim().is_empty() != table.group_identifier_issuer.trim().is_empty() {
         return Err(PartyError::Groups { issuer: issuer() });
-    }
-    if profile.is_unstable(&profile.person_key) {
-        return Err(PartyError::UnstableKey {
-            issuer: issuer(),
-            claim: profile.person_key.clone(),
-        });
     }
     Ok(())
 }
@@ -241,13 +207,12 @@ mod tests {
 
     #[test]
     fn two_tables_of_one_issuer_are_refused() {
-        let profile = Profile::default();
         let tables = [table("https://a", "urn:a"), table("https://a", "urn:b")];
         assert_eq!(
             Err(PartyError::DuplicateIssuer {
                 issuer: String::from("https://a")
             }),
-            check_tables(&tables, |_| Some((IssuerKind::Persons, &profile)))
+            check_tables(&tables, |_| Some(IssuerKind::Smart))
         );
     }
 
@@ -256,7 +221,7 @@ mod tests {
         let mut table = table("https://a", "urn:a");
         table.group_claim = String::from("groups");
         assert!(matches!(
-            check_table(&table, Some(IssuerKind::Persons), Some(&Profile::default())),
+            check_table(&table, Some(IssuerKind::Smart)),
             Err(PartyError::Groups { .. })
         ));
     }

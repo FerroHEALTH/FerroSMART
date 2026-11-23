@@ -52,6 +52,16 @@ reach: the server's own `.well-known/smart-configuration` names FerroSMART's
    (`GET [base]/Encounter?patient=…`, as the person, with the scope
    `user/Encounter.rs`); the person chooses one or goes on without, and
    the chosen encounter is read again and must belong to the patient.
+   Before a search, the picker offers the patients the person chose at
+   that server within `[ferrosmart.picker] recent_retention` (30 days by
+   default), each read again as them first, so a patient they may no
+   longer see is left out. At a FHIR server whose `[[ferrosmart.resource]]`
+   names `assigned`, it also lists the patients of the professional's
+   active care teams (`GET [base]/CareTeam?participant=…&status=active&_include=CareTeam:patient`)
+   or encounters in progress
+   (`GET [base]/Encounter?participant=…&status=in-progress&_include=Encounter:patient`),
+   as the person. The person forgets their recent patients on the
+   management page.
 4. **Consent.** The person approves the scopes on the consent page
    ([clients, roles and consent](../configure/clients.md#consent)).
 5. **The code.** FerroSMART redirects to the app with `code`, the `state` as
@@ -105,6 +115,33 @@ carries `Cache-Control: no-store` and `Pragma: no-cache`. A browser app's
 token request from one of its registered origins, the origins of its
 redirect URIs, gets a CORS answer for that origin; any other origin gets
 none.
+
+### A pushed request
+
+An app can push its authorization request first (RFC 9126): it posts the
+same parameters to `POST {issuer}/par`, authenticating as it does at the
+token endpoint, and gets `201` with a `request_uri` that lives 60 seconds.
+It then sends the browser to `/authorize` with its `client_id` and that
+`request_uri` alone. FerroSMART takes the pushed request once; a second use,
+a lapsed one or another client's answers the page that says the request
+lapsed. A deployment that sets `require_pushed_authorization_requests`, or
+a client registered with it, refuses a request that was not pushed with
+`invalid_request`.
+
+### Sender-constrained tokens
+
+A token request that carries a `DPoP` proof of `POST {issuer}/token` gets a
+token of type `DPoP` whose `cnf.jkt` is the thumbprint of the proof's key
+(RFC 9449 §5, §6.1); a proof that does not hold, or one used before, is
+refused with `invalid_dpop_proof`. A public client's refresh token is bound
+to that key too, and refreshing it takes a proof of the same key. A client
+registered with `tls_client_certificate_bound_access_tokens` gets a token
+whose `cnf` carries the `x5t#S256` of the certificate its mutual-TLS
+connection presented (RFC 8705 §3.1), and is refused without one.
+Introspection answers the token's `cnf`. The metadata names
+`dpop_signing_alg_values_supported`, and
+`tls_client_certificate_bound_access_tokens` is `true` when `[server.tls]`
+asks clients for a certificate.
 
 ## The EHR launch
 

@@ -350,7 +350,41 @@ impl ProofCheck {
     ///
     /// Returns [`Rejection::Invalid`] naming the failed [`Check`].
     pub fn check(&self, presented: &Presented<'_>) -> Result<Proof, Rejection> {
-        let mut values = presented.headers.get_all(DPOP).iter();
+        self.inspect(
+            presented.method,
+            presented.path,
+            presented.headers,
+            Some(presented.token),
+        )
+    }
+
+    /// Returns the proof of a token request to an authorization server, a
+    /// request for `path` by `method` with `headers`, after every check of
+    /// RFC 9449 §4.3 but the replay check: no access token is presented, so
+    /// the proof carries no `ath` to hold to one (RFC 9449 §5).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Rejection::Invalid`] naming the failed [`Check`].
+    pub fn check_token_request(
+        &self,
+        method: &Method,
+        path: &str,
+        headers: &HeaderMap,
+    ) -> Result<Proof, Rejection> {
+        self.inspect(method, path, headers, None)
+    }
+
+    /// Returns the proof `headers` carry for a request for `path` by
+    /// `method`, held to the access token `token` when one is presented.
+    fn inspect(
+        &self,
+        method: &Method,
+        path: &str,
+        headers: &HeaderMap,
+        token: Option<&str>,
+    ) -> Result<Proof, Rejection> {
+        let mut values = headers.get_all(DPOP).iter();
         let value = match (values.next(), values.next()) {
             (None, _) => return Err(sender(Check::ProofMissing)),
             (Some(_), Some(_)) => return Err(sender(Check::ProofRepeated)),
@@ -386,15 +420,18 @@ impl ProofCheck {
             })?
             .claims;
         let text = |name: &str| claims.get(name).and_then(Value::as_str);
-        let (Some(jti), Some(htm), Some(htu), Some(iat), Some(ath)) = (
+        let (Some(jti), Some(htm), Some(htu), Some(iat)) = (
             text("jti"),
             text("htm"),
             text("htu"),
             claims.get("iat").and_then(Value::as_i64),
-            text("ath"),
         ) else {
             return Err(sender(Check::ProofClaim));
         };
+        let ath = text("ath");
+        if token.is_some() && ath.is_none() {
+            return Err(sender(Check::ProofClaim));
+        }
         if jti.is_empty() {
             return Err(sender(Check::ProofClaim));
         }
@@ -402,16 +439,18 @@ impl ProofCheck {
             return Err(sender(Check::ProofJti));
         }
         // NOTE: RFC 9110 §9.1, the method token is case-sensitive.
-        if htm != presented.method.as_str() {
+        if htm != method.as_str() {
             return Err(sender(Check::ProofMethod));
         }
-        let expected = self.target(presented.path)?;
+        let expected = self.target(path)?;
         if normalized(htu).as_deref() != Some(expected.as_str()) {
             return Err(sender(Check::ProofUri));
         }
         // NOTE: RFC 9449 §4.2, `ath` is the base64url SHA-256 of the ASCII
         // access token; §4.3 check 12 holds it to the token presented.
-        if ath != crate::sender::sha256(presented.token.as_bytes()) {
+        if let Some(token) = token
+            && ath != Some(crate::sender::sha256(token.as_bytes()).as_str())
+        {
             return Err(sender(Check::ProofTokenHash));
         }
         let until = self.window(iat)?;

@@ -23,7 +23,7 @@ use serde_json::Value;
 use url::Url;
 
 use super::purpose::{self, Declared};
-use super::{Access, Ask, PickerError, as_person};
+use super::{Access, Ask, PickerError};
 use crate::form::Params;
 use crate::launch::context::Context;
 use crate::pages::{self, Fault};
@@ -72,7 +72,10 @@ pub(super) async fn look_up(
         .map(str::trim)
         .filter(|text| !text.is_empty())
     else {
-        return pages::ehr_picker(state, headers, pending, None);
+        return match super::shortcuts::openehr(state, pending, from, namespace).await {
+            Ok(recent) => pages::ehr_picker(state, headers, pending, None, &recent),
+            Err(error) => pages::server_error(state, &error),
+        };
     };
     if subject_id.len() > MAX_ID {
         return pages::fault(state, Fault::BadRequest);
@@ -82,7 +85,13 @@ pub(super) async fn look_up(
         Err(response) => return *response,
     };
     match by_subject(state, &kept, from, namespace, (subject_id, declared)).await {
-        Ok(found) => pages::ehr_picker(state, headers, &kept, Some((subject_id, found.as_ref()))),
+        Ok(found) => pages::ehr_picker(
+            state,
+            headers,
+            &kept,
+            Some((subject_id, found.as_ref())),
+            &[],
+        ),
         Err(error) => pages::server_error(state, &error),
     }
 }
@@ -133,11 +142,25 @@ pub(super) async fn by_subject(
     namespace: &str,
     (subject_id, declared): (&str, Option<Declared<'_>>),
 ) -> Result<Option<FoundEhr>, PickerError> {
-    let mut url = ehr_url(&pending.audience)?;
+    let person = super::Person::of(pending).ok_or(PickerError::Unreadable)?;
+    let at = (pending.audience.as_str(), namespace);
+    by_subject_as(state, &person, from, at, (subject_id, declared)).await
+}
+
+/// Looks up the EHR of `subject_id` in the namespace of `at` at the openEHR
+/// base of `at` as `person`, as [`by_subject`] does.
+pub(super) async fn by_subject_as(
+    state: &AppState,
+    person: &super::Person<'_>,
+    from: IpAddr,
+    (base, namespace): (&str, &str),
+    (subject_id, declared): (&str, Option<Declared<'_>>),
+) -> Result<Option<FoundEhr>, PickerError> {
+    let mut url = ehr_url(base)?;
     url.query_pairs_mut()
         .append_pair("subject_id", subject_id)
         .append_pair("subject_namespace", namespace);
-    let audience = pending.audience.as_str();
+    let audience = base;
     let asked = &url;
     let ask = Ask {
         url: asked,
@@ -147,7 +170,7 @@ pub(super) async fn by_subject(
         describe: Box::new(move |fetched| access(audience, namespace, subject_id, asked, fetched)),
         purpose: declared,
     };
-    match as_person(state, pending, from, &ask).await {
+    match super::as_the(state, person, from, &ask).await {
         Ok(ehr) => found(subject_id, &ehr).map(Some),
         // NOTE: openEHR ITS-REST 1.1.0, ehr_get_by_subject, `404` is returned when
         // no EHR with the subject exists, which is an answer and no failure.

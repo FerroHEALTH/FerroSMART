@@ -73,14 +73,14 @@ start() {
   local setting
   local -a sets=()
   while IFS= read -r setting; do sets+=(--set "$setting"); done < <(authentication)
-  SSL_CERT_FILE="$LANE_DIR/trust.pem" \
-    "$root/target/debug/ferrosmart" --config "$root/app/ferrosmart/oidf/ferrosmart-rp.toml" \
-    --set "server.tls.certificate_file=$LANE_DIR/host.crt" \
-    --set "server.tls.key_file=$LANE_DIR/host.key" \
-    --set "ferrosmart.keys.private_key_file=$LANE_DIR/signing.pem" \
-    "${sets[@]}" \
-    --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_rp" \
-    serve > "$log" 2>&1 &
+  local rp=("$root/target/debug/ferrosmart" --config "$root/app/ferrosmart/oidf/ferrosmart-rp.toml"
+    --set "server.tls.certificate_file=$LANE_DIR/host.crt"
+    --set "server.tls.key_file=$LANE_DIR/host.key"
+    --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+    "${sets[@]}"
+    --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_rp")
+  "${rp[@]}" client apply "$root"/app/ferrosmart/oidf/rp-clients/*.json > /dev/null
+  SSL_CERT_FILE="$LANE_DIR/trust.pem" "${rp[@]}" serve > "$log" 2>&1 &
   smart=$!
   for _ in $(seq 1 40); do
     if get -f -o /dev/null "$issuer/.well-known/smart-configuration" 2> /dev/null; then

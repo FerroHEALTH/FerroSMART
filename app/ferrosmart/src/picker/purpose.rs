@@ -85,3 +85,32 @@ pub(super) async fn declared<'s>(
         Err(error) => Err(Box::new(pages::server_error(state, &error))),
     }
 }
+
+/// The person has yet to choose among the purposes a server lists.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Unchosen;
+
+/// Returns the purpose a lookup of `pending` declares with no choice on a
+/// form: none when the server lists none, else the one the request kept or
+/// the only one listed.
+///
+/// # Errors
+/// Returns [`Unchosen`] while the person has yet to choose one.
+pub(super) fn kept<'s>(
+    state: &'s AppState,
+    pending: &Pending,
+) -> Result<Option<Declared<'s>>, Unchosen> {
+    let Some(purposes) = state.settings().purposes.get(&pending.audience) else {
+        return Ok(None);
+    };
+    let code = match (pending.purpose_of_use.as_deref(), purposes.codes.as_slice()) {
+        (Some(kept), _) => kept,
+        (None, [only]) => only.code.as_str(),
+        (None, _) => return Err(Unchosen),
+    };
+    let purpose = purposes.get(code).ok_or(Unchosen)?;
+    Ok(Some(Declared {
+        header: &purposes.header,
+        purpose,
+    }))
+}

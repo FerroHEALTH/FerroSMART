@@ -6,26 +6,26 @@
 //! may `CREATE DATABASE` for the first case. CI sets it (the `nextest (core and axum)` job's PostgreSQL
 //! service); a run without it fails the case, never skips it.
 
-use ferrosmart::clients::{ClientKind, ClientSection, GrantType, resolve};
+use ferrosmart::clients::{AuthMethod, ClientMetadata, GrantType, Material, resolve};
 use ferrosmart::store::Store;
 use secrecy::SecretString;
 
 use crate::support::Database;
 
-/// Returns a configured Backend Services client.
-fn backend(client_id: &str, scope: &str) -> ClientSection {
-    ClientSection {
+/// Returns a Backend Services client's registration.
+fn backend(client_id: &str, scope: &str) -> ClientMetadata {
+    ClientMetadata {
         client_id: client_id.to_owned(),
-        kind: ClientKind::ConfidentialAsymmetric,
+        auth_method: AuthMethod::PrivateKeyJwt,
         jwks_uri: String::from("https://export.example.org/jwks.json"),
         scopes: vec![scope.to_owned()],
         grant_types: vec![GrantType::ClientCredentials],
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     }
 }
 
 #[tokio::test]
-async fn the_configured_clients_are_registered_replaced_and_removed() {
+async fn a_client_is_registered_once_and_replaced() {
     let database = Database::create().await;
     let store = Store::connect(&database.url, 2).await.expect("connects");
     store.migrate().await.expect("migrates");
@@ -35,33 +35,30 @@ async fn the_configured_clients_are_registered_replaced_and_removed() {
         .expect("a second run migrates nothing");
     store.ping().await.expect("answers");
 
-    let first = resolve(&[
-        backend("export", "system/Patient.rs"),
-        backend("audit", "system/AuditEvent.rs"),
-    ])
-    .expect("admitted");
-    store.register(&first).await.expect("registered");
-    assert_eq!(
-        Some(first[0].clone()),
-        store.client("export").await.expect("read")
+    let export =
+        resolve(&backend("export", "system/Patient.rs"), Material::default()).expect("admitted");
+    let mut tx = store.begin().await.expect("begins");
+    assert!(tx.create_client(&export).await.expect("written"));
+    assert!(
+        !tx.create_client(&export).await.expect("read"),
+        "a client_id is registered once"
     );
-    assert_eq!(
-        Some(first[1].clone()),
-        store.client("audit").await.expect("read")
-    );
+    crate::support::commit(tx).await;
+    assert_eq!(Some(export), store.client("export").await.expect("read"));
     assert_eq!(None, store.client("unknown").await.expect("read"));
 
-    let second = resolve(&[backend("export", "system/Observation.rs")]).expect("admitted");
-    store.register(&second).await.expect("registered again");
+    let replaced = resolve(
+        &backend("export", "system/Observation.rs"),
+        Material::default(),
+    )
+    .expect("admitted");
+    let mut tx = store.begin().await.expect("begins");
+    tx.update_client(&replaced).await.expect("written");
+    crate::support::commit(tx).await;
     assert_eq!(
-        Some(second[0].clone()),
+        Some(replaced),
         store.client("export").await.expect("read"),
         "replaced"
-    );
-    assert_eq!(
-        None,
-        store.client("audit").await.expect("read"),
-        "no longer configured"
     );
 
     database.drop(store).await;
@@ -92,8 +89,10 @@ async fn the_sweep_deletes_lapsed_refresh_tokens_and_keeps_a_fresh_grant() {
             auth_time: None,
             access: Some(Access::Offline),
             upstream_session: None,
-            approved_at: None,
+            basis: None,
             roles: &[],
+            acr: None,
+            dpop_jkt: None,
         })
         .await
         .expect("recorded");

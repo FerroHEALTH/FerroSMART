@@ -3,11 +3,10 @@
 
 # Clients, roles and consent
 
-Who may ask for what is content in the configuration, never code. Three
-things decide the scope an app gets, and the narrowest wins:
+Who may ask for what is content, never code. Three things decide the scope
+an app gets, and the narrowest wins:
 
-1. the client's **ceiling**, the scopes its `[[ferrosmart.client]]` table
-   lists;
+1. the client's **ceiling**, the scopes its client document lists;
 2. the **roles** the person holds at the identity provider, each mapped by a
    `[[ferrosmart.role]]` table to the `user/` and `patient/` scopes it allows;
 3. the **consent** the person gives on FerroSMART's consent page.
@@ -20,62 +19,88 @@ applies its own rules on top.
 
 ## The client registry
 
-Each `[[ferrosmart.client]]` table registers one client. FerroSMART writes
-the tables to its database at start, so every replica sees the same
-registry. The configuration seeds the registry; the
-[admin API](admin-api.md) changes it while FerroSMART runs, and a client it
-changed is no longer written from its table.
+A client lives in one place: FerroSMART's database, which every replica
+reads. RFC 6749 §2 leaves the means of registration to the server, and
+SMART App Launch 2.2.0 (Register App with EHR) asks only for what a
+registration holds. An administrator registers a client with a client
+document, a JSON object, through the [admin API](admin-api.md) or from a
+file:
 
-| Key | What it is |
+```sh
+ferrosmart client apply growth-chart.json portal.json
+```
+
+`client apply` reads each file's document, checks it as the admin API does,
+and creates the client or replaces the one with its `client_id`, each change
+committed with its `AuditEvent`, which names `ferrosmart client apply` as
+the requester. It runs when you run it, never at start, and migrates the
+database first, so it can create the first client, the administrator, before
+FerroSMART first serves.
+
+The document is RFC 7591 §2 client metadata, the names an app that
+registers itself sends too. `resources`, `launch_uri`, `upstreams` and
+`first_party` are FerroSMART's own.
+
+| Member | What it is |
 |---|---|
 | `client_id` | The client's id, as the app sends it |
-| `name` | The name the consent page shows the person |
-| `kind` | `public`, `confidential_symmetric` or `confidential_asymmetric` |
-| `jwks_uri` | A confidential asymmetric client's JWK Set URL, `https`; exclusive with `jwks_file` |
-| `jwks_file` | A file holding the client's JWK Set by value |
-| `secret_hash_file` | A file holding the Argon2id hash of a confidential symmetric client's secret, never the secret |
+| `client_name` | The name the consent page shows the person |
+| `token_endpoint_auth_method` | `none`, `client_secret_basic`, `client_secret_post` or `private_key_jwt` |
+| `jwks_uri` | A `private_key_jwt` client's JWK Set URL, `https`; exclusive with `jwks` |
+| `jwks` | The client's JWK Set by value |
 | `redirect_uris` | The client's complete redirect URIs, compared by exact string |
+| `post_logout_redirect_uris` | Where the end-session endpoint may send the browser back (RP-Initiated Logout 1.0 §3.1) |
 | `resources` | The `[[ferrosmart.resource]]` bases its tokens may name in `aud`; a request for any other base is refused `invalid_target`, and a client that lists none reaches no resource server |
+| `upstreams` | The identity providers its people log in at; every provider when absent |
+| `default_acr_values` | The eIDAS level-of-assurance URIs a request without `acr_values` asks for (OpenID Connect Dynamic Client Registration 1.0 §2) |
+| `require_pushed_authorization_requests` | `true` when the app may start an authorization request only by pushing it to `POST {issuer}/par` (RFC 9126 §6); `false` by default |
+| `dpop_bound_access_tokens` | `true` when every token request of the client carries a `DPoP` proof (RFC 9449 §5.2); `false` by default |
+| `tls_client_certificate_bound_access_tokens` | `true` when the client's tokens are bound to the certificate of its mutual-TLS connection, which every token request then presents (RFC 8705 §3.4); `false` by default |
 | `launch_uri` | Optional: the app's launch URL, absolute `https`, by which an EHR's [launch registration](../integrate/ehr-launch.md) may name the app (`app_launch_uri`), as a SMART Task does; compared after RFC 3986 normalization, one client per URL |
-| `client_uri` | Optional: the app's home page, absolute `https`, linked from the consent page (RFC 7591 §2) |
+| `client_uri` | Optional: the app's home page, absolute `https`, linked from the consent page |
 | `logo_uri` | Optional: the app's logo, absolute `https`, drawn on the consent page; the page's CSP admits that origin for images alone |
 | `policy_uri` | Optional: the app's privacy policy, absolute `https`, linked from the consent page |
 | `tos_uri` | Optional: the app's terms of service, absolute `https`, linked from the consent page |
-| `scopes` | The ceiling: every scope the client may ever be granted |
-| `grant_types` | Any of `authorization_code`, `client_credentials` and `refresh_token` |
+| `scope` | The ceiling, space-separated: every scope the client may ever be granted |
+| `grant_types` | Any of `authorization_code`, `client_credentials`, `refresh_token` and `urn:ietf:params:oauth:grant-type:token-exchange`. The token exchange lets a confidential client that serves a FHIR base exchange a patient's own token there for a token at the paired openEHR base (RFC 8693), and needs both bases in `resources` |
 
-FerroSMART refuses at start a client that breaks one of these rules:
+FerroSMART refuses a document that breaks one of these rules, with the
+RFC 7591 §3.2.2 error `invalid_redirect_uri` or `invalid_client_metadata`:
 
 - a client lists at least one grant type;
-- a `public` client registers no JWK Set and cannot use
+- a `none` client registers no JWK Set and cannot use
   `client_credentials`, since that grant authenticates with a key;
-- a `confidential_asymmetric` client registers exactly one of `jwks_uri` and
-  `jwks_file`, and every key in the set carries `kty` and `kid` and the bare
+- a `private_key_jwt` client registers exactly one of `jwks_uri` and
+  `jwks`, and every key in the set carries `kty` and `kid` and the bare
   public members (`n` and `e`, or `crv`, `x` and `y`), and no private part;
-- a `confidential_symmetric` client registers a `secret_hash_file` whose
-  Argon2id hash is at least `m=19456,t=2,p=1`, no JWK Set, and never
-  `client_credentials`, which SMART keeps for asymmetric clients;
+- a `client_secret_basic` or `client_secret_post` client registers no JWK
+  Set and never `client_credentials`, which SMART keeps for asymmetric
+  clients;
 - `refresh_token` comes with `authorization_code`;
-- `authorization_code` comes with at least one redirect URI.
+- `authorization_code` comes with at least one redirect URI;
+- each of `default_acr_values` is an eIDAS level of assurance.
 
-### The three kinds of client
+### Client authentication
 
-| Kind | SMART capability | How it authenticates |
+| `token_endpoint_auth_method` | SMART capability | How it authenticates |
 |---|---|---|
-| `public` | `client-public` | PKCE alone; a browser or native app that keeps no secret |
-| `confidential_symmetric` | `client-confidential-symmetric` | Its client secret, by HTTP Basic (`client_secret_basic`) or in the form (`client_secret_post`), never both in one request |
-| `confidential_asymmetric` | `client-confidential-asymmetric` | A client assertion, `private_key_jwt`, signed `RS384` or `ES384` with a key of its registered JWK Set |
+| `none` | `client-public` | PKCE alone; a browser or native app that keeps no secret |
+| `client_secret_basic` | `client-confidential-symmetric` | Its client secret by HTTP Basic |
+| `client_secret_post` | `client-confidential-symmetric` | Its client secret in the form |
+| `private_key_jwt` | `client-confidential-asymmetric` | A client assertion signed `RS384` or `ES384` with a key of its registered JWK Set |
 
-SMART prefers asymmetric authentication for a client that can hold a key
-pair; the symmetric kind is for an app that can keep a secret and nothing
-more. FerroSMART stores only the secret's hash. Make it with:
+A client authenticates only by the method it registered. SMART prefers
+asymmetric authentication for a client that can hold a key pair; a secret
+is for an app that can keep one and nothing more. FerroSMART issues the
+secret when it registers the client and answers it once, as
+`client_secret` with `client_secret_expires_at` 0 (RFC 7591 §3.2.1); it
+keeps only the secret's Argon2id hash. `client apply` prints the secret it
+issued, and `ferrosmart client secret <client_id>` issues a new one, which
+it prints once:
 
 ```sh
-printf '%s' "$secret" | ferrosmart client hash-secret > portal-secret.phc
+ferrosmart client secret portal
 ```
-
-The command reads the secret on standard input and prints its Argon2id
-hash with a fresh salt; give the client the secret and FerroSMART the file.
 
 The client assertion follows SMART App Launch 2.2.0, Client Authentication:
 Asymmetric: `iss` and `sub` the `client_id`, `aud` the token endpoint URL
@@ -90,43 +115,44 @@ no longer than its `Cache-Control` allows. Any failure answers
 
 A SMART app a person launches, which may stay signed in:
 
-```toml
-[[ferrosmart.client]]
-client_id = "growth-chart"
-name = "Growth chart"
-kind = "public"
-resources = ["https://ehr.example.org/fhir"]
-redirect_uris = ["https://growth-chart.example.org/callback"]
-scopes = ["openid", "fhirUser", "launch", "launch/patient",
-          "patient/Observation.rs", "online_access"]
-grant_types = ["authorization_code", "refresh_token"]
+```json
+{
+  "client_id": "growth-chart",
+  "client_name": "Growth chart",
+  "token_endpoint_auth_method": "none",
+  "resources": ["https://ehr.example.org/fhir"],
+  "redirect_uris": ["https://growth-chart.example.org/callback"],
+  "scope": "openid fhirUser launch launch/patient patient/Observation.rs online_access",
+  "grant_types": ["authorization_code", "refresh_token"]
+}
 ```
 
 A web app with a server that keeps a secret:
 
-```toml
-[[ferrosmart.client]]
-client_id = "portal"
-name = "Patient portal"
-kind = "confidential_symmetric"
-resources = ["https://ehr.example.org/fhir"]
-secret_hash_file = "/run/secrets/portal-secret.phc"
-redirect_uris = ["https://portal.example.org/callback"]
-scopes = ["openid", "fhirUser", "launch/patient", "patient/Observation.rs"]
-grant_types = ["authorization_code", "refresh_token"]
+```json
+{
+  "client_id": "portal",
+  "client_name": "Patient portal",
+  "token_endpoint_auth_method": "client_secret_basic",
+  "resources": ["https://ehr.example.org/fhir"],
+  "redirect_uris": ["https://portal.example.org/callback"],
+  "scope": "openid fhirUser launch/patient patient/Observation.rs",
+  "grant_types": ["authorization_code", "refresh_token"]
+}
 ```
 
 A system with no person, SMART Backend Services:
 
-```toml
-[[ferrosmart.client]]
-client_id = "bulk-export"
-name = "Bulk export"
-kind = "confidential_asymmetric"
-resources = ["https://ehr.example.org/fhir"]
-jwks_uri = "https://export.example.org/jwks.json"
-scopes = ["system/Patient.rs", "system/Observation.rs"]
-grant_types = ["client_credentials"]
+```json
+{
+  "client_id": "bulk-export",
+  "client_name": "Bulk export",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "resources": ["https://ehr.example.org/fhir"],
+  "jwks_uri": "https://export.example.org/jwks.json",
+  "scope": "system/Patient.rs system/Observation.rs",
+  "grant_types": ["client_credentials"]
+}
 ```
 
 Four scopes are FerroSMART's own `system/` scopes, which a client's ceiling
@@ -137,7 +163,7 @@ lists to reach an endpoint of FerroSMART itself:
 | `system/introspect` | `POST /introspect`, for a resource server that introspects ([the flows](../integrate/flows.md#refresh-introspection-and-revocation)) |
 | `system/launch.c` | `POST /launch` and the signed launch JWT, for an EHR ([the EHR launch API](../integrate/ehr-launch.md)) |
 | `system/AuditEvent.rs` | `GET /audit`, for an operator's client ([audit records](../operate/audit.md#reading-the-records)) |
-| `system/admin` | `/admin/clients` and `/admin/keys`, for an administrator's client ([the admin API](admin-api.md)) |
+| `system/admin` | `/register`, `/admin/clients` and `/admin/keys`, for an administrator's client ([the admin API](admin-api.md)) |
 
 ## Roles
 
@@ -207,8 +233,8 @@ With both refresh scopes granted, `offline_access` decides.
 
 ## Consent
 
-A flow with a person shows the consent page unless an organisation
-approval or a remembered choice answers for them; [The consent
+A flow with a person shows the consent page unless the registration or a
+remembered choice answers for them; [The consent
 rules](consent.md) lists every case with the text it rests on. The person
 approves the offered scopes, unticks
 any access to their data (`patient/`, `user/` and extension scopes), or
@@ -219,7 +245,7 @@ are listed as fixed lines with no box: they give the app no data the
 boxes do not, and the person ends lasting access on the management page. The page shows the app's logo and
 links to its home page, privacy policy and terms when the client registers
 them. FerroSMART draws the page itself, with the
-deployment's name and `consent_text` from `[ferrosmart.branding]`.
+deployment's `[ferrosmart] name` and the `consent_text` of `[ferrosmart.branding]`.
 
 When the person ticks "Remember this choice", FerroSMART keeps the consent
 for that client, that resource server (the request's `aud`) and that scope
@@ -228,7 +254,7 @@ covers goes back to the app with a code at once; a request for more shows
 the page again. The person sees each remembered consent at
 `{issuer}/manage`, the SMART `management_endpoint`, with every app that
 holds live access to their data: a refresh token or an access token not
-yet expired, remembered or not, organisation-approved or not. The page says
+yet expired, remembered or not. The page says
 how long each app stays connected, and each app has a Disconnect button.
 Disconnect forgets the remembered consent and revokes every grant the app
 holds for the person, with every token under them, at once: its next
@@ -237,60 +263,32 @@ as the authorization server and end-user will allow", so the person can
 end any app's access. The audit record of a disconnect is
 `consent-withdrawn`.
 
-### An app the organisation approved
+### Who skips the page
 
-An administrator can approve an app once for the organisation's staff, so
-a professional who opens it sees no consent page (SMART App
-Launch 2.2.0, Obtain authorization code, Response: the server "will enforce
-access rules based on local policies and optionally direct end-user
-input"):
+An administrator's registration is the organisation's consent for its
+professionals, so a person whose `fhirUser` is a `Practitioner` or a
+`PractitionerRole` sees no consent page for an app an administrator
+registered (OpenID Connect Core 1.0 §3.1.2.4, "previous administrative
+consent"). A patient, related person or person sees the page for an app of
+another party: they decide whether another party reads their data
+(Regulation (EU) 2025/327 Art 3, 4(2) and 7(1)).
 
-```toml
-[ferrosmart.client.organisation_approval]
-scopes = ["openid", "fhirUser", "launch", "user/Observation.rs"]
-approved_by = "J. de Vries, information security"
-approved_at = "2026-11-19T09:00:00Z"
-```
-
-The approval lists `user/` and `patient/` scopes and the launch, OpenID,
-refresh and extension scopes that go with them, each within the client's
-`scopes`. The page is skipped when the person's `fhirUser` is not a
-`Patient`, `RelatedPerson` or `Person`, the request names no `patient/`
-scope or comes from an EHR launch, and the approval covers every scope
-offered; the person still gets no more than their roles allow. The
-approval is the organisation's administrative consent (OpenID Connect Core
-1.0 §3.1.2.4), and in an EHR launch the professional opened the app for
-the patient the EHR has open, so its `patient/` scopes need no page. A
-standalone request for `patient/` scopes shows the page. Anything else shows the page as usual. Each skipped page
-writes an audit record naming the approver and the time, and the
-management page lists the app as approved by the organisation. A person
-who disconnects it there ends their own access; the approval stays, and
-their next sign-in follows it again. Withdraw it through the
-[admin API](admin-api.md) and it is withdrawn at once; remove or change the
-table and restart, and it is withdrawn at start. Either way every token
-issued on it is revoked.
-
-For the organisation's own app, such as its patient portal, add
-`first_party = true` to the approval. A first-party approval may also list
-`patient/` scopes, and a patient, related person or person who logs in to
-the app sees no consent page either, as long as the approval covers every
-scope offered. The organisation processes its patients' data in its own
-app on its own legal basis (GDPR Art. 9(2)(h)), so the consent page adds
-nothing there. An app of another party keeps the page for every patient:
-the patient decides whether to share their data with it, and disconnects
-it on the management page. The audit record of a skipped page says
-`consent-first-party-approved`, and the management page lists the app as
-the organisation's own, with a Disconnect button that ends the patient's
-access and leaves the approval to the administrator. Setting or
-clearing `first_party` is a new approval: the old one is withdrawn with
-every token issued on it.
+For the organisation's own app, such as its patient portal, or an app that
+acts for it, set `"first_party": true` in its document. Only an
+administrator sets it. A patient, related person or person then sees no
+page either. The audit record of a skipped page is `consent-administrative`
+or `consent-first-party`, and the management page lists the app as the
+organisation's, with a Disconnect button that ends the person's access and
+leaves the registration standing. Clearing `first_party` revokes at once
+every token issued on it with no page. [The consent rules](consent.md) list
+every case with the text it rests on.
 
 ### Native and browser apps without a secret
 
-A public client (`kind = "public"`) has no secret, so a request carrying
+A public client (`token_endpoint_auth_method` `none`) has no secret, so a request carrying
 its `client_id` could come from any app on the device. FerroSMART gives a
-public client a code with no consent page, on an approval or a remembered
-consent, only when the request's redirect URI is a claimed `https` URI: an
+public client a code with no consent page, on its registration or a
+remembered consent, only when the request's redirect URI is a claimed `https` URI: an
 `https` URL whose host is not `localhost` or a loopback address. The
 operating system hands such a redirect only to the app that proved it owns
 the domain (RFC 8252 §7.2). A custom-scheme redirect such as
@@ -304,11 +302,12 @@ clients authenticate at the token endpoint and are not affected.
 
 Register the organisation's own mobile app with a claimed `https` redirect,
 an iOS Universal Link or an Android App Link, so its patients see no page.
-`ferrosmart config check` prints a warning for a first-party public client
-whose redirect URIs are all custom-scheme or loopback ones:
+`ferrosmart client apply` prints a warning for a public client an
+administrator registers whose redirect URIs are all custom-scheme or
+loopback ones:
 
 ```text
-ferrosmart: warning: client "portal-app" is a first-party public app with no claimed https redirect URI, so every sign-in shows the consent page (RFC 8252 §8.6): register an https redirect the app claims, such as a Universal Link or an App Link
+ferrosmart: warning: client "portal-app" is a public app with no claimed https redirect URI, so every sign-in shows the consent page (RFC 8252 §8.6): register an https redirect the app claims, such as a Universal Link or an App Link
 ```
 
 ![The management page, titled "Apps you allowed": one app that stays connected after sign-out, the scopes it holds in words, and the Disconnect button](../integrate/img/manage.png)

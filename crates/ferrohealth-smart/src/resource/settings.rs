@@ -4,13 +4,11 @@
 //! What a deployment configures its resource server with, and the rules
 //! [`Settings::validate`] holds it to before the start.
 
-use std::collections::BTreeSet;
 use std::time::Duration;
 
 use jsonwebtoken::Algorithm;
 
 use crate::kind::IssuerKind;
-use crate::kind::standing::StandingSource;
 use crate::profile::Profile;
 use crate::resource::MAX_CLOCK_SKEW;
 use crate::resource::ResourceError;
@@ -25,9 +23,7 @@ impl Settings {
     /// RS256, RS384, PS256, PS384, ES256 and ES384 are accepted under the
     /// `rfc9068` profile, the clock skew is 60 seconds, the key set is used
     /// for 600 seconds and read again at most once a minute, a call to the
-    /// authorization server may take 10 seconds, no subject is granted
-    /// scopeless access, and the profile's lists answer the standing
-    /// questions.
+    /// authorization server may take 10 seconds.
     #[must_use]
     pub fn new(issuer: impl Into<String>, audience: impl Into<String>, kind: IssuerKind) -> Self {
         Self {
@@ -48,8 +44,6 @@ impl Settings {
             jwks_refresh_interval: Duration::from_secs(60),
             jwks_file: None,
             timeout: Duration::from_secs(10),
-            scopeless_subjects: BTreeSet::new(),
-            standing: StandingSource::Lists,
             // NOTE: no specification governs this: our own design; another party's
             // issuer asserts no role of this deployment.
             role_claims: if kind == IssuerKind::Federation {
@@ -101,10 +95,8 @@ impl Settings {
             self.assurance.as_ref(),
             self.federation.as_ref(),
             self.sender_constraint,
-            &self.scopeless_subjects,
             &self.role_claims,
         )?;
-        rules::check_standing(&self.standing, &self.profile, &self.scopeless_subjects)?;
         rules::check_attributes(self.kind, self.attributes.as_ref())
     }
 }
@@ -117,14 +109,14 @@ mod tests {
 
     #[test]
     fn the_settings_rules_refuse_the_start() {
-        let mut settings = Settings::new("https://as.example.org", "aud", IssuerKind::Persons);
+        let mut settings = Settings::new("https://as.example.org", "aud", IssuerKind::Smart);
         assert!(settings.validate().is_ok());
         settings.clock_skew = MAX_CLOCK_SKEW + Duration::from_secs(1);
         assert!(matches!(
             settings.validate(),
             Err(ResourceError::ClockSkew { .. })
         ));
-        let mut settings = Settings::new("https://as.example.org", "", IssuerKind::Persons);
+        let mut settings = Settings::new("https://as.example.org", "", IssuerKind::Smart);
         assert!(matches!(
             settings.validate(),
             Err(ResourceError::NoAudience)

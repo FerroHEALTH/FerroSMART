@@ -70,21 +70,21 @@ impl Server {
             "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
              [[ferrosmart.resource]]\nbase = {RESOURCE:?}\n\
              [[ferrosmart.resource]]\nbase = {OPENEHR:?}\nkind = \"openehr\"\n\
-             [[ferrosmart.client]]\nclient_id = \"ehr\"\nkind = \"confidential_asymmetric\"\n\
-             jwks_file = {:?}\nscopes = [\"system/launch.c\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"export\"\nkind = \"confidential_asymmetric\"\n\
-             jwks_file = {:?}\nscopes = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"app\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"ehr\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\n\
+             jwks = {}\nscope = [\"system/launch.c\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"export\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\n\
+             jwks = {}\nscope = [\"system/Patient.rs\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"app\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://app.example.org/callback\"]\ngrant_types = [\"authorization_code\"]\n\
              launch_uri = \"https://app.example.org/launch\"\n\
-             [[ferrosmart.client]]\nclient_id = \"other\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"other\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://other.example.org/callback\"]\ngrant_types = [\"authorization_code\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"fhir-only\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"fhir-only\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://fhir-only.example.org/callback\"]\ngrant_types = [\"authorization_code\"]\n\
              resources = [{RESOURCE:?}]",
             secrecy::ExposeSecret::expose_secret(&database.url),
-            jwks(&keys, "ehr", &ehr),
-            jwks(&keys, "export", &export),
+            jwks(&ehr),
+            jwks(&export),
         );
         let settings = config(&crate::support::reach_every_base(&text), &keys)
             .resolve()
@@ -93,9 +93,13 @@ impl Server {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let audit = audit(&settings);
         let state = Arc::new(AppState::new(settings, store.clone(), audit));
+        crate::support::apply(
+            &state,
+            &crate::support::clients(&crate::support::reach_every_base(&text)),
+        )
+        .await;
         let app = router(Arc::clone(&state));
         Self {
             state,
@@ -214,10 +218,8 @@ fn client_key(keys: &Keys, client_id: &str, algorithm: Algorithm) -> AssertionKe
 }
 
 /// Writes the JWK Set of `key` and returns its path.
-fn jwks(keys: &Keys, client_id: &str, key: &AssertionKey) -> String {
-    let path = keys.dir.path().join(format!("{client_id}-jwks.json"));
-    std::fs::write(&path, json!({"keys": [key.public_jwk()]}).to_string()).expect("written");
-    path.display().to_string()
+fn jwks(key: &AssertionKey) -> String {
+    crate::support::inline(&json!({"keys": [key.public_jwk()]}))
 }
 
 /// Returns an id no other JWT of the run carries.

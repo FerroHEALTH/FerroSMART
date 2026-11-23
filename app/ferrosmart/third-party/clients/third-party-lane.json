@@ -1,0 +1,14 @@
+{
+  "client_id": "third-party-lane",
+  "client_name": "The third-party lane",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "resources": [
+    "http://localhost:8090/fhir",
+    "http://localhost:8092/fhir",
+    "http://localhost:8099/fhir"
+  ],
+  "scope": "system/Patient.rs system/introspect",
+  "grant_types": [
+    "client_credentials"
+  ]
+}

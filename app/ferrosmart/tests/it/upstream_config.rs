@@ -16,7 +16,7 @@ use ferrosmart::upstream::preset::Preset;
 use ferrosmart::upstream::registration::{Registration, subject};
 use ferrosmart::upstream::{Authentication, OidcUpstream, Protocol, Upstream, pairwise};
 
-use crate::support::{Keys, config, upstream_assertion};
+use crate::support::{ASSURANCE, Keys, config, upstream_assertion};
 
 /// The issuer of every case.
 const ISSUER: &str = "https://smart.example.org";
@@ -29,7 +29,7 @@ const UPSTREAM: &str = "https://idp.example.org/realms/hospital";
 fn oidc(keys: &Keys, entry: &str, oidc: &str) -> String {
     format!(
         "[ferrosmart]\nissuer = {ISSUER:?}\n\
-         [[ferrosmart.upstream]]\nname = \"idp\"\n{entry}\n\
+         [[ferrosmart.upstream]]\nname = \"idp\"\n{entry}\n{ASSURANCE}\
          [ferrosmart.upstream.oidc]\nissuer = {UPSTREAM:?}\nclient_id = \"ferrosmart\"\n{oidc}\n\
          {}\
          [[ferrosmart.role]]\nname = \"clinician\"\nscopes = [\"user/Patient.rs\"]\n",

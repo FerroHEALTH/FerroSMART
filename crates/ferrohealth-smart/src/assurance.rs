@@ -209,7 +209,7 @@ mod tests {
 
     fn bearer(sub: &str, claims: &serde_json::Value) -> Caller {
         let claims = claims.as_object().cloned().expect("an object");
-        Caller::new(String::from(sub), None, "", None, false, CallerKind::Person)
+        Caller::new(String::from(sub), None, "", None, CallerKind::Person)
             .with_assurance(section(None).assess(&claims))
             .with_claims(claims)
     }

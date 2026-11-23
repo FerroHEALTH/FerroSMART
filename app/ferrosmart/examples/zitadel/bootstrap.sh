@@ -21,7 +21,8 @@
 # ZITADEL generates the OIDC client id, the application's private key and
 # the target's signing key, so the script writes them to OUT with the
 # FerroSMART configuration that names them: `upstream-assertion.pem`,
-# `target-signing-key` and `ferrosmart.toml`. FerroSMART signs its client
+# `target-signing-key` and `ferrosmart.toml`, with the example app's client
+# document `example-app.json`. FerroSMART signs its client
 # assertion with that key under the `kid` ZITADEL gave it (OpenID Connect
 # Core 1.0 §9, private_key_jwt). A second run finds `ferrosmart.toml` and does nothing.
 # It needs sh, curl, sed and base64, so it runs in the curl image and on a CI host.
@@ -132,6 +133,10 @@ cat > "$OUT/ferrosmart.toml" << TOML
 
 [ferrosmart]
 issuer = "$FERROSMART_ISSUER"
+# A workforce login with no eIDAS level of assurance; an EU deployment keeps the
+# substantial floor and maps its provider's values under
+# [ferrosmart.upstream.assurance] (docs/architecture.md §13.28).
+assurance_minimum = "none"
 
 [[ferrosmart.resource]]
 base = "http://localhost:8090/fhir"
@@ -160,16 +165,18 @@ kid = "$key_id"
 [[ferrosmart.role]]
 name = "clinician"
 scopes = ["user/Patient.rs", "user/Observation.rs"]
-
-[[ferrosmart.client]]
-client_id = "example-app"
-name = "Example SMART app"
-kind = "public"
-redirect_uris = ["http://localhost:9000/callback"]
-scopes = ["openid", "fhirUser", "user/Patient.rs", "user/Observation.rs"]
-resources = ["http://localhost:8090/fhir"]
-grant_types = ["authorization_code"]
 TOML
+cat > "$OUT/example-app.json" <<'JSON'
+{
+  "client_id": "example-app",
+  "client_name": "Example SMART app",
+  "token_endpoint_auth_method": "none",
+  "redirect_uris": ["http://localhost:9000/callback"],
+  "scope": "openid fhirUser user/Patient.rs user/Observation.rs",
+  "resources": ["http://localhost:8090/fhir"],
+  "grant_types": ["authorization_code"]
+}
+JSON
 # NOTE: FerroSMART and the target run as other users, so they read the two files.
 chmod 0644 "$OUT/upstream-assertion.pem" "$OUT/target-signing-key"
 echo "bootstrap: ZITADEL is bootstrapped; the client id is $client_id"

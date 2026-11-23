@@ -9,6 +9,7 @@
 
 use url::Url;
 
+use crate::assurance::Assurance;
 use crate::form::Params;
 use crate::store::{Asking, Prompt};
 
@@ -19,9 +20,10 @@ use super::Denial;
 /// `prompt=none` is `login_required`: FerroSMART keeps no session of its
 /// own, so every authorization request logs the person in upstream, and
 /// "an error is returned if an End-User is not already authenticated"
-/// (OpenID Connect Core 1.0 §3.1.2.1). `display`, `claims_locales` and
-/// `acr_values` are taken and do not change the flow, the minimum §15.1
-/// sets for each.
+/// (OpenID Connect Core 1.0 §3.1.2.1). `display` and `claims_locales` are
+/// taken and do not change the flow, the minimum §15.1 sets for each.
+/// `acr_values` naming an eIDAS level is a level the login must reach
+/// (RFC 9470 §5); any other value is taken and ignored.
 pub(super) fn read(params: &Params) -> Result<Asking, Denial> {
     let mut asking = Asking::default();
     if let Some(prompt) = params.get("prompt") {
@@ -54,14 +56,18 @@ pub(super) fn read(params: &Params) -> Result<Asking, Denial> {
         asking.max_age = Some(seconds);
     }
     asking.ui_locales = params.get("ui_locales").map(str::to_owned);
+    asking.acr = params
+        .get("acr_values")
+        .and_then(crate::assurance::requested);
     Ok(asking)
 }
 
 /// Returns the upstream authorization request `url` carrying what `asking`
 /// passes on: `prompt` (`login`, `select_account`, beside any value the
 /// request already carries), `max_age` and `ui_locales` (OpenID Connect
-/// Core 1.0 §3.1.2.1).
-pub(super) fn upstream(mut url: Url, asking: &Asking) -> Url {
+/// Core 1.0 §3.1.2.1), and as `acr_values` the provider's values that reach
+/// both the level asked and the provider's minimum, by its `assurance`.
+pub(super) fn upstream(mut url: Url, asking: &Asking, assurance: &Assurance) -> Url {
     let mut pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
     let mut prompt: Vec<String> = pairs
         .iter()
@@ -85,6 +91,13 @@ pub(super) fn upstream(mut url: Url, asking: &Asking) -> Url {
     }
     if let Some(ui_locales) = &asking.ui_locales {
         pairs.push((String::from("ui_locales"), ui_locales.clone()));
+    }
+    if let Some(level) = asking.acr.max(assurance.minimum()) {
+        let values = assurance.values_from(level);
+        if !values.is_empty() {
+            pairs.retain(|(name, _)| name != "acr_values");
+            pairs.push((String::from("acr_values"), values.join(" ")));
+        }
     }
     url.query_pairs_mut().clear().extend_pairs(pairs);
     url
@@ -134,6 +147,7 @@ mod tests {
         let url = upstream(
             Url::parse("https://idp.example.org/authorize?tenant=a&prompt=consent").expect("a URL"),
             &asking,
+            &Assurance::default(),
         );
         let pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
         assert!(pairs.contains(&(String::from("tenant"), String::from("a"))));
@@ -144,5 +158,41 @@ mod tests {
         assert!(pairs.contains(&(String::from("max_age"), String::from("60"))));
         assert!(pairs.contains(&(String::from("ui_locales"), String::from("nl en"))));
         assert_eq!(1, pairs.iter().filter(|(name, _)| name == "prompt").count());
+        assert!(!pairs.iter().any(|(name, _)| name == "acr_values"));
+    }
+
+    #[test]
+    fn the_upstream_request_asks_for_the_provider_s_values_at_the_level_needed() {
+        use ferrohealth_smart::assurance::AssuranceLevel;
+        let section = crate::assurance::AssuranceSection {
+            levels: std::collections::BTreeMap::from([
+                (String::from("urn:idp:password"), AssuranceLevel::Low),
+                (String::from("urn:idp:app"), AssuranceLevel::Substantial),
+                (String::from("urn:idp:wallet"), AssuranceLevel::High),
+            ]),
+            minimum: None,
+        };
+        let assurance =
+            Assurance::resolve(&section, crate::assurance::Floor::Substantial).expect("resolves");
+        let asked = |query: &str| {
+            let asking = read_query(query).expect("taken");
+            upstream(
+                Url::parse("https://idp.example.org/authorize").expect("a URL"),
+                &asking,
+                &assurance,
+            )
+            .query_pairs()
+            .find(|(name, _)| name == "acr_values")
+            .map(|(_, value)| value.into_owned())
+        };
+        assert_eq!(Some(String::from("urn:idp:app urn:idp:wallet")), asked(""));
+        assert_eq!(
+            Some(String::from("urn:idp:wallet")),
+            asked("acr_values=http%3A%2F%2Feidas.europa.eu%2FLoA%2Fhigh")
+        );
+        assert_eq!(
+            Some(String::from("urn:idp:app urn:idp:wallet")),
+            asked("acr_values=urn%3Aother")
+        );
     }
 }

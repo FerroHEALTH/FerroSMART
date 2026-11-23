@@ -9,24 +9,29 @@
 //! migrate once. No specification governs the storage: our own design.
 
 pub mod admin;
-pub mod approval;
 pub mod audit;
 pub mod authorization;
 pub mod consent;
+pub mod first_party;
 pub mod grant;
 pub mod launch;
 pub mod logout;
+pub mod pushed;
+pub mod recent;
+pub mod signing;
+pub mod subjects;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use ferrohealth_smart::assurance::AssuranceLevel;
 use secrecy::ExposeSecret as _;
 use serde_json::Value;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Postgres, Row as _};
 use url::Url;
 
-use crate::clients::{About, Approval, Client, ClientKeys, ClientKind, GrantType, SecretHash};
+use crate::clients::{About, AuthMethod, Client, ClientKeys, GrantType, Registration, SecretHash};
 use crate::launch::context::Context;
 
 /// How long a request waits for a connection before the store answers that
@@ -62,6 +67,12 @@ pub enum StoreError {
     /// An audited write was to commit without its audit record.
     #[error("an audited write has no audit record")]
     Unrecorded,
+    /// A signing key's row holds a state the server never writes.
+    #[error("the signing key `{kid}` holds a state the server never writes")]
+    CorruptKey {
+        /// The key's `kid`.
+        kid: String,
+    },
     /// A stored row holds a value the server never writes.
     #[error("the stored row `{client_id}` holds a value the server never writes")]
     Corrupt {
@@ -124,47 +135,6 @@ impl Store {
     pub async fn migrate(&self) -> Result<(), StoreError> {
         sqlx::migrate!("./migrations").run(&self.pool).await?;
         Ok(())
-    }
-
-    /// Seeds the registry with the clients the configuration registers, in
-    /// one transaction, and returns the ids of those it left alone.
-    ///
-    /// A configured client is written unless the admin API created or
-    /// changed it, which makes the store its source (`docs/architecture.md`
-    /// §13.8); a client the configuration wrote and no longer lists is
-    /// removed.
-    ///
-    /// # Errors
-    /// Returns [`StoreError::Database`] when a statement fails; nothing is
-    /// changed then.
-    pub async fn register(&self, clients: &[Client]) -> Result<Vec<String>, StoreError> {
-        let mut tx = self.pool.begin().await?;
-        let ids: Vec<&str> = clients
-            .iter()
-            .map(|client| client.client_id.as_str())
-            .collect();
-        sqlx::query("DELETE FROM client WHERE source = 'config' AND NOT (client_id = ANY($1))")
-            .bind(&ids)
-            .execute(&mut *tx)
-            .await?;
-        // A launch URL may move between clients in one change; each is unique
-        // again once every client is written.
-        sqlx::query("UPDATE client SET launch_uri = NULL WHERE source = 'config'")
-            .execute(&mut *tx)
-            .await?;
-        let managed: Vec<String> = sqlx::query_scalar(
-            "SELECT client_id FROM client WHERE source = 'admin' AND client_id = ANY($1) ORDER BY client_id",
-        )
-        .bind(&ids)
-        .fetch_all(&mut *tx)
-        .await?;
-        for client in clients {
-            if !managed.contains(&client.client_id) {
-                upsert(&mut tx, client).await?;
-            }
-        }
-        tx.commit().await?;
-        Ok(managed)
     }
 
     /// Returns the client registered as `client_id`.
@@ -266,8 +236,8 @@ impl Store {
     }
 
     /// Deletes the assertion ids, the SAML assertion ids, the access and
-    /// refresh tokens and the launches past their expiry, and the grants an
-    /// hour old with no token left.
+    /// refresh tokens, the launches and the pushed requests past their
+    /// expiry, and the grants an hour old with no token left.
     ///
     /// # Errors
     /// Returns [`StoreError::Database`] when a statement fails.
@@ -303,6 +273,9 @@ impl Store {
             .execute(&self.pool)
             .await?;
         sqlx::query("DELETE FROM launch WHERE expires_at < now()")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM pushed_request WHERE expires_at < now()")
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -373,40 +346,50 @@ enum ClientKey {
     LaunchUri,
 }
 
-/// Where a client's row came from: the configuration, which writes it at
-/// every start, or the admin API, which makes the store its source.
+/// Who registered a client: an administrator, or the app itself (RFC 7591
+/// §5 keeps its metadata self-asserted).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Source {
-    /// A `[[ferrosmart.client]]` table.
-    Config,
-    /// The admin API.
+pub enum RegisteredBy {
+    /// An administrator, through the admin API or `ferrosmart client apply`.
     Admin,
+    /// The app's own registration (RFC 7591).
+    Itself,
 }
 
-impl Source {
-    /// Returns the source as the store writes it.
+impl RegisteredBy {
+    /// Returns the value the store writes.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Config => "config",
             Self::Admin => "admin",
+            Self::Itself => "self",
+        }
+    }
+
+    /// Returns who the store wrote as `text`.
+    pub(crate) fn parse(text: &str) -> Option<Self> {
+        match text {
+            "admin" => Some(Self::Admin),
+            "self" => Some(Self::Itself),
+            _ => None,
+        }
+    }
+
+    /// Returns who registered `client`.
+    #[must_use]
+    pub const fn of(client: &Client) -> Self {
+        if client.registered_itself() {
+            Self::Itself
+        } else {
+            Self::Admin
         }
     }
 }
 
-/// Writes `client` as a configured client.
-async fn upsert(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    client: &Client,
-) -> Result<(), StoreError> {
-    write_client(tx, client, Source::Config).await
-}
-
-/// Writes `client`, from `source`, over any row of its id.
+/// Writes `client` over any row of its id.
 pub(crate) async fn write_client(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     client: &Client,
-    source: Source,
 ) -> Result<(), StoreError> {
     let (jwks_uri, jwks) = match &client.keys {
         Some(ClientKeys::Uri(url)) => (Some(url.as_str().to_owned()), None),
@@ -419,20 +402,23 @@ pub(crate) async fn write_client(
         .map(|grant| grant.as_str())
         .collect();
     sqlx::query(
-        "INSERT INTO client (client_id, name, kind, jwks_uri, jwks, redirect_uris, scopes, grant_types, secret_hash, \
-         launch_uri, approved_scope, approved_by, approved_at, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
-         post_logout_redirect_uris, upstreams, source, resources) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, to_timestamp($13), $14, $15, $16, $17, $18, $19, \
-         $20, $21, $22) \
-         ON CONFLICT (client_id) DO UPDATE SET name = $2, kind = $3, jwks_uri = $4, jwks = $5, \
-         redirect_uris = $6, scopes = $7, grant_types = $8, secret_hash = $9, launch_uri = $10, \
-         approved_scope = $11, approved_by = $12, approved_at = to_timestamp($13), first_party = $14, \
-         client_uri = $15, logo_uri = $16, policy_uri = $17, tos_uri = $18, post_logout_redirect_uris = $19, upstreams = $20, \
-         source = $21, resources = $22, updated_at = now()",
+        "INSERT INTO client (client_id, client_name, token_endpoint_auth_method, jwks_uri, jwks, redirect_uris, scope, grant_types, secret_hash, \
+         launch_uri, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
+         post_logout_redirect_uris, upstreams, registered_by, resources, default_acr_values, \
+         require_pushed_authorization_requests, dpop_bound_access_tokens, \
+         tls_client_certificate_bound_access_tokens) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, \
+         $22, $23) \
+         ON CONFLICT (client_id) DO UPDATE SET client_name = $2, token_endpoint_auth_method = $3, jwks_uri = $4, jwks = $5, \
+         redirect_uris = $6, scope = $7, grant_types = $8, secret_hash = $9, launch_uri = $10, first_party = $11, \
+         client_uri = $12, logo_uri = $13, policy_uri = $14, tos_uri = $15, post_logout_redirect_uris = $16, upstreams = $17, \
+         registered_by = $18, resources = $19, default_acr_values = $20, \
+         require_pushed_authorization_requests = $21, dpop_bound_access_tokens = $22, \
+         tls_client_certificate_bound_access_tokens = $23, updated_at = now()",
     )
     .bind(&client.client_id)
     .bind(&client.name)
-    .bind(client.kind.as_str())
+    .bind(client.auth_method.as_str())
     .bind(jwks_uri)
     .bind(jwks)
     .bind(&client.redirect_uris)
@@ -440,27 +426,29 @@ pub(crate) async fn write_client(
     .bind(&grants)
     .bind(client.secret_hash.as_ref().map(SecretHash::phc))
     .bind(&client.launch_uri)
-    .bind(client.approval.as_ref().map(|approval| &approval.scopes))
-    .bind(client.approval.as_ref().map(|approval| &approval.approved_by))
-    .bind(client.approval.as_ref().map(|approval| approval.approved_at))
-    .bind(client.approval.as_ref().is_some_and(|approval| approval.first_party))
+    .bind(client.first_party())
     .bind(client.about.home.as_ref().map(Url::as_str))
     .bind(client.about.logo.as_ref().map(Url::as_str))
     .bind(client.about.policy.as_ref().map(Url::as_str))
     .bind(client.about.terms.as_ref().map(Url::as_str))
     .bind(&client.post_logout_redirect_uris)
     .bind(&client.upstreams)
-    .bind(source.as_str())
+    .bind(RegisteredBy::of(client).as_str())
     .bind(&client.resources)
+    .bind(&client.default_acr_values)
+    .bind(client.require_pushed_authorization_requests)
+    .bind(client.dpop_bound_access_tokens)
+    .bind(client.tls_client_certificate_bound_access_tokens)
     .execute(&mut **tx)
     .await?;
     Ok(())
 }
 
 /// The columns [`read_client`] reads.
-pub(crate) const CLIENT_COLUMNS: &str = "client_id, name, kind, jwks_uri, jwks, secret_hash, redirect_uris, \
-     post_logout_redirect_uris, upstreams, resources, scopes, grant_types, launch_uri, approved_scope, approved_by, \
-     extract(epoch FROM approved_at)::bigint AS approved_at, first_party, client_uri, logo_uri, policy_uri, tos_uri";
+pub(crate) const CLIENT_COLUMNS: &str = "client_id, client_name, token_endpoint_auth_method, jwks_uri, jwks, secret_hash, redirect_uris, \
+     post_logout_redirect_uris, upstreams, resources, scope, grant_types, launch_uri, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
+     default_acr_values, registered_by, require_pushed_authorization_requests, dpop_bound_access_tokens, \
+     tls_client_certificate_bound_access_tokens";
 
 /// Reads a `client` row.
 pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreError> {
@@ -468,12 +456,8 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
     let corrupt = || StoreError::Corrupt {
         client_id: client_id.clone(),
     };
-    let kind = match row.try_get::<String, _>("kind")?.as_str() {
-        "public" => ClientKind::Public,
-        "confidential_asymmetric" => ClientKind::ConfidentialAsymmetric,
-        "confidential_symmetric" => ClientKind::ConfidentialSymmetric,
-        _ => return Err(corrupt()),
-    };
+    let auth_method = AuthMethod::parse(&row.try_get::<String, _>("token_endpoint_auth_method")?)
+        .ok_or_else(corrupt)?;
     let secret_hash = row
         .try_get::<Option<String>, _>("secret_hash")?
         .map(SecretHash::from);
@@ -493,42 +477,45 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
             "authorization_code" => Ok(GrantType::AuthorizationCode),
             "client_credentials" => Ok(GrantType::ClientCredentials),
             "refresh_token" => Ok(GrantType::RefreshToken),
+            crate::token::exchange::TOKEN_EXCHANGE => Ok(GrantType::TokenExchange),
             _ => Err(corrupt()),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let approval = match (
-        row.try_get::<Option<Vec<String>>, _>("approved_scope")?,
-        row.try_get::<Option<String>, _>("approved_by")?,
-        row.try_get::<Option<i64>, _>("approved_at")?,
-    ) {
-        (Some(scopes), Some(approved_by), Some(approved_at)) => Some(Approval {
-            scopes,
-            approved_by,
-            approved_at,
-            first_party: row.try_get("first_party")?,
-        }),
-        (None, None, None) => None,
-        _ => return Err(corrupt()),
+    let registered_by =
+        RegisteredBy::parse(&row.try_get::<String, _>("registered_by")?).ok_or_else(corrupt)?;
+    let first_party: bool = row.try_get("first_party")?;
+    // NOTE: RFC 7591 §5, an app's own registration is self-asserted, so a row of
+    // one that holds the first-party mark is refused.
+    let registration = match registered_by {
+        RegisteredBy::Itself if first_party => return Err(corrupt()),
+        RegisteredBy::Itself => Registration::Dynamic,
+        RegisteredBy::Admin => Registration::Administered { first_party },
     };
     Ok(Client {
-        name: row.try_get("name")?,
-        kind,
+        name: row.try_get("client_name")?,
+        auth_method,
         keys,
         secret_hash,
         redirect_uris: row.try_get("redirect_uris")?,
         post_logout_redirect_uris: row.try_get("post_logout_redirect_uris")?,
         upstreams: row.try_get("upstreams")?,
+        default_acr_values: row.try_get("default_acr_values")?,
         resources: row.try_get("resources")?,
-        scopes: row.try_get("scopes")?,
+        scopes: row.try_get("scope")?,
         grant_types,
         launch_uri: row.try_get("launch_uri")?,
-        approval,
+        registration,
         about: About {
             home: read_url(row, "client_uri", &corrupt)?,
             logo: read_url(row, "logo_uri", &corrupt)?,
             policy: read_url(row, "policy_uri", &corrupt)?,
             terms: read_url(row, "tos_uri", &corrupt)?,
         },
+        require_pushed_authorization_requests: row
+            .try_get("require_pushed_authorization_requests")?,
+        dpop_bound_access_tokens: row.try_get("dpop_bound_access_tokens")?,
+        tls_client_certificate_bound_access_tokens: row
+            .try_get("tls_client_certificate_bound_access_tokens")?,
         client_id,
     })
 }
@@ -541,6 +528,17 @@ fn read_url(
 ) -> Result<Option<Url>, StoreError> {
     row.try_get::<Option<String>, _>(column)?
         .map(|url| url.parse().map_err(|_unparsed| corrupt()))
+        .transpose()
+}
+
+/// Reads the eIDAS level in `column` of `row`.
+pub(crate) fn read_level(
+    row: &sqlx::postgres::PgRow,
+    column: &str,
+    corrupt: &dyn Fn() -> StoreError,
+) -> Result<Option<AssuranceLevel>, StoreError> {
+    row.try_get::<Option<String>, _>(column)?
+        .map(|level| crate::assurance::parse(&level).ok_or_else(corrupt))
         .transpose()
 }
 
@@ -625,6 +623,8 @@ pub struct Pending {
     /// The code of the purpose of use a professional chose on the patient
     /// picker of an openEHR base, once a lookup declared it.
     pub purpose_of_use: Option<String>,
+    /// The eIDAS level the person's login reached, once they logged in.
+    pub acr: Option<AssuranceLevel>,
     /// What the app asked of the login under OpenID Connect Core 1.0
     /// §3.1.2.1.
     pub asking: Asking,
@@ -645,6 +645,9 @@ pub struct Asking {
     /// Whether the upstream login was begun again because its
     /// authentication was older than `max_age`.
     pub reauthenticated: bool,
+    /// The eIDAS level the login must reach for the request: the lowest the
+    /// app's `acr_values` names, raised to the client's minimum.
+    pub acr: Option<AssuranceLevel>,
 }
 
 /// The `prompt` values of an authorization request FerroSMART acts on
@@ -655,7 +658,7 @@ pub struct Prompt {
     /// again.
     pub login: bool,
     /// `consent`: the consent page is shown even when a remembered consent
-    /// or an approval would answer.
+    /// or the registration would answer.
     pub consent: bool,
     /// `select_account`: the upstream login offers its accounts.
     pub select_account: bool,
@@ -799,6 +802,8 @@ pub struct Login {
     pub roles: Vec<String>,
     /// The upstream ID Token's standard claims.
     pub person_claims: PersonClaims,
+    /// The eIDAS level the login reached.
+    pub acr: Option<AssuranceLevel>,
 }
 
 /// An authorization code's grant.
@@ -833,15 +838,17 @@ pub struct Code {
     pub upstream_session: Option<String>,
     /// The launch context of an EHR launch.
     pub launch_context: Option<Context>,
-    /// The time of the organisation approval the code was issued on, in
-    /// seconds since the epoch, when the person saw no consent page.
-    pub approved_at: Option<i64>,
+    /// What the consent rests on: `page`, `remembered`, `administrative` or
+    /// `first-party` (`docs/architecture.md` §13.6 item 6).
+    pub basis: Option<String>,
     /// The roles of the person, mapped from the upstream identity provider
     /// (`docs/architecture.md` §13.6 item 5), which the access token's
     /// `roles` claim carries (RFC 9068 §2.2.3.1).
     pub roles: Vec<String>,
     /// The upstream ID Token's standard claims.
     pub person_claims: PersonClaims,
+    /// The eIDAS level the login reached.
+    pub acr: Option<AssuranceLevel>,
 }
 
 /// Inserts the access token `token` through `executor`, a pool or a

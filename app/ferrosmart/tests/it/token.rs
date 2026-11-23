@@ -73,19 +73,17 @@ impl Server {
             .expect("a client key");
         let registration = jwks_uri.map_or_else(
             || {
-                let set = keys.dir.path().join("client-jwks.json");
-                std::fs::write(&set, json!({"keys": [key.public_jwk()]}).to_string())
-                    .expect("written");
-                format!("jwks_file = {:?}", set.display().to_string())
+                let set = crate::support::inline(&json!({"keys": [key.public_jwk()]}));
+                format!("jwks = {set}")
             },
             |uri| format!("jwks_uri = {uri:?}"),
         );
         let database = Database::create().await;
         let text = format!(
             "[ferrosmart]\nissuer = {ISSUER:?}\n{extra}\n[ferrosmart.database]\nurl = {:?}\n\
-             [[ferrosmart.client]]\nclient_id = \"export\"\nkind = \"confidential_asymmetric\"\n{registration}\n\
-             scopes = [\"system/Patient.rs\", \"system/Observation.rs\", \"system/AuditEvent.rs\"]\ngrant_types = [\"client_credentials\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"app\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"export\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\n{registration}\n\
+             scope = [\"system/Patient.rs\", \"system/Observation.rs\", \"system/AuditEvent.rs\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"app\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://app.example.org/callback\"]\ngrant_types = [\"authorization_code\"]",
             secrecy::ExposeSecret::expose_secret(&database.url)
         );
@@ -96,9 +94,14 @@ impl Server {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let audit = audit(&settings);
-        let app = router(Arc::new(AppState::new(settings, store.clone(), audit)));
+        let state = Arc::new(AppState::new(settings, store.clone(), audit));
+        crate::support::apply(
+            &state,
+            &crate::support::clients(&crate::support::reach_every_base(&text)),
+        )
+        .await;
+        let app = router(state);
         Self {
             app,
             key,
@@ -331,11 +334,11 @@ async fn a_backend_services_token_is_read_under_the_ferrosmart_preset() {
     assert_eq!(StatusCode::OK, status, "{body}");
     let token = body["access_token"].as_str().expect("a token");
     let jwks = server.post_get_jwks().await;
-    let caller = crate::support::read_under_preset(
+    let caller = crate::support::read_at_resource_server(
         &jwks,
         ISSUER,
         RESOURCE,
-        ferrohealth_smart::kind::IssuerKind::Machines,
+        ferrohealth_smart::kind::IssuerKind::Smart,
         &ferrohealth_smart::profile::ProfileKeys::default(),
         token,
     )
@@ -346,11 +349,11 @@ async fn a_backend_services_token_is_read_under_the_ferrosmart_preset() {
     assert_eq!(Some("export"), caller.client_id());
     assert_eq!(&[String::from("system/Observation.rs")], caller.scope());
     // NOTE: RFC 9068 §4, a token for another resource server is refused.
-    let elsewhere = crate::support::read_under_preset(
+    let elsewhere = crate::support::read_at_resource_server(
         &jwks,
         ISSUER,
         "https://other.example.org/fhir",
-        ferrohealth_smart::kind::IssuerKind::Machines,
+        ferrohealth_smart::kind::IssuerKind::Smart,
         &ferrohealth_smart::profile::ProfileKeys::default(),
         token,
     )
@@ -358,12 +361,12 @@ async fn a_backend_services_token_is_read_under_the_ferrosmart_preset() {
     assert!(elsewhere.is_err(), "another audience");
     // NOTE: RFC 9068 §2.2, under the one `persons` table of docs/architecture.md
     // §13.21 an app-only token (`sub` is `client_id`) reads as the system too.
-    let one_table = crate::support::read_under_preset(
+    let one_table = crate::support::read_at_resource_server(
         &jwks,
         ISSUER,
         RESOURCE,
-        ferrohealth_smart::kind::IssuerKind::Persons,
-        &crate::support::one_table("app"),
+        ferrohealth_smart::kind::IssuerKind::Smart,
+        &ferrohealth_smart::profile::ProfileKeys::default(),
         token,
     )
     .await
@@ -799,7 +802,12 @@ async fn an_operator_reads_the_records_with_its_own_token_by_time() {
             .and_then(|v| v.to_str().ok())
     );
     assert_eq!(json!("searchset"), bundle["type"]);
-    let entries = bundle["entry"].as_array().expect("entries");
+    let entries: Vec<&Value> = bundle["entry"]
+        .as_array()
+        .expect("entries")
+        .iter()
+        .filter(|entry| !crate::support::applied(&entry["resource"]))
+        .collect();
     assert_eq!(2, entries.len(), "both token requests");
     assert_eq!(json!("AuditEvent"), entries[0]["resource"]["resourceType"]);
     let (_, _, later) = server

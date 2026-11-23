@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 //! The defaults of one `[auth.issuer.<name>]` table and of its
-//! `[auth.issuer.introspection]` table, the profile keys it sets over its
-//! preset, and the rules one table is checked against when `[auth]`
-//! resolves.
+//! `[auth.issuer.introspection]` table, and the rules one table is checked
+//! against when `[auth]` resolves.
 
 use jsonwebtoken::Algorithm;
 
@@ -12,10 +11,7 @@ use crate::config::AuthMode;
 use crate::config::ConfigError;
 use crate::config::IntrospectionSection;
 use crate::config::IssuerEntry;
-use crate::federation::FederationSection;
 use crate::kind::IssuerKind;
-use crate::profile::Preset;
-use crate::profile::ProfileFile;
 use crate::profile::ProfileKeys;
 use crate::sender::SenderConstraint;
 use ferrohealth_config::units::Duration;
@@ -25,7 +21,6 @@ impl Default for IssuerEntry {
         Self {
             issuer: ferrohealth_secret::secret_url::SecretUrl::default(),
             kind: None,
-            preset: Preset::Rfc9068,
             audience: Vec::new(),
             algorithms: vec![
                 Algorithm::RS256,
@@ -42,14 +37,12 @@ impl Default for IssuerEntry {
             timeout: Duration::from_secs(10),
             mode: AuthMode::Jwt,
             introspection: None,
-            scopeless_subjects: Vec::new(),
             federation: None,
             attributes: None,
             party: None,
             assurance: None,
             sender_constraint: SenderConstraint::None,
             role_claims: None,
-            profile_file: None,
             profile: ProfileKeys::default(),
         }
     }
@@ -67,61 +60,9 @@ impl Default for IntrospectionSection {
     }
 }
 
-impl IssuerEntry {
-    /// Returns the profile file this table names, read; `None` when it
-    /// names none.
-    ///
-    /// # Errors
-    ///
-    /// [`ConfigError::Issuer`] when the file cannot be read or is no
-    /// profile.
-    pub fn profile_file(&self) -> Result<Option<ProfileFile>, ConfigError> {
-        self.profile_file
-            .as_deref()
-            .map(ProfileFile::read)
-            .transpose()
-            .map_err(|source| ConfigError::Issuer {
-                issuer: crate::config::shown(&self.issuer),
-                source: Box::new(source.into()),
-            })
-    }
-}
-
-/// Returns the federation table `table` of the issuer `issuer` set over the
-/// federation defaults of its profile `file`, set over those of `preset`,
-/// naming that issuer; none when no layer declares one.
-pub(super) fn federation_over(
-    preset: Preset,
-    file: Option<&ProfileFile>,
-    table: Option<FederationSection>,
-    issuer: &ferrohealth_secret::secret_url::SecretUrl,
-) -> Result<Option<FederationSection>, crate::profile::ProfileError> {
-    let defaults = over(
-        file.and_then(|file| file.federation.clone()),
-        preset.federation()?,
-    );
-    Ok(over(table, defaults).map(|table| FederationSection {
-        issuer: issuer.clone(),
-        ..table
-    }))
-}
-
-/// Returns the federation table `upper` set over `lower`, either alone when
-/// the other is absent.
-fn over(
-    upper: Option<FederationSection>,
-    lower: Option<FederationSection>,
-) -> Option<FederationSection> {
-    match (upper, lower) {
-        (Some(upper), Some(lower)) => Some(upper.over(lower)),
-        (upper, None) => upper,
-        (None, lower) => lower,
-    }
-}
-
-/// Checks the issuer-level rules of `entry` and returns its kind, its own,
-/// its profile file's or its preset's: an identifier, a kind, and no `federation` issuer in this
-/// build.
+/// Checks the issuer-level rules of `entry` and returns its kind: an
+/// identifier without userinfo, a key set file with no secret, and an
+/// introspection table under `mode = "introspection"` alone.
 pub(super) fn check_entry(entry: &IssuerEntry) -> Result<IssuerKind, ConfigError> {
     if entry.issuer.is_empty() {
         return Err(ConfigError::Missing { key: "auth.issuer" });
@@ -138,14 +79,7 @@ pub(super) fn check_entry(entry: &IssuerEntry) -> Result<IssuerKind, ConfigError
     if !entry.jwks_file.is_empty() {
         check_jwks_file(entry)?;
     }
-    let preset = entry.preset.kind().map_err(|source| ConfigError::Issuer {
-        issuer: crate::config::shown(&entry.issuer),
-        source: Box::new(source.into()),
-    })?;
-    let file = entry.profile_file()?.and_then(|file| file.kind);
-    let kind = entry.kind.or(file).or(preset).ok_or(ConfigError::Missing {
-        key: "auth.issuer.kind",
-    })?;
+    let kind = entry.kind.unwrap_or_default();
     if entry.mode == AuthMode::Jwt && entry.introspection.is_some() {
         return Err(ConfigError::Exclusive {
             left: "auth.issuer.introspection",

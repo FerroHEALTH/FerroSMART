@@ -244,15 +244,12 @@ pub enum Event {
     ConsentRemembered,
     /// A remembered consent withdrawn, with the tokens it covered.
     ConsentWithdrawn,
-    /// A code issued with no consent page, on the client's organisation
-    /// approval (`docs/architecture.md` §13.6 item 6).
-    ConsentApproved,
-    /// A code issued with no consent page, on the organisation approval of
-    /// its own (first-party) app (`docs/architecture.md` §13.6 item 6).
+    /// A code issued to a professional with no consent page, on the
+    /// administrator's registration (`docs/architecture.md` §13.6 item 6).
+    ConsentAdministrative,
+    /// A code issued with no consent page for a first-party app
+    /// (`docs/architecture.md` §13.6 item 6).
     ConsentFirstParty,
-    /// A client's organisation approval withdrawn, with the grants issued
-    /// on it.
-    ApprovalWithdrawn,
     /// An access token revoked at `/revoke` (RFC 7009).
     TokenRevoked,
     /// A grant revoked at `/revoke` by its refresh token (RFC 7009 §2.1).
@@ -293,8 +290,13 @@ pub enum Event {
     /// A client disabled through the admin API, with every grant and token
     /// it held.
     ClientDisabled,
+    /// A client deleted at its RFC 7592 registration endpoint.
+    ClientDeleted,
     /// A disabled client enabled through the admin API.
     ClientEnabled,
+    /// A person's recent patients forgotten at the management page
+    /// (`docs/architecture.md` §13.6 item 4).
+    RecentForgotten,
 }
 
 impl Event {
@@ -306,9 +308,8 @@ impl Event {
             Self::CodeIssued => "authorization-code",
             Self::ConsentRemembered => "consent-remembered",
             Self::ConsentWithdrawn => "consent-withdrawn",
-            Self::ConsentApproved => "consent-organisation-approved",
-            Self::ConsentFirstParty => "consent-first-party-approved",
-            Self::ApprovalWithdrawn => "organisation-approval-withdrawn",
+            Self::ConsentAdministrative => "consent-administrative",
+            Self::ConsentFirstParty => "consent-first-party",
             Self::TokenRevoked => "token-revoked",
             Self::GrantRevoked => "grant-revoked",
             Self::RefreshRotated => "refresh-rotated",
@@ -324,7 +325,9 @@ impl Event {
             Self::ClientCreated => "client-created",
             Self::ClientUpdated => "client-updated",
             Self::ClientDisabled => "client-disabled",
+            Self::ClientDeleted => "client-deleted",
             Self::ClientEnabled => "client-enabled",
+            Self::RecentForgotten => "recent-patients-forgotten",
         }
     }
 
@@ -343,9 +346,8 @@ impl Event {
             Self::CodeIssued => "Authorization code issued",
             Self::ConsentRemembered => "Consent remembered",
             Self::ConsentWithdrawn => "Consent withdrawn",
-            Self::ConsentApproved => "Consent by organisation approval",
-            Self::ConsentFirstParty => "Consent by first-party approval",
-            Self::ApprovalWithdrawn => "Organisation approval withdrawn",
+            Self::ConsentAdministrative => "Consent by the administrator's registration",
+            Self::ConsentFirstParty => "Consent by first-party registration",
             Self::TokenRevoked => "Access token revoked",
             Self::GrantRevoked => "Grant revoked",
             Self::RefreshRotated => "Refresh token rotated",
@@ -361,7 +363,9 @@ impl Event {
             Self::ClientCreated => "Client registered",
             Self::ClientUpdated => "Client changed",
             Self::ClientDisabled => "Client disabled",
+            Self::ClientDeleted => "Client deleted",
             Self::ClientEnabled => "Client enabled",
+            Self::RecentForgotten => "Recent patients forgotten",
         }
     }
 
@@ -379,17 +383,19 @@ impl Event {
             Self::RefreshRotated | Self::RefreshRepeated | Self::LaunchRedeemed => {
                 (USER_AUTHENTICATION, vec![own], "E")
             }
-            Self::ConsentRemembered | Self::ConsentApproved | Self::ConsentFirstParty => {
+            Self::ConsentRemembered | Self::ConsentAdministrative | Self::ConsentFirstParty => {
                 (SECURITY_ALERT, vec![SECURITY_ATTRIBUTES_CHANGED, own], "C")
             }
-            Self::ConsentWithdrawn | Self::ApprovalWithdrawn | Self::ClientDisabled => {
+            Self::ConsentWithdrawn | Self::ClientDisabled | Self::ClientDeleted => {
                 (SECURITY_ALERT, vec![SECURITY_ATTRIBUTES_CHANGED, own], "D")
             }
             Self::ClientCreated => (SECURITY_ALERT, vec![SECURITY_ATTRIBUTES_CHANGED, own], "C"),
             Self::ClientUpdated | Self::ClientEnabled => {
                 (SECURITY_ALERT, vec![SECURITY_ATTRIBUTES_CHANGED, own], "U")
             }
-            Self::TokenRevoked | Self::GrantRevoked => (SECURITY_ALERT, vec![own], "D"),
+            Self::TokenRevoked | Self::GrantRevoked | Self::RecentForgotten => {
+                (SECURITY_ALERT, vec![own], "D")
+            }
             Self::RefreshReused | Self::CodeReused | Self::LaunchRefused => {
                 (SECURITY_ALERT, vec![own], "E")
             }

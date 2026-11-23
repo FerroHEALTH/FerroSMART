@@ -448,8 +448,10 @@ async fn paired() -> (Server, String) {
             auth_time: Some(jiff::Timestamp::now().as_second()),
             access: Some(Access::Offline),
             upstream_session: None,
-            approved_at: None,
+            basis: None,
             roles: &[],
+            acr: None,
+            dpop_jkt: None,
         })
         .await
         .expect("recorded");

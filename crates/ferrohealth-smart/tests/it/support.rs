@@ -254,14 +254,10 @@ impl Issuer {
     }
 }
 
-/// Returns the settings of a `persons` issuer whose first-party client is
-/// [`CLIENT`], so a synthetic token is a person's, and which sets the launch
-/// context's patient, as an authorization server does.
+/// Returns the settings of a SMART issuer, whose tokens set the launch
+/// context's patient.
 pub(crate) fn persons(issuer: impl Into<String>, audience: impl Into<String>) -> Settings {
-    let mut settings = Settings::new(issuer, audience, IssuerKind::Persons);
-    settings.profile.first_party_clients = vec![String::from(CLIENT)];
-    settings.profile.patient_context = true;
-    settings
+    Settings::new(issuer, audience, IssuerKind::Smart)
 }
 
 /// Returns the current time in seconds.

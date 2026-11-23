@@ -45,27 +45,35 @@ defaults, in your shell or a `.env` file beside `compose.yaml`:
 | `FERROSMART_RESOURCE` | `http://localhost:8090/fhir` | The base URL of the FHIR server the tokens are for, their `aud` |
 
 Everything else goes in a configuration file in the `config` directory,
-which `FERROSMART_CONFIG` names. A Backend Services client with its JWK Set
-URL:
-
-```sh
-mkdir -p config
-cat > config/ferrosmart.toml <<'TOML'
-[[ferrosmart.client]]
-client_id = "bulk-export"
-name = "Bulk export"
-kind = "confidential_asymmetric"
-resources = ["http://localhost:8090/fhir"]
-jwks_uri = "https://export.example.org/jwks.json"
-scopes = ["system/Patient.rs", "system/Observation.rs"]
-grant_types = ["client_credentials"]
-TOML
-FERROSMART_CONFIG=/etc/ferrosmart/ferrosmart.toml docker compose up
-```
-
+which `FERROSMART_CONFIG` names (`FERROSMART_CONFIG=/etc/ferrosmart/ferrosmart.toml`).
 The environment wins over the file. `docker compose run --rm ferrosmart
 config check` prints the configuration as FerroSMART reads it, every secret
 masked. [Configuration](../configure/configuration.md) lists every key.
+
+## Add the clients
+
+Clients live in FerroSMART's database. Write each as a JSON client document
+in the `config` directory and apply it; the first is the administrator, a
+Backend Services client whose `system/admin` scope reaches the
+[admin API](../configure/admin-api.md):
+
+```sh
+cat > config/admin.json <<'JSON'
+{
+  "client_id": "admin",
+  "client_name": "Administrator",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "jwks_uri": "https://admin.example.org/jwks.json",
+  "scope": "system/admin",
+  "grant_types": ["client_credentials"]
+}
+JSON
+docker compose run --rm ferrosmart client apply /etc/ferrosmart/admin.json
+```
+
+`client apply` creates the client or replaces the one with its
+`client_id`. [Clients, roles and consent](../configure/clients.md) describes
+the document.
 
 ## Add a login
 

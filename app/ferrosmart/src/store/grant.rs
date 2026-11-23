@@ -8,6 +8,7 @@
 //! names it, so revoking the grant revokes them all in one transaction
 //! (RFC 7009 §2.1). A refresh token is stored as its SHA-256.
 
+use ferrohealth_smart::assurance::AssuranceLevel;
 use serde_json::Value;
 use sqlx::Row as _;
 
@@ -59,12 +60,17 @@ pub struct NewGrant<'a> {
     pub access: Option<Access>,
     /// The upstream session an `online_access` grant lives in.
     pub upstream_session: Option<&'a str>,
-    /// The time of the organisation approval it was given on, in seconds
-    /// since the epoch, which withdrawing the approval revokes it by.
-    pub approved_at: Option<i64>,
+    /// What its consent rests on: `page`, `remembered`, `administrative` or
+    /// `first-party`, which clearing a first-party mark revokes it by.
+    pub basis: Option<&'a str>,
     /// The person's mapped roles, which every access token issued under
     /// the grant carries (RFC 9068 §2.2.3.1).
     pub roles: &'a [String],
+    /// The eIDAS level the person's login reached.
+    pub acr: Option<AssuranceLevel>,
+    /// The `DPoP` key a public client's refresh tokens are bound to (RFC
+    /// 9449 §5).
+    pub dpop_jkt: Option<&'a str>,
 }
 
 /// What introspection reads of a grant.
@@ -88,6 +94,12 @@ pub struct GrantRecord {
     pub access: Option<Access>,
     /// The person's mapped roles.
     pub roles: Vec<String>,
+    /// When the person logged in, in seconds since the epoch.
+    pub auth_time: Option<i64>,
+    /// The eIDAS level their login reached.
+    pub acr: Option<AssuranceLevel>,
+    /// The `DPoP` key its refresh tokens are bound to (RFC 9449 §5).
+    pub dpop_jkt: Option<String>,
 }
 
 /// The outcome of redeeming a refresh token.
@@ -180,7 +192,8 @@ pub struct RefreshRecord {
 /// The grant columns a joined query reads, prefixed `g_`.
 const GRANT_COLUMNS: &str = "g.id AS g_id, g.client_id AS g_client_id, g.subject AS g_subject, \
     g.fhir_user AS g_fhir_user, g.audience AS g_audience, g.scope AS g_scope, g.context AS g_context, \
-    g.access AS g_access, g.roles AS g_roles";
+    g.access AS g_access, g.roles AS g_roles, g.auth_time AS g_auth_time, g.acr AS g_acr, \
+    g.dpop_jkt AS g_dpop_jkt";
 
 impl Store {
     /// Records the grant `grant`.
@@ -190,8 +203,8 @@ impl Store {
     pub async fn create_grant(&self, grant: &NewGrant<'_>) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO authorization_grant (id, client_id, subject, fhir_user, audience, scope, \
-             context, auth_time, access, upstream_session, roles, approved_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, to_timestamp($12))",
+             context, auth_time, access, upstream_session, roles, basis, acr, dpop_jkt) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         )
         .bind(grant.id)
         .bind(grant.client_id)
@@ -204,7 +217,9 @@ impl Store {
         .bind(grant.access.map(Access::as_str))
         .bind(grant.upstream_session)
         .bind(grant.roles)
-        .bind(grant.approved_at)
+        .bind(grant.basis)
+        .bind(grant.acr.map(AssuranceLevel::as_str))
+        .bind(grant.dpop_jkt)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -360,6 +375,11 @@ fn read_grant(row: &sqlx::postgres::PgRow) -> Result<GrantRecord, StoreError> {
         scope: row.try_get("g_scope")?,
         context,
         roles: row.try_get("g_roles")?,
+        auth_time: row.try_get("g_auth_time")?,
+        acr: crate::store::read_level(row, "g_acr", &|| StoreError::Corrupt {
+            client_id: id.clone(),
+        })?,
+        dpop_jkt: row.try_get("g_dpop_jkt")?,
         id,
     })
 }

@@ -6,6 +6,7 @@
 
 use crate::assurance::Assessment;
 use crate::federation::person::Attributes;
+use crate::kind::Actor;
 use crate::kind::CallerKind;
 use crate::party::Outcome;
 use crate::resource::Access;
@@ -23,25 +24,20 @@ impl Caller {
     /// Returns the caller of a token whose claims say so, a caller of
     /// `kind`.
     ///
-    /// `scope` is the space-delimited `scope` claim (RFC 6749 §3.3), and
-    /// `scopeless` is whether the deployment grants the subject system-wide
-    /// access when the token names no clinical scope, which holds only for
-    /// a [`CallerKind::System`] caller.
+    /// `scope` is the space-delimited `scope` claim (RFC 6749 §3.3).
     #[must_use]
     pub fn new(
         subject: String,
         client_id: Option<String>,
         scope: &str,
         patient: Option<String>,
-        scopeless: bool,
         kind: CallerKind,
     ) -> Self {
-        let scopeless = scopeless && kind == CallerKind::System;
         Self {
             subject,
             client_id,
             kind,
-            person_key: (None, None),
+            actor: None,
             assurance: Assessment::default(),
             scope: scope
                 .split(' ')
@@ -50,7 +46,6 @@ impl Caller {
                 .collect(),
             scopes: Scopes::parse(scope),
             patient,
-            scopeless,
             via: Via::Bearer,
             issuer: None,
             claims: serde_json::Map::new(),
@@ -67,8 +62,8 @@ impl Caller {
     /// configuration grants it, so the same check serves a Basic caller and
     /// a bearer caller (no specification governs this: our own design).
     ///
-    /// A Basic credential is a person's, so the caller is always a
-    /// [`CallerKind::Person`], never a [`CallerKind::System`]: a machine
+    /// A Basic credential is a user's, so the caller is always a
+    /// [`CallerKind::User`], never a [`CallerKind::System`]: a machine
     /// authenticates with the client credentials grant (RFC 6749 §4.4) and
     /// is classified from its token. A `system/` scope in `scope` is a
     /// backend service's grant (SMART App Launch 2.2.0, Scopes and Launch
@@ -80,14 +75,7 @@ impl Caller {
             .split(' ')
             .filter(|token| !crate::basic::is_system_scope(token))
             .collect();
-        let mut caller = Self::new(
-            username,
-            None,
-            &personal.join(" "),
-            None,
-            false,
-            CallerKind::Person,
-        );
+        let mut caller = Self::new(username, None, &personal.join(" "), None, CallerKind::User);
         caller.via = Via::Basic;
         caller
     }
@@ -110,34 +98,33 @@ impl Caller {
 
     /// Returns what the caller's token states under its issuer's
     /// `[auth.issuer.<name>.attributes]` table (IHE IUA §3.71.4.2.2.1.1): the
-    /// professional of a `persons` caller other than `System`, and the
-    /// purposes of use of every caller, a `System` or a `patients` caller
-    /// included.
+    /// professional of a user other than a `Patient` or a `RelatedPerson`,
+    /// and the purposes of use of every caller.
     #[must_use]
     pub fn attributes(&self) -> Option<&Attributes> {
         self.attributes.as_ref()
     }
 
-    /// Returns this caller carrying the value of its issuer profile's
-    /// person key and tenant claim.
+    /// Returns this caller carrying `actor`, the current RFC 8693 §4.1
+    /// actor its token names.
     #[must_use]
-    pub fn with_person_key(mut self, key: Option<String>, tenant: Option<String>) -> Self {
-        self.person_key = (key, tenant);
+    pub fn with_actor(mut self, actor: Actor) -> Self {
+        self.actor = Some(actor);
         self
     }
 
-    /// Returns the value of the issuer profile's person key, the stable
-    /// person identifier (`sub` by default, OpenID Connect Core 1.0 §5.7).
+    /// Returns the current RFC 8693 §4.1 actor the token names, read as the
+    /// issuer asserts it.
     #[must_use]
-    pub fn person_key(&self) -> Option<&str> {
-        self.person_key.0.as_deref()
+    pub const fn actor(&self) -> Option<&Actor> {
+        self.actor.as_ref()
     }
 
-    /// Returns the value of the issuer profile's tenant claim, when it names
-    /// one and the token carries it.
+    /// Returns the `fhirUser` claim, the user's FHIR resource (SMART App
+    /// Launch 2.2.0, Scopes for requesting identity data).
     #[must_use]
-    pub fn tenant(&self) -> Option<&str> {
-        self.person_key.1.as_deref()
+    pub fn fhir_user(&self) -> Option<&str> {
+        self.claim_text("fhirUser")
     }
 
     /// Returns who stands behind the credential.
@@ -394,24 +381,34 @@ impl Caller {
             .collect()
     }
 
-    /// Returns whether the request is the natural person's own access: the
-    /// caller is a [`CallerKind::Patient`].
+    /// Returns whether the request is the natural person's own access: a
+    /// [`CallerKind::Patient`] whose `fhirUser` is the `Patient` its
+    /// `patient` launch context names, with no actor.
     ///
     /// Regulation (EU) 2025/327 Art. 5 has information the person inserts
     /// "clearly distinguishable as having been inserted by the natural
-    /// person", and Art. 9(1) gives the person information on every access
-    /// "through the health professional access service", so only two
-    /// tokens are the person's: one of a `patients` issuer that names the
-    /// record subject alone (SMART on openEHR `master08-scopes`, the
-    /// `patient` context), and one of a `persons` issuer whose profile sets
-    /// `fhir_user_patient`, through an admitted client, whose `fhirUser` is
-    /// the `Patient` its `patient` claim names and whose scopes are
-    /// `patient/` alone. Any other `persons` token whose only clinical
-    /// scopes are `patient/` is a professional confined to its launch
-    /// context. A Basic caller never is.
+    /// person", so only the patient's own token is the person's; a
+    /// representative is a `RelatedPerson` (Art 4(2)) and an actor acts for
+    /// them (RFC 8693 §4.1). A Basic caller never is.
     #[must_use]
     pub fn is_the_person(&self) -> bool {
         self.kind == CallerKind::Patient
+            && self.actor.is_none()
+            && self.patient().is_some_and(|patient| {
+                self.fhir_user()
+                    .and_then(crate::kind::fhir_user_parts)
+                    .is_some_and(|(_, id)| id == patient)
+            })
+    }
+
+    /// Returns the patient a [`CallerKind::RelatedPerson`] represents: the
+    /// `patient` launch context of their token (Regulation (EU) 2025/327
+    /// Art 4(2)).
+    #[must_use]
+    pub fn represented(&self) -> Option<&str> {
+        (self.kind == CallerKind::RelatedPerson)
+            .then(|| self.patient())
+            .flatten()
     }
 
     /// Returns the patient the request is bound to when
@@ -446,35 +443,6 @@ impl Caller {
     #[must_use]
     pub fn issuer(&self) -> Option<&str> {
         self.issuer.as_deref()
-    }
-
-    /// Returns whether the subject is on the deployment's
-    /// `scopeless_subjects` allowlist, which grants a token that carries no
-    /// resource scope of either grammar system-wide access (no
-    /// specification governs the allowlist: our own design).
-    #[must_use]
-    pub const fn scopeless(&self) -> bool {
-        self.scopeless
-    }
-
-    /// Returns whether the allowlist admits this caller everywhere: its
-    /// subject is on it and its token carries no resource scope.
-    pub(crate) fn admitted_without_scope(&self) -> bool {
-        self.scopeless && !self.carries_resource_scope()
-    }
-
-    /// Returns whether the token carries a resource scope: a SMART on FHIR
-    /// clinical scope or, with the `openehr` feature, a SMART on openEHR
-    /// resource scope, the two grammars coexisting in one `scope` claim.
-    fn carries_resource_scope(&self) -> bool {
-        #[cfg(feature = "openehr")]
-        let openehr = self
-            .openehr_scopes()
-            .iter()
-            .any(|scope| matches!(scope, crate::openehr::smart_scopes::SmartScope::Resource(_)));
-        #[cfg(not(feature = "openehr"))]
-        let openehr = false;
-        openehr || !self.scopes.is_empty()
     }
 
     /// Returns whether the `scope` claim names `scope`, compared verbatim.
@@ -534,9 +502,6 @@ impl Caller {
         resource_type: &str,
         evaluate: Evaluator<'_>,
     ) -> Option<Compartment> {
-        if self.admitted_without_scope() {
-            return Some(Compartment::Any);
-        }
         match self
             .scopes
             .reach_with(permission, resource_type, evaluate)?
@@ -651,51 +616,41 @@ impl Access {
 
 #[cfg(test)]
 mod tests {
-    use crate::kind::CallerKind;
+    use crate::kind::{Actor, CallerKind};
     use crate::resource::{Access, Caller, Compartment, PatientClaim, PatientClaimError, Via};
     use crate::scope::Permission;
 
     #[test]
-    fn a_scopeless_token_reaches_everything_only_when_allowlisted() {
-        let allowed = Caller::new(
+    fn a_token_with_no_clinical_scope_reaches_nothing() {
+        let system = Caller::new(
             String::from("svc"),
             None,
             "openid",
             None,
-            true,
             CallerKind::System,
         );
-        assert_eq!(
-            Some(Compartment::Any),
-            allowed.reach(Permission::Create, "Condition")
-        );
-        assert!(allowed.has_scope("openid"));
-        assert!(!allowed.has_scope("open"));
-        let other = Caller::new(
-            String::from("svc"),
-            None,
-            "",
-            None,
-            false,
-            CallerKind::Person,
-        );
+        assert_eq!(None, system.reach(Permission::Create, "Condition"));
+        assert!(system.has_scope("openid"));
+        assert!(!system.has_scope("open"));
+        let other = Caller::new(String::from("svc"), None, "", None, CallerKind::Person);
         assert_eq!(None, other.reach(Permission::Read, "Condition"));
         assert_eq!(other.scope(), Vec::<String>::new());
     }
 
     #[test]
-    fn an_allowlisted_subject_with_scopes_gets_only_its_scopes() {
+    fn a_system_caller_gets_only_its_scopes() {
         let caller = Caller::new(
             String::from("svc"),
             None,
             "system/Condition.r",
             None,
-            true,
             CallerKind::System,
         );
         assert_eq!(None, caller.reach(Permission::Create, "Condition"));
-        assert!(caller.scopeless(), "the getter reads the allowlist flag");
-        assert!(!Caller::basic(String::from("etl"), "").scopeless());
+        assert_eq!(
+            Some(Compartment::Any),
+            caller.reach(Permission::Read, "Condition")
+        );
     }
 
     #[cfg(feature = "openehr")]
@@ -706,7 +661,6 @@ mod tests {
             None,
             "system/composition-*.r",
             None,
-            true,
             CallerKind::System,
         );
         assert_eq!(
@@ -723,7 +677,6 @@ mod tests {
             None,
             "patient/*.rs",
             None,
-            false,
             CallerKind::Person,
         );
         assert_eq!(None, without.reach(Permission::Read, "Condition"));
@@ -732,7 +685,6 @@ mod tests {
             None,
             "patient/*.rs",
             Some(String::from("123")),
-            false,
             CallerKind::Person,
         );
         assert_eq!(
@@ -746,14 +698,7 @@ mod tests {
         let basic = Caller::basic(String::from("scrape"), "");
         assert_eq!(Some("scrape"), basic.basic_user_in(&["feed", "scrape"]));
         assert_eq!(None, basic.basic_user_in(&["feed"]), "an unlisted user");
-        let bearer = Caller::new(
-            String::from("scrape"),
-            None,
-            "",
-            None,
-            false,
-            CallerKind::Person,
-        );
+        let bearer = Caller::new(String::from("scrape"), None, "", None, CallerKind::Person);
         assert_eq!(
             None,
             bearer.basic_user_in(&["scrape"]),
@@ -770,14 +715,7 @@ mod tests {
     fn an_extension_rides_on_the_caller_and_equality_ignores_it() {
         #[derive(Debug, Clone, PartialEq)]
         struct Policy(&'static str);
-        let plain = Caller::new(
-            String::from("svc"),
-            None,
-            "",
-            None,
-            false,
-            CallerKind::Person,
-        );
+        let plain = Caller::new(String::from("svc"), None, "", None, CallerKind::Person);
         let extended = plain.clone().with_extension(Policy("issuer-a"));
         assert_eq!(Some(&Policy("issuer-a")), extended.extension::<Policy>());
         assert_eq!(None, plain.extension::<Policy>());
@@ -793,25 +731,11 @@ mod tests {
         let mut claims = serde_json::Map::new();
         claims.insert(String::from("acr"), serde_json::json!("urn:acr:high"));
         claims.insert(String::from("auth_time"), serde_json::json!(1_700_000_000));
-        let caller = Caller::new(
-            String::from("svc"),
-            None,
-            "",
-            None,
-            false,
-            CallerKind::Person,
-        )
-        .with_claims(claims);
+        let caller = Caller::new(String::from("svc"), None, "", None, CallerKind::Person)
+            .with_claims(claims);
         assert_eq!(Some("urn:acr:high"), caller.acr());
         assert_eq!(Some(1_700_000_000), caller.auth_time());
-        let bare = Caller::new(
-            String::from("svc"),
-            None,
-            "",
-            None,
-            false,
-            CallerKind::Person,
-        );
+        let bare = Caller::new(String::from("svc"), None, "", None, CallerKind::Person);
         assert_eq!(None, bare.acr());
         assert_eq!(None, bare.auth_time());
     }
@@ -833,12 +757,12 @@ mod tests {
             claims.insert(String::from("patient_id"), serde_json::json!(value));
         }
         claims.insert(String::from("ehrId"), serde_json::json!("ehr-9"));
+        claims.insert(String::from("fhirUser"), serde_json::json!("Patient/123"));
         Caller::new(
             String::from("sub-1"),
             None,
             "patient/*.rs",
             Some(String::from("123")),
-            false,
             kind,
         )
         .with_claims(claims)
@@ -851,15 +775,47 @@ mod tests {
         for kind in [
             CallerKind::Person,
             CallerKind::System,
-            CallerKind::Delegated { actor: None },
-            CallerKind::Guest(Box::new(CallerKind::Person)),
+            CallerKind::Practitioner,
+            CallerKind::RelatedPerson,
+            CallerKind::User,
         ] {
             let caller = bearer(kind.clone(), Some("p-7"));
             assert!(!caller.is_the_person(), "{kind:?}");
             assert!(caller.person().is_none(), "{kind:?}");
         }
+        let acted = bearer(CallerKind::Patient, None).with_actor(Actor {
+            issuer: String::from("https://as.example.org"),
+            sub: String::from("actor-1"),
+        });
+        assert!(!acted.is_the_person(), "an actor acts for the patient");
+        let other = Caller::new(
+            String::from("sub-1"),
+            None,
+            "patient/*.rs",
+            Some(String::from("456")),
+            CallerKind::Patient,
+        )
+        .with_claims(
+            serde_json::json!({ "fhirUser": "Patient/123" })
+                .as_object()
+                .cloned()
+                .expect("an object"),
+        );
+        assert!(
+            !other.is_the_person(),
+            "a patient context other than the fhirUser"
+        );
         let basic = Caller::basic(String::from("etl"), "patient/Observation.rs");
         assert!(!basic.is_the_person(), "a Basic user is never the person");
+    }
+
+    // NOTE: Regulation (EU) 2025/327 Art 4(2): a representative acts for the
+    // patient in their launch context.
+    #[test]
+    fn a_related_person_represents_the_patient_in_context() {
+        let related = bearer(CallerKind::RelatedPerson, None);
+        assert_eq!(Some("123"), related.represented());
+        assert_eq!(None, bearer(CallerKind::Practitioner, None).represented());
     }
 
     #[test]
@@ -887,11 +843,10 @@ mod tests {
     }
 
     #[test]
-    fn a_basic_caller_is_a_person_and_never_a_system() {
+    fn a_basic_caller_is_a_user_and_never_a_system() {
         let caller = Caller::basic(String::from("etl"), "system/*.rs");
-        assert_eq!(&CallerKind::Person, caller.kind());
+        assert_eq!(&CallerKind::User, caller.kind());
         assert_ne!(&CallerKind::System, caller.kind());
-        assert!(!caller.scopeless(), "a Basic caller is never scopeless");
     }
 
     // NOTE: a Basic credential is a person's (owner ruling on #215), so no scope string a
@@ -924,31 +879,6 @@ mod tests {
         assert!(
             caller.has_scope("__ferro.admin"),
             "a product scope still counts"
-        );
-    }
-
-    #[test]
-    fn only_a_system_caller_is_scopeless() {
-        let system = Caller::new(
-            String::from("svc"),
-            None,
-            "",
-            None,
-            true,
-            CallerKind::System,
-        );
-        assert!(system.scopeless());
-        let person = Caller::new(
-            String::from("svc"),
-            None,
-            "",
-            None,
-            true,
-            CallerKind::Person,
-        );
-        assert!(
-            !person.scopeless(),
-            "the allowlist admits a system caller alone"
         );
     }
 

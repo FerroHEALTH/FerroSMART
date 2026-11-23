@@ -71,7 +71,8 @@ impl Store {
     ///
     /// Each app carries the scope of its newest such grant, the refresh
     /// access of its newest grant that can still refresh, and whether any
-    /// of its grants stands on the client's current organisation approval.
+    /// of its grants was issued with no page on its registration, and on its
+    /// first-party mark.
     ///
     /// # Errors
     /// Returns [`StoreError::Database`] when the query fails, or
@@ -79,13 +80,14 @@ impl Store {
     pub async fn connected_apps(&self, subject: &str) -> Result<Vec<ConnectedApp>, StoreError> {
         let rows = sqlx::query(
             "SELECT g.client_id, g.scope, g.access, \
-             (c.approved_at IS NOT NULL AND g.approved_at = c.approved_at) AS organisation, \
+             COALESCE(g.basis IN ('administrative', 'first-party'), false) AS organisation, \
+             COALESCE(g.basis = 'first-party', false) AS first_party, \
              EXISTS (SELECT 1 FROM refresh_token r WHERE r.grant_id = g.id \
                AND r.used_at IS NULL AND r.revoked_at IS NULL AND r.expires_at > now()) \
                AS refreshable, \
              EXISTS (SELECT 1 FROM access_token a WHERE a.grant_id = g.id \
                AND a.revoked_at IS NULL AND a.expires_at > now()) AS bearer \
-             FROM authorization_grant g LEFT JOIN client c ON c.client_id = g.client_id \
+             FROM authorization_grant g \
              WHERE g.subject = $1 AND g.revoked_at IS NULL \
              ORDER BY g.client_id, g.created_at DESC",
         )
@@ -110,16 +112,19 @@ impl Store {
                 None
             };
             let organisation: bool = row.try_get("organisation")?;
+            let first_party: bool = row.try_get("first_party")?;
             match apps.last_mut() {
                 Some(app) if app.client_id == client_id => {
                     app.access = app.access.or(access);
                     app.organisation |= organisation;
+                    app.first_party |= first_party;
                 }
                 _ => apps.push(ConnectedApp {
                     client_id,
                     scope: row.try_get("scope")?,
                     access,
                     organisation,
+                    first_party,
                 }),
             }
         }
@@ -137,9 +142,11 @@ pub struct ConnectedApp {
     pub scope: String,
     /// The refresh access it holds, if any.
     pub access: Option<Access>,
-    /// Whether it holds access on the client's current organisation
-    /// approval.
+    /// Whether it holds access on its registration, the organisation's
+    /// administrative consent, with no page.
     pub organisation: bool,
+    /// Whether that registration marks it first party.
+    pub first_party: bool,
 }
 
 /// What disconnecting an app from a person ended
@@ -182,8 +189,8 @@ impl Transaction {
     /// remembered for it, if any, and revokes every grant, refresh token
     /// and access token issued to the client about them, whatever basis
     /// issued it (SMART App Launch 2.2.0, Conformance,
-    /// `management_endpoint`). An organisation approval of the client is
-    /// left as it stands.
+    /// `management_endpoint`). The client's registration is left as it
+    /// stands.
     ///
     /// # Errors
     /// Returns [`StoreError::Database`] when a statement fails; nothing is

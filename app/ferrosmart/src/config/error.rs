@@ -43,29 +43,20 @@ pub enum Error {
         #[source]
         source: ferrohealth_smart::metadata::DiscoveryError,
     },
-    /// A client names a provider no `[[ferrosmart.upstream]]` entry is.
-    #[error(
-        "the client `{client_id}` names the upstream provider `{name}`, which is not configured"
-    )]
-    UnknownUpstream {
-        /// The client.
-        client_id: String,
-        /// The name.
-        name: String,
-    },
-    /// A client names a base no `[[ferrosmart.resource]]` table is.
-    #[error("the client `{client_id}` names the resource `{base}`, which is not configured")]
-    UnknownResource {
-        /// The client.
-        client_id: String,
-        /// The base.
-        base: String,
-    },
     /// An upstream provider's table breaks a rule.
     #[error("`ferrosmart.upstream`: {rule}")]
     Upstream {
         /// The rule broken.
         rule: &'static str,
+    },
+    /// An upstream provider's assurance cannot be met.
+    #[error("`ferrosmart.upstream` `{name}`")]
+    Assurance {
+        /// The provider's name.
+        name: String,
+        /// Why.
+        #[source]
+        source: crate::assurance::AssuranceError,
     },
     /// An upstream preset's compiled file does not read.
     #[error(transparent)]
@@ -88,6 +79,12 @@ pub enum Error {
     /// `[ferrosmart.brand]` breaks a rule.
     #[error(transparent)]
     Brand(#[from] crate::brands::BrandError),
+    /// `[ferrosmart.registration]` breaks a rule.
+    #[error("`ferrosmart.registration`: {rule}")]
+    Registration {
+        /// The rule broken.
+        rule: &'static str,
+    },
     /// A role table breaks a rule.
     #[error("`ferrosmart.role`: {rule}")]
     Role {
@@ -126,9 +123,6 @@ pub enum Error {
     /// A secret is set twice, or its `_file` sibling cannot be read.
     #[error(transparent)]
     Secret(#[from] ferrohealth_secret::file::SecretError),
-    /// A client table breaks a rule of the registry.
-    #[error(transparent)]
-    Client(#[from] crate::clients::ClientError),
     /// `[ferrosmart.audit.feed]` describes no client that can be built.
     #[error("`ferrosmart.audit.feed` describes no usable endpoint")]
     AuditFeed {
@@ -142,6 +136,19 @@ pub enum Error {
         /// Why.
         #[source]
         source: ihe_atna::atna::feed::FeedConfigError,
+    },
+    /// `ferrosmart.keys.private_key_files` names one key twice.
+    #[error("`ferrosmart.keys.private_key_files` names the key {kid} twice")]
+    RepeatedKey {
+        /// The key's `kid`.
+        kid: String,
+    },
+    /// The rotation period is shorter than a key stays published after it
+    /// stops signing.
+    #[error("`ferrosmart.keys.rotation_period` is at least {}s", shortest.as_secs())]
+    RotationPeriod {
+        /// The shortest period.
+        shortest: std::time::Duration,
     },
     /// The keys of the ring repeat one another.
     #[error("`ferrosmart.keys` names one key twice")]

@@ -59,6 +59,9 @@ pub struct UpstreamSection {
     /// speaks SAML 2.0 when it is present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub saml: Option<saml::SamlSection>,
+    /// `[ferrosmart.upstream.assurance]`: the eIDAS level each of the
+    /// provider's values stands for, and its minimum.
+    pub assurance: crate::assurance::AssuranceSection,
 }
 
 impl UpstreamSection {
@@ -278,6 +281,9 @@ pub struct Upstream {
     pub fhir_user_claim: Option<String>,
     /// The claims of the roles.
     pub role_claims: Vec<String>,
+    /// The eIDAS level of each of its values, and the minimum a login at it
+    /// reaches.
+    pub assurance: crate::assurance::Assurance,
     /// The protocol, with its settings.
     pub protocol: Protocol,
 }
@@ -392,6 +398,9 @@ pub struct Identity {
     /// When the person authenticated, in seconds since the epoch, when the
     /// provider says.
     pub auth_time: Option<i64>,
+    /// How they authenticated, in the provider's words: an ID Token's
+    /// `acr`, a SAML assertion's `AuthnContextClassRef`.
+    pub acr: Option<String>,
 }
 
 impl std::fmt::Debug for Identity {
@@ -422,6 +431,11 @@ impl Identity {
                 .other
                 .get("auth_time")
                 .and_then(serde_json::Value::as_i64),
+            acr: claims
+                .other
+                .get("acr")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
         }
     }
 }

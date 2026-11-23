@@ -22,9 +22,15 @@
 # `zitadel-bootstrap` once: app/ferrosmart/examples/zitadel/bootstrap.sh makes
 # the project, its role, the application, the user and the Actions v2
 # target (docs/architecture.md §13.20), and writes FerroSMART's
-# configuration with the client id ZITADEL generated. `zitadel-fhir-user` is
+# configuration with the client id ZITADEL generated and the example app's
+# client document. `zitadel-fhir-user` is
 # that target (tools/zitadel-fhir-user), built from this checkout on its first
 # start; it writes the user's `fhirUser` claim from the user's metadata.
+#
+# CLIENTS. Apply the example's public SMART app once the bootstrap ran:
+#
+#   docker compose -f compose.yaml -f compose.zitadel.yaml run --rm \
+#     ferrosmart client apply /zitadel/bootstrap/out/example-app.json
 #
 # NETWORK. FerroSMART, the Login UI, the target and the bootstrap share
 # ZITADEL's network namespace, so every party reaches the others on
