@@ -35,9 +35,9 @@ async fn a_person_s_token_is_read_at_a_resource_server() {
     .await
     .expect("admitted");
     assert_eq!(
-        &CallerKind::Practitioner,
+        &CallerKind::RelatedPerson,
         caller.kind(),
-        "the fhirUser is a Practitioner"
+        "the launch's fhirUser is a RelatedPerson"
     );
     // NOTE: RFC 9068 §2.2, `sub` is the person, and the app is `client_id`.
     assert_eq!(claims["sub"].as_str(), Some(caller.subject()));
