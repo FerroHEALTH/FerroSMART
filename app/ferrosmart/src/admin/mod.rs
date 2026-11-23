@@ -14,6 +14,7 @@
 pub mod document;
 pub mod guard;
 pub mod register;
+pub mod subjects;
 
 use std::sync::Arc;
 
@@ -23,7 +24,7 @@ use axum::extract::DefaultBodyLimit;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequestParts, Path, State};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use ferrohealth_server::run::chain;
 use ferrohealth_smart::resource::Access;
 use http::{HeaderValue, StatusCode, header};
@@ -53,6 +54,11 @@ pub fn router(state: &Arc<AppState>) -> Router<Arc<AppState>> {
         .route(DISABLE_ROUTE, post(disable))
         .route(ENABLE_ROUTE, post(enable))
         .route(KEYS_ROUTE, get(keys))
+        .route(subjects::SUBJECTS_ROUTE, get(subjects::lookup))
+        .route(subjects::GRANTS_ROUTE, get(subjects::grants))
+        .route(subjects::GRANT_ROUTE, delete(subjects::revoke))
+        .route(subjects::CONSENT_ROUTE, delete(subjects::withdraw))
+        .route(subjects::SESSIONS_ROUTE, delete(subjects::end_sessions))
         .layer(DefaultBodyLimit::max(DOCUMENT_LIMIT))
         .route_layer(guard::layer(Arc::clone(state)))
 }
@@ -111,6 +117,15 @@ pub enum AdminError {
     /// The client authenticates with no secret.
     #[error("the client `{0}` authenticates with no client secret")]
     NoSecret(String),
+    /// The query is not one the route reads.
+    #[error("{0}")]
+    Query(&'static str),
+    /// No provider is configured under the name.
+    #[error("no provider is configured as `{0}`")]
+    NoProvider(String),
+    /// The person holds no live grant under the id.
+    #[error("the person holds no live grant under the id")]
+    NoGrant,
 }
 
 impl From<StoreError> for AdminError {
@@ -131,14 +146,18 @@ impl AdminError {
     fn code(&self) -> (StatusCode, &'static str) {
         match self {
             Self::Unreadable(rejection) => (rejection.status(), "invalid_request"),
-            Self::OtherClient | Self::NoSecret(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
+            Self::OtherClient | Self::NoSecret(_) | Self::Query(_) => {
+                (StatusCode::BAD_REQUEST, "invalid_request")
+            }
             Self::Metadata(ClientError::RedirectUri { .. }) => {
                 (StatusCode::BAD_REQUEST, "invalid_redirect_uri")
             }
             Self::Metadata(_) | Self::UnknownUpstream { .. } | Self::UnknownResource { .. } => {
                 (StatusCode::BAD_REQUEST, "invalid_client_metadata")
             }
-            Self::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
+            Self::NotFound(_) | Self::NoProvider(_) | Self::NoGrant => {
+                (StatusCode::NOT_FOUND, "not_found")
+            }
             Self::Exists(_) => (StatusCode::CONFLICT, "client_exists"),
             Self::LaunchUriTaken => (StatusCode::CONFLICT, "launch_uri_taken"),
             Self::Unchanged(_) => (StatusCode::CONFLICT, "unchanged"),

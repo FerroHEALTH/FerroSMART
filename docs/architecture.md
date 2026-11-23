@@ -3282,6 +3282,7 @@ differently.
 | `GET`, `PUT`, `DELETE /register/{client_id}` | the client's configuration endpoint, with its registration access token or an administrator's token (13.27) | `rfc7592 §2` |
 | `GET /admin/clients`; `POST /admin/clients/{client_id}/disable`, `.../enable` | the registry over the store, behind a `ferrohealth-smart` guard with the `system/admin` scope, every change audited (13.27) | our own design |
 | `GET /admin/keys` | the signing key ring's public keys with their states, behind the same guard | our own design |
+| `GET /admin/subjects`; `GET /admin/subjects/{sub}/grants`; `DELETE .../grants/{grant_id}`, `.../consents/{client_id}`, `.../sessions` | a person's pairwise subject by provider and upstream `sub`, their live grants and remembered consents, and the revocation of one grant, one app's consent and grants, or their upstream sessions with the `online_access` grants in them, each committed with its record naming the admin client, behind the same guard | GDPR Art 7(3); our own design (#831) |
 | `/healthz`, `/readyz` | `ferrohealth-health` | the family |
 
 `POST /par` (RFC 9126) joins later; the metadata names it only once it

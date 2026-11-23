@@ -165,3 +165,30 @@ public JWK of each key with its state, `active` (signs), `next` (published
 ahead of the rotation that makes it sign) and `retiring` (published until
 the tokens it signed have expired). The private keys stay in the files
 `[ferrosmart.keys]` names ([keys and rotation](../operate/keys.md)).
+
+## A person's access
+
+An administrator finds a person and ends their access through the API,
+as the person can on the management page. Withdrawing is as easy as
+giving (GDPR Art 7(3)), and each change commits with its record naming
+the admin client and the person.
+
+- `GET /admin/subjects?upstream=<name>&sub=<sub>` answers the person's
+  FerroSMART `subject`: the pairwise subject of their `sub` at the
+  provider `name`, as `ferrosmart subject` prints it.
+- `GET /admin/subjects/{subject}/grants` lists their live grants, newest
+  first (`grant_id`, `client_id`, `aud`, `scope`, `basis`, `access`,
+  `issued_at` and `last_used_at`, the last token issued under it), and the
+  `consents` they remembered (`client_id`, `aud`, `scope`, `granted_at`).
+  A grant is live while a refresh token or an access token under it is.
+- `DELETE /admin/subjects/{subject}/grants/{grant_id}` revokes one grant
+  with every token under it, answering `204`; a grant that is not the
+  person's or no longer live answers `404`.
+- `DELETE /admin/subjects/{subject}/consents/{client_id}` disconnects the
+  app from the person: their remembered consent is forgotten and every
+  grant and token of the app about them is revoked. The answer counts
+  them: `{"remembered": true, "grants": 1}`.
+- `DELETE /admin/subjects/{subject}/sessions` ends every upstream login
+  the person's grants were issued in, with the `online_access` grants in
+  them, as a logout at the provider would. `offline_access` grants stay.
+  The answer counts them: `{"sessions": 1, "grants": 1}`.

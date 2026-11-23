@@ -321,7 +321,7 @@ pub struct ClientView<'a> {
     clippy::expect_used,
     reason = "every instant the registry holds is the clock's or a parsed RFC 3339 instant, both within jiff's range"
 )]
-fn instant(seconds: i64) -> String {
+pub(super) fn instant(seconds: i64) -> String {
     jiff::Timestamp::from_second(seconds)
         .expect("the instant should be one the server wrote")
         .to_string()

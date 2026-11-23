@@ -18,6 +18,7 @@ pub mod launch;
 pub mod logout;
 pub mod recent;
 pub mod signing;
+pub mod subjects;
 
 use std::collections::BTreeMap;
 use std::time::Duration;

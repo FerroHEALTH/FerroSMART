@@ -10,6 +10,7 @@
 )]
 
 mod admin;
+mod admin_subjects;
 mod audit;
 mod authorize;
 mod brands;
