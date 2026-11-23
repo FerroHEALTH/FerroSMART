@@ -108,6 +108,8 @@ pub(super) async fn token_exchange(
             audience: &base,
             scope: &scope,
             fhir_user: Some(&patient.fhir_user),
+            roles: &grant.roles,
+            login: Some(Authentication::of(grant)),
             code_hash: None,
             token_type: "Bearer",
             // NOTE: RFC 8693 §2.2.1 leaves the lifetime to the server; the token never
@@ -116,11 +118,6 @@ pub(super) async fn token_exchange(
             identity: None,
             under: Some(&grant.id),
             context: &context,
-            roles: &grant.roles,
-            login: Some(Authentication {
-                auth_time: grant.auth_time,
-                acr: grant.acr,
-            }),
         },
     )?;
     tracing::info!(

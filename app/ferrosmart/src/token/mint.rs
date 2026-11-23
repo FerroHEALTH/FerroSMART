@@ -67,6 +67,16 @@ pub(crate) struct Authentication {
     pub(crate) acr: Option<AssuranceLevel>,
 }
 
+impl Authentication {
+    /// Returns the login `grant` was given on.
+    pub(crate) const fn of(grant: &crate::store::grant::GrantRecord) -> Self {
+        Self {
+            auth_time: grant.auth_time,
+            acr: grant.acr,
+        }
+    }
+}
+
 /// What an access token grants, and what else the token response carries.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Grant<'a> {
