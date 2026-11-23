@@ -160,15 +160,20 @@ fn wallet_of<'a>(state: &'a AppState, pending: &Pending) -> Option<&'a LoginProv
 }
 
 /// Returns the payload of the encrypted response `sealed` to the request
-/// `pending`, once it names that request's `state`.
-fn opened(pending: &Pending, sealed: &str) -> Result<Value, Refusal> {
+/// `pending`, encrypted to the request's key (OpenID4VP 1.0 §8.3).
+fn decrypted(pending: &Pending, sealed: &str) -> Result<Value, Refusal> {
     let key = EphemeralKey::from_stored(&pending.upstream_verifier)
         .map_err(|_unread| Refusal::MalformedResponse)?;
     let plain = key
         .decrypt(sealed, &pending.upstream_state)
         .map_err(|_unopened| Refusal::MalformedResponse)?;
-    let payload: Value =
-        serde_json::from_slice(&plain).map_err(|_unread| Refusal::MalformedResponse)?;
+    serde_json::from_slice(&plain).map_err(|_unread| Refusal::MalformedResponse)
+}
+
+/// Returns the payload of the encrypted response `sealed` to the request
+/// `pending`, once it names that request's `state`.
+fn opened(pending: &Pending, sealed: &str) -> Result<Value, Refusal> {
+    let payload = decrypted(pending, sealed)?;
     // NOTE: RFC 6749 §4.1.2, the response carries back the request's state.
     if payload.get("state").and_then(Value::as_str) != Some(pending.upstream_state.as_str()) {
         return Err(Refusal::MalformedResponse);
@@ -307,14 +312,22 @@ fn back(state: &AppState, pairs: &[(&str, &str)]) -> Response {
 /// Records the refusal `refusal` of a presentation at `provider` and
 /// answers the wallet with a `400` naming it.
 async fn refused(state: &AppState, provider: &LoginProvider, refusal: Refusal) -> Response {
+    match record_refusal(state, provider, refusal).await {
+        Ok(()) => refusal_body(refusal),
+        Err(response) => *response,
+    }
+}
+
+/// Records the refusal `refusal` of a presentation at `provider` as a
+/// failed login naming it, or returns the page of a record not stored.
+async fn record_refusal(
+    state: &AppState,
+    provider: &LoginProvider,
+    refusal: Refusal,
+) -> Result<(), Box<Response>> {
     tracing::warn!(reason = %refusal, "a wallet presentation was refused");
     let reason = format!("the wallet presentation is refused: {refusal}");
-    if let Err(response) =
-        super::callback::record_login(state, provider.upstream(), Err(&reason)).await
-    {
-        return *response;
-    }
-    refusal_body(refusal)
+    super::callback::record_login(state, provider.upstream(), Err(&reason)).await
 }
 
 /// Returns the `400` that names `refusal` to the wallet.
@@ -347,11 +360,12 @@ fn failed(error: &(dyn std::error::Error + 'static)) -> Response {
 /// the wallet declined.
 pub async fn complete(
     State(state): State<Arc<AppState>>,
+    RawQuery(query): RawQuery,
     Connected(from): Connected,
     headers: HeaderMap,
-    RawQuery(query): RawQuery,
 ) -> Response {
-    let Ok(params) = Params::parse(query.unwrap_or_default().as_bytes(), &[]) else {
+    let query = query.unwrap_or_default();
+    let Ok(params) = Params::parse(query.as_bytes(), &[]) else {
         return pages::fault(&state, Fault::BadRequest);
     };
     let Some(code) = params.get("response_code") else {
@@ -469,16 +483,16 @@ pub async fn module() -> Response {
 /// the request (OpenID4VP 1.0 Appendix A.4; HAIP 1.0 §5.2).
 pub async fn digital_credentials(
     State(state): State<Arc<AppState>>,
-    Connected(from): Connected,
     headers: HeaderMap,
+    Connected(from): Connected,
     body: Bytes,
 ) -> Response {
-    let Ok(form) = Params::parse(&body, &[]) else {
-        return pages::fault(&state, Fault::BadRequest);
-    };
     let (pending, provider) = match at_wallet(&state, &headers).await {
         Ok(found) => found,
         Err(page) => return *page,
+    };
+    let Ok(form) = Params::parse(&body, &[]) else {
+        return pages::fault(&state, Fault::BadRequest);
     };
     let sent = form.get("form_token").unwrap_or_default();
     if !super::constant_eq(sent.as_bytes(), pending.form_token.as_bytes()) {
@@ -524,13 +538,7 @@ async fn api_answer(
         .get("response")
         .and_then(Value::as_str)
         .ok_or(Refusal::UnencryptedResponse)?;
-    let key = EphemeralKey::from_stored(&pending.upstream_verifier)
-        .map_err(|_unread| Refusal::MalformedResponse)?;
-    let plain = key
-        .decrypt(sealed, &pending.upstream_state)
-        .map_err(|_unopened| Refusal::MalformedResponse)?;
-    let payload: Value =
-        serde_json::from_slice(&plain).map_err(|_unread| Refusal::MalformedResponse)?;
+    let payload = decrypted(pending, sealed)?;
     let origin = login.upstream().origin().to_owned();
     let lane = Lane::DigitalCredentials { origin: &origin };
     let identity = presented(login, pending, &payload, &lane).await?;
@@ -563,12 +571,8 @@ async fn api_refused(
     provider: &LoginProvider,
     refusal: Refusal,
 ) -> Response {
-    tracing::warn!(reason = %refusal, "a wallet presentation was refused");
-    let reason = format!("the wallet presentation is refused: {refusal}");
-    if let Err(response) =
-        super::callback::record_login(state, provider.upstream(), Err(&reason)).await
-    {
-        return *response;
+    match record_refusal(state, provider, refusal).await {
+        Ok(()) => back_declined(state, pending).await,
+        Err(response) => *response,
     }
-    back_declined(state, pending).await
 }
