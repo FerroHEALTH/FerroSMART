@@ -120,13 +120,12 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
   `fapi2` (the FAPI 2.0 Security Profile on a grant), `authorization_details`
   (RFC 9396) and `onward` (the token exchange and JWT bearer onward
   grants with their check and cache), `kind` (the caller
-  classification), `profile` (the issuer profile with its `onward` keys, its
-  presets under `profiles/`), `federation`
+  classification), `profile` (the issuer profile with its `onward` keys), `federation`
   (what a `federation` issuer asserts, with `assertion`, the eHDSI IdA and
   TRC check behind `ehdsi-assertion`), `sender` (sender-constrained tokens,
   with `proof`, the DPoP proof check, and `replay`, the proof replay store),
   `party` (the login's party through a product `PartySource`, with
-  `binding`, `source`, `config` and `adapter`), `assurance`,
+  `binding`, `source` and `config`), `assurance`,
   `audit`, `refusal`, `config`, `oidc` behind `oidc`, `xml` behind `xml` (the
   bounded XML reader and Exclusive XML Canonicalization the eHDSI check and
   FerroSMART's SAML login share), and `guard` and

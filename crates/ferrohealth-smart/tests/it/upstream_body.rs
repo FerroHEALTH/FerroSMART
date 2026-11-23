@@ -98,7 +98,7 @@ async fn a_refused_introspection_keeps_its_status_and_error_code_only() -> TestR
         String::from("ferro-rs"),
         SecretString::from("synthetic-secret"),
     )));
-    let settings = IntrospectionSettings::new(issuer.uri(), AUDIENCE, auth, IssuerKind::Persons);
+    let settings = IntrospectionSettings::new(issuer.uri(), AUDIENCE, auth, IssuerKind::Smart);
     let introspector = Introspector::discover(settings).await?;
     let outcome = introspector.authenticate("synthetic-opaque-token").await;
     let Err(Rejection::Upstream { source, .. }) = outcome else {
@@ -137,7 +137,7 @@ async fn an_introspection_error_code_outside_the_rfc_6749_set_is_dropped() -> Te
         String::from("ferro-rs"),
         SecretString::from("synthetic-secret"),
     )));
-    let settings = IntrospectionSettings::new(issuer.uri(), AUDIENCE, auth, IssuerKind::Persons);
+    let settings = IntrospectionSettings::new(issuer.uri(), AUDIENCE, auth, IssuerKind::Smart);
     let introspector = Introspector::discover(settings).await?;
     let outcome = introspector.authenticate("synthetic-opaque-token").await;
     let Err(Rejection::Upstream { source, .. }) = outcome else {

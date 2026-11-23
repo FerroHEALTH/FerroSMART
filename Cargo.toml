@@ -94,8 +94,7 @@ sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio
 # framework tests, and the JSON formatter the audit line is read back through.
 wiremock = "0.6.5"
 http-body-util = "0.1.5"
-# The reader of the issuer profile presets ferrohealth-smart ships under
-# profiles/, and of the configuration cases.
+# The reader of the configuration cases and of the book's example tables.
 toml = { version = "1.1.8", default-features = false, features = ["std", "parse", "display", "serde"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "fmt", "json"] }
 # ferrohealth-smart's `client::PresentedTls`, the rustls client configuration

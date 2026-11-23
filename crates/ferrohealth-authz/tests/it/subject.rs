@@ -10,7 +10,6 @@ use ferrohealth_authz::request::Subject;
 use ferrohealth_smart::federation::Attribute;
 use ferrohealth_smart::federation::External;
 use ferrohealth_smart::federation::Field;
-use ferrohealth_smart::kind::Actor;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::resource::Caller;
 use serde_json::json;
@@ -37,12 +36,10 @@ fn a_subject_is_read_from_a_caller_of_every_kind() {
         CallerKind::Person,
         CallerKind::System,
         CallerKind::Patient,
-        CallerKind::Delegated { actor: actor() },
-        CallerKind::Representative {
-            represented: String::from("synthetic-represented"),
-            ground: None,
-        },
-        CallerKind::Guest(Box::new(CallerKind::Person)),
+        CallerKind::Practitioner,
+        CallerKind::PractitionerRole,
+        CallerKind::RelatedPerson,
+        CallerKind::User,
     ] {
         let subject = Subject::of(&caller(kind.clone()), &[("unit", "org.unit")]);
         assert_eq!("synthetic-subject", subject.id(), "{kind:?}");
@@ -86,24 +83,19 @@ fn a_patient_subject_carries_its_kind() {
 }
 
 #[test]
-fn a_delegated_subject_carries_its_kind() {
-    carries(&CallerKind::Delegated { actor: actor() }, "delegated");
+fn a_practitioner_subject_carries_its_kind() {
+    carries(&CallerKind::Practitioner, "practitioner");
+    carries(&CallerKind::PractitionerRole, "practitioner_role");
 }
 
 #[test]
-fn a_representative_subject_carries_its_kind() {
-    carries(
-        &CallerKind::Representative {
-            represented: String::from("synthetic-represented"),
-            ground: None,
-        },
-        "representative",
-    );
+fn a_related_person_subject_carries_its_kind() {
+    carries(&CallerKind::RelatedPerson, "related_person");
 }
 
 #[test]
-fn a_guest_subject_carries_its_kind() {
-    carries(&CallerKind::Guest(Box::new(CallerKind::Person)), "guest");
+fn a_user_of_no_stated_type_carries_its_kind() {
+    carries(&CallerKind::User, "user");
 }
 
 #[test]
@@ -116,12 +108,15 @@ fn a_subject_built_by_hand_carries_the_kind_it_is_given() {
 
 #[test]
 fn the_subject_debug_names_the_kind_and_no_represented_subject() {
-    let kind = CallerKind::Representative {
-        represented: String::from("synthetic-represented"),
-        ground: None,
-    };
-    let rendered = format!("{:?}", Subject::of(&caller(kind), &[]));
-    assert!(rendered.contains("representative"), "{rendered}");
+    let represented = Caller::new(
+        String::from("synthetic-subject"),
+        Some(String::from("synthetic-client")),
+        "patient/Observation.rs",
+        Some(String::from("synthetic-represented")),
+        CallerKind::RelatedPerson,
+    );
+    let rendered = format!("{:?}", Subject::of(&represented, &[]));
+    assert!(rendered.contains("related_person"), "{rendered}");
     assert!(!rendered.contains("synthetic-represented"), "{rendered}");
 }
 
@@ -151,12 +146,4 @@ fn an_external_organisation_subject_carries_its_kind() {
         &CallerKind::ExternalOrganisation(Box::new(external())),
         "external_organisation",
     );
-}
-
-/// The RFC 8693 §4.1 actor of a delegated caller.
-fn actor() -> Actor {
-    Actor {
-        issuer: String::from("https://as.example.org"),
-        sub: String::from("actor-1"),
-    }
 }

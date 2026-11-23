@@ -32,19 +32,16 @@ use crate::federation::Source;
 use crate::federation::read::attribute;
 use crate::federation::read::check_attribute;
 use crate::federation::read::read_fields;
-use crate::kind::IssuerKind;
 use crate::kind::Unclassified;
 use crate::roles::lookup;
 
-/// One `[auth.issuer.<name>.attributes]` table: where the `persons` issuer `issuer`
-/// states its professional's attributes, or where a `patients` or `machines`
-/// issuer states the purpose of use.
+/// One `[auth.issuer.<name>.attributes]` table: where the SMART issuer
+/// `issuer` states its professional's attributes and the purpose of use.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AttributesSection {
-    /// The issuer this table describes, of kind `persons`, `patients` or
-    /// `machines`: `[auth]` sets it from the `[auth.issuer.<name>]` table it
+    /// The SMART issuer this table describes: `[auth]` sets it from the `[auth.issuer.<name>]` table it
     /// sits under. It renders with any userinfo masked, as
     /// [`SecretUrl`](ferrohealth_secret::secret_url::SecretUrl) renders itself.
     #[cfg_attr(feature = "schema", schemars(skip))]
@@ -92,32 +89,6 @@ impl AttributesSection {
             }
         }
         Ok(())
-    }
-
-    /// Checks the table of an issuer of `kind`: [`AttributesSection::validate`],
-    /// and, on a `patients` or `machines` issuer, no field of the table's
-    /// own but [`Field::PurposeOfUse`], the one such an issuer states.
-    ///
-    /// # Errors
-    ///
-    /// The errors of [`AttributesSection::validate`], and
-    /// [`FederationError::PurposeOnly`] for another field of a `patients` or
-    /// `machines` issuer's table.
-    pub fn validate_for(&self, kind: IssuerKind) -> Result<(), FederationError> {
-        self.validate()?;
-        if kind == IssuerKind::Persons {
-            return Ok(());
-        }
-        match self
-            .fields
-            .keys()
-            .find(|field| **field != Field::PurposeOfUse)
-        {
-            Some(field) => Err(FederationError::PurposeOnly {
-                field: field.as_str(),
-            }),
-            None => Ok(()),
-        }
     }
 
     /// Returns the attributes the verified `claims` state under this table:

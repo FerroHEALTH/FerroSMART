@@ -45,15 +45,16 @@ async fn a_second_request_for_the_same_subject_target_and_scope_is_served_from_t
 async fn two_audiences_with_one_scope_are_two_exchanges() {
     // NOTE: RFC 8707 §2, a token issued for one target is never handed to
     // another, so the target is part of the cache key.
-    let harness = Harness::start(Flavor::Keycloak).await;
+    let harness = Harness::start(Flavor::Generic).await;
     let (subject, claims) = harness.person();
-    let mut issued = Flavor::Keycloak.issued_claims(&claims, harness.now());
-    issued["aud"] = json!(["target-client1", "target-client2"]);
+    let mut issued = Flavor::Generic.issued_claims(&claims, harness.now());
+    let audiences = ["https://ehr-a.example.org", "https://ehr-b.example.org"];
+    issued["aud"] = json!(audiences);
     harness.issue(&issued, None).await;
-    for audience in ["target-client1", "target-client2"] {
-        let target = Target::new(["target-client1", "target-client2"])
+    for audience in audiences {
+        let target = Target::new(audiences)
             .with_indicator(audience)
-            .with_scope("optional-scope2");
+            .with_scope("user/*.rs");
         harness
             .onward
             .token(&subject, None, &target)
@@ -98,15 +99,15 @@ async fn an_entry_is_renewed_the_margin_before_it_expires() {
 }
 
 #[tokio::test]
-async fn an_entra_token_outliving_its_subject_is_used_only_until_the_subjects_exp() {
-    // NOTE: Microsoft, "On-behalf-of flow", "Success response example": the
-    // issued token carries its own `expires_in`, here past the subject's.
-    let harness = Harness::start(Flavor::Entra).await;
+async fn a_token_outliving_its_subject_is_used_only_until_the_subjects_exp() {
+    // NOTE: RFC 8693 §2.2.1: the issued token carries its own `expires_in`,
+    // here past the subject's.
+    let harness = Harness::start(Flavor::Generic).await;
     let now = harness.now();
-    let mut claims = Flavor::Entra.subject_claims(now);
+    let mut claims = Flavor::Generic.subject_claims(now);
     claims["exp"] = json!(now + 120);
     let subject = harness.subject(&claims, CallerKind::Person);
-    let mut issued = Flavor::Entra.issued_claims(&claims, now);
+    let mut issued = Flavor::Generic.issued_claims(&claims, now);
     issued["exp"] = json!(now + 3269);
     harness.issue(&issued, None).await;
     let token = harness.token(&subject, None).await.expect("accepted");

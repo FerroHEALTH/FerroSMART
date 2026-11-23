@@ -101,12 +101,10 @@ impl Case {
             identifier_type: String::from("login"),
             group_claim: String::from("groups"),
             group_identifier_issuer: String::from(super::GROUPS),
-            ..PartySection::default()
         };
         let concrete = Arc::clone(&self.source);
         let source: Arc<dyn PartySource> = concrete;
-        let binding =
-            PartyBinding::new(source).with_issuer(table, settings.kind, &settings.profile)?;
+        let binding = PartyBinding::new(source).with_issuer(table, settings.kind)?;
         let verifier: Arc<dyn Verifier> = server(settings).await;
         let gate = Gate::open()
             .with_bearer(verifier)

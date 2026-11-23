@@ -302,9 +302,6 @@ jobs:
       - name: clippy with axum
         if: ${{ !cancelled() }}
         run: cargo clippy --workspace --all-targets --features axum --locked -- -D warnings
-      - name: clippy with idp-entra
-        if: ${{ !cancelled() }}
-        run: cargo clippy -p ferrohealth-smart --all-targets --features idp-entra --locked -- -D warnings
       - name: clippy with openehr-scopes alone
         if: ${{ !cancelled() }}
         run: cargo clippy -p ferrohealth-smart --all-targets --no-default-features --features openehr-scopes --locked -- -D warnings
@@ -332,12 +329,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash scripts/checks/advisory-exceptions.sh
 
-  # The live Keycloak case runs here after the suites (#239): the `keycloak`
-  # profile against the Keycloak image docs/VERSIONS.md pins, which
-  # tests/it/keycloak_live.rs starts, obtains tokens from and classifies. It
-  # runs on a pull request that touches the profiles, the resource server, the
-  # case itself or the pins, on a manual run, and on every push to main, which
-  # saves the build cache a pull request run restores (#243).
   test:
     name: nextest (core and axum)
     runs-on: ubuntu-latest
@@ -388,46 +379,9 @@ jobs:
       - name: Fetch and verify the FHIR packages
         run: bash scripts/vendor/fhir-packages.sh
       - run: cargo nextest run --workspace --locked
-      # The vendor adapter suite runs after the generic one, with only its feature.
-      - run: cargo nextest run -p ferrohealth-smart --features idp-entra --locked --no-tests=fail -E 'test(/^party::entra::/)'
       - run: cargo nextest run --workspace --all-features --locked
       - run: cargo nextest run --workspace --no-default-features --features axum,openehr --locked
       - run: cargo test --doc --workspace --all-features --locked
-      - id: paths
-        name: Does the change reach the profiles or the resource server
-        if: github.event_name != 'merge_group'
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT" != pull_request ]; then
-            echo "live=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          live=false
-          while IFS= read -r path; do
-            case "$path" in
-              crates/ferrohealth-smart/profiles/* | \
-                crates/ferrohealth-smart/src/profile.rs | \
-                crates/ferrohealth-smart/src/kind.rs | \
-                crates/ferrohealth-smart/src/resource/* | \
-                crates/ferrohealth-smart/src/sender/* | \
-                crates/ferrohealth-smart/tests/it/keycloak_live.rs | \
-                .github/workflows/ci.yml | docs/VERSIONS.md | Cargo.lock)
-                echo "reaches the live case: $path"
-                live=true
-                ;;
-              *) ;;
-            esac
-          done < <(git diff --name-only "$BASE...$HEAD")
-          echo "live=$live" >> "$GITHUB_OUTPUT"
-      - if: steps.paths.outputs.live == 'true'
-        name: The live Keycloak case
-        env:
-          FERROHEALTH_KEYCLOAK_E2E: "1"
-        run: cargo nextest run -p ferrohealth-smart --locked --no-tests=fail -E 'test(/^keycloak_live::/)'
       # FerroSMART with Keycloak upstream (#522): a SMART standalone launch
       # through the example's realm to a token with the mapped fhirUser
       # (scripts/idp/keycloak-launch.sh).
