@@ -1,0 +1,1087 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "FerroSMART administration API",
+    "version": "0.0.0",
+    "description": "The endpoints an administrator's console calls at run time: client registration and its management (RFC 7591, RFC 7592), the client registry, the signing key ring and the audit records. The standard endpoints (`/authorize`, `/token`, `/introspect`, `/revoke` and the discovery documents) are described by their specifications.",
+    "license": {
+      "name": "BUSL-1.1",
+      "identifier": "BUSL-1.1"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://issuer.invalid",
+      "description": "The issuer."
+    }
+  ],
+  "paths": {
+    "/admin/openapi.json": {
+      "get": {
+        "operationId": "getOpenApi",
+        "summary": "This document.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The OpenAPI document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/register": {
+      "post": {
+        "operationId": "registerClient",
+        "summary": "Registers a client (RFC 7591 §3).",
+        "description": "With an administrator's token every member may be set. Without one the endpoint answers only when `[ferrosmart.registration] open` is set, the app's scope is held to that ceiling, and a member set by an administrator alone is refused.",
+        "security": [
+          {},
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientMetadata"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The client as registered (RFC 7591 §3.2.1).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientRegistration"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "The client's configuration endpoint.",
+                "schema": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidMetadata"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          }
+        }
+      }
+    },
+    "/register/{client_id}": {
+      "parameters": [
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The client's `client_id`."
+        }
+      ],
+      "get": {
+        "operationId": "readClientRegistration",
+        "summary": "Reads a client's metadata (RFC 7592 §2.1).",
+        "security": [
+          {
+            "registrationToken": []
+          },
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The client.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Client"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateClientRegistration",
+        "summary": "Replaces a client's metadata (RFC 7592 §2.2).",
+        "security": [
+          {
+            "registrationToken": []
+          },
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientMetadata"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The client as replaced, with a new secret when one was issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientRegistration"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidMetadata"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteClientRegistration",
+        "summary": "Deprovisions a client, revoking every grant and token it holds (RFC 7592 §2.3).",
+        "security": [
+          {
+            "registrationToken": []
+          },
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The client is deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/admin/clients": {
+      "get": {
+        "operationId": "listClients",
+        "summary": "Every registered client, disabled ones included.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The registry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/admin/clients/{client_id}/disable": {
+      "parameters": [
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The client's `client_id`."
+        }
+      ],
+      "post": {
+        "operationId": "disableClient",
+        "summary": "Disables a client: no request finds it again, and every grant and token it holds is revoked.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The client as disabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Client"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/admin/clients/{client_id}/enable": {
+      "parameters": [
+        {
+          "name": "client_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "description": "The client's `client_id`."
+        }
+      ],
+      "post": {
+        "operationId": "enableClient",
+        "summary": "Enables a disabled client.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The client as enabled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Client"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/admin/keys": {
+      "get": {
+        "operationId": "listSigningKeys",
+        "summary": "The signing key ring: each public key with its state.",
+        "security": [
+          {
+            "admin": [
+              "system/admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The key ring.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyRing"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "operationId": "searchAudit",
+        "summary": "FerroSMART's audit records, newest first.",
+        "security": [
+          {
+            "admin": [
+              "system/AuditEvent.rs"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "subject",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The person's subject."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "_count",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A FHIR R4 searchset Bundle of AuditEvent resources.",
+            "content": {
+              "application/fhir+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditBundle"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter named twice, an unknown one, or a value outside its form.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one FerroSMART does not take (RFC 6750 §3).",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token lacks `system/AuditEvent.rs` (RFC 6750 §3.1).",
+            "headers": {
+              "WWW-Authenticate": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "admin": {
+        "type": "oauth2",
+        "description": "An access token FerroSMART issued for its own issuer to a Backend Services client whose ceiling lists the scope.",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://issuer.invalid/token",
+            "scopes": {
+              "system/admin": "The administration API.",
+              "system/AuditEvent.rs": "Read and search the audit records."
+            }
+          }
+        }
+      },
+      "registrationToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The registration access token a self-registered client received (RFC 7592 §3)."
+      }
+    },
+    "responses": {
+      "InvalidMetadata": {
+        "description": "The metadata is refused (RFC 7591 §3.2.2), or the body names another client.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No token, or one this endpoint does not take (RFC 6750 §3).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        },
+        "headers": {
+          "WWW-Authenticate": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The token lacks the scope (RFC 6750 §3.1).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        },
+        "headers": {
+          "WWW-Authenticate": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No client is registered under the id.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The id or launch URL is taken, or the client is in the state asked for already.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "TooLarge": {
+        "description": "The body is over 64 KiB."
+      },
+      "UnsupportedMediaType": {
+        "description": "The body is not `application/json`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        }
+      },
+      "ClientMetadata": {
+        "type": "object",
+        "description": "RFC 7591 §2 client metadata, with FerroSMART's own `upstreams`, `resources`, `launch_uri` and `first_party`. Other members are ignored.",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "The client's id. An administrator may name it; the server assigns one otherwise."
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "token_endpoint_auth_method": {
+            "type": "string",
+            "enum": [
+              "none",
+              "client_secret_basic",
+              "client_secret_post",
+              "private_key_jwt"
+            ],
+            "default": "client_secret_basic"
+          },
+          "jwks_uri": {
+            "type": "string",
+            "format": "uri",
+            "description": "Exclusive with `jwks`."
+          },
+          "jwks": {
+            "type": "object",
+            "description": "A JWK Set (RFC 7517 §5). Exclusive with `jwks_uri`."
+          },
+          "redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "post_logout_redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The upstream providers a person may log in at, by name; every one when empty. Set by an administrator alone."
+          },
+          "default_acr_values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "The resource servers the client's tokens may name in `aud`. Set by an administrator alone."
+          },
+          "scope": {
+            "type": "string",
+            "description": "The scope ceiling, space-separated."
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "authorization_code",
+                "client_credentials",
+                "refresh_token",
+                "urn:ietf:params:oauth:grant-type:token-exchange"
+              ]
+            },
+            "default": [
+              "authorization_code"
+            ]
+          },
+          "launch_uri": {
+            "type": "string",
+            "format": "uri",
+            "description": "The app's launch URL. Set by an administrator alone."
+          },
+          "client_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "logo_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "policy_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "tos_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "first_party": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
+          },
+          "client_secret": {
+            "type": "string",
+            "description": "On an update (RFC 7592 §2.2), the secret the client holds."
+          }
+        }
+      },
+      "Client": {
+        "type": "object",
+        "required": [
+          "client_id",
+          "client_name",
+          "token_endpoint_auth_method",
+          "redirect_uris",
+          "post_logout_redirect_uris",
+          "upstreams",
+          "resources",
+          "scope",
+          "grant_types",
+          "first_party",
+          "registered_by"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "The client's id. An administrator may name it; the server assigns one otherwise."
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "token_endpoint_auth_method": {
+            "type": "string",
+            "enum": [
+              "none",
+              "client_secret_basic",
+              "client_secret_post",
+              "private_key_jwt"
+            ],
+            "default": "client_secret_basic"
+          },
+          "jwks_uri": {
+            "type": "string",
+            "format": "uri",
+            "description": "Exclusive with `jwks`."
+          },
+          "jwks": {
+            "type": "object",
+            "description": "A JWK Set (RFC 7517 §5). Exclusive with `jwks_uri`."
+          },
+          "redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "post_logout_redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The upstream providers a person may log in at, by name; every one when empty. Set by an administrator alone."
+          },
+          "default_acr_values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "The resource servers the client's tokens may name in `aud`. Set by an administrator alone."
+          },
+          "scope": {
+            "type": "string",
+            "description": "The scope ceiling, space-separated."
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "authorization_code",
+                "client_credentials",
+                "refresh_token",
+                "urn:ietf:params:oauth:grant-type:token-exchange"
+              ]
+            },
+            "default": [
+              "authorization_code"
+            ]
+          },
+          "launch_uri": {
+            "type": "string",
+            "format": "uri",
+            "description": "The app's launch URL. Set by an administrator alone."
+          },
+          "client_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "logo_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "policy_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "tos_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "first_party": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
+          },
+          "registered_by": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "self"
+            ]
+          },
+          "disabled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the client was disabled; absent while enabled."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ClientRegistration": {
+        "description": "A client with what its registration answers once (RFC 7591 §3.2.1).",
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "The client's id. An administrator may name it; the server assigns one otherwise."
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "token_endpoint_auth_method": {
+            "type": "string",
+            "enum": [
+              "none",
+              "client_secret_basic",
+              "client_secret_post",
+              "private_key_jwt"
+            ],
+            "default": "client_secret_basic"
+          },
+          "jwks_uri": {
+            "type": "string",
+            "format": "uri",
+            "description": "Exclusive with `jwks`."
+          },
+          "jwks": {
+            "type": "object",
+            "description": "A JWK Set (RFC 7517 §5). Exclusive with `jwks_uri`."
+          },
+          "redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "post_logout_redirect_uris": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The upstream providers a person may log in at, by name; every one when empty. Set by an administrator alone."
+          },
+          "default_acr_values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "The resource servers the client's tokens may name in `aud`. Set by an administrator alone."
+          },
+          "scope": {
+            "type": "string",
+            "description": "The scope ceiling, space-separated."
+          },
+          "grant_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "authorization_code",
+                "client_credentials",
+                "refresh_token",
+                "urn:ietf:params:oauth:grant-type:token-exchange"
+              ]
+            },
+            "default": [
+              "authorization_code"
+            ]
+          },
+          "launch_uri": {
+            "type": "string",
+            "format": "uri",
+            "description": "The app's launch URL. Set by an administrator alone."
+          },
+          "client_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "logo_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "policy_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "tos_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "first_party": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the app is the controller's own or acts for it. Set by an administrator alone."
+          },
+          "registered_by": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "self"
+            ]
+          },
+          "disabled_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the client was disabled; absent while enabled."
+          },
+          "client_secret": {
+            "type": "string",
+            "description": "The issued secret, answered once."
+          },
+          "client_secret_expires_at": {
+            "type": "integer",
+            "const": 0
+          },
+          "registration_access_token": {
+            "type": "string"
+          },
+          "registration_client_uri": {
+            "type": "string",
+            "format": "uri"
+          },
+          "client_id_issued_at": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "client_id",
+          "client_name",
+          "token_endpoint_auth_method",
+          "redirect_uris",
+          "post_logout_redirect_uris",
+          "upstreams",
+          "resources",
+          "scope",
+          "grant_types",
+          "first_party",
+          "registered_by"
+        ]
+      },
+      "ClientList": {
+        "type": "object",
+        "required": [
+          "clients"
+        ],
+        "properties": {
+          "clients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Client"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "KeyRing": {
+        "type": "object",
+        "required": [
+          "keys"
+        ],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "state",
+                "jwk"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "next",
+                    "retiring"
+                  ]
+                },
+                "jwk": {
+                  "type": "object",
+                  "required": [
+                    "kty",
+                    "kid"
+                  ],
+                  "description": "The public key (RFC 7517 §4)."
+                }
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "AuditBundle": {
+        "type": "object",
+        "required": [
+          "resourceType",
+          "type",
+          "entry"
+        ],
+        "properties": {
+          "resourceType": {
+            "const": "Bundle"
+          },
+          "type": {
+            "const": "searchset"
+          },
+          "entry": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "resource"
+              ],
+              "properties": {
+                "resource": {
+                  "type": "object",
+                  "required": [
+                    "resourceType"
+                  ],
+                  "properties": {
+                    "resourceType": {
+                      "const": "AuditEvent"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

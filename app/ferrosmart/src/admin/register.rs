@@ -18,11 +18,11 @@ use axum::Router;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use serde_json::{Value, json};
 
 use super::document::ClientDocument;
+use super::openapi::Operation;
 use super::{AdminError, Applied, Change, DOCUMENT_LIMIT, OnClient, Record, no_store};
 use crate::audit::{self, Connected};
 use crate::server::AppState;
@@ -35,13 +35,17 @@ pub const CONFIGURATION_ROUTE: &str = "/register/{client_id}";
 
 /// Returns the registration routes.
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route(REGISTER_ROUTE, post(register))
-        .route(
-            CONFIGURATION_ROUTE,
-            axum::routing::get(read).put(update).delete(remove),
-        )
-        .layer(DefaultBodyLimit::max(DOCUMENT_LIMIT))
+    super::openapi::routes(table()).layer(DefaultBodyLimit::max(DOCUMENT_LIMIT))
+}
+
+/// Returns the registration operations.
+pub(super) fn table() -> Vec<Operation> {
+    vec![
+        Operation::post(REGISTER_ROUTE, register),
+        Operation::get(CONFIGURATION_ROUTE, read),
+        Operation::put(CONFIGURATION_ROUTE, update),
+        Operation::delete(CONFIGURATION_ROUTE, remove),
+    ]
 }
 
 /// The change a request on `on` by `by` makes: `None` when the client

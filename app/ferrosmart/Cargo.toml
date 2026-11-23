@@ -105,6 +105,8 @@ tokio = { workspace = true, features = ["process", "io-util"] }
 # The Brands Bundle held to the SMART App Launch 2.2.0 profiles (#602).
 ferrobridge-validator.workspace = true
 fhir-types.workspace = true
+# Each admin answer held to its schema in the OpenAPI document (#824).
+jsonschema.workspace = true
 
 [lints]
 workspace = true
