@@ -4,41 +4,7 @@
 //! The organisation approvals of the clients and what was issued on them
 //! (`docs/architecture.md` §13.6 item 6, §13.9).
 
-use sqlx::Row as _;
-
-use crate::clients::Approval;
-use crate::store::{Store, StoreError, Transaction};
-
-impl Store {
-    /// Returns the stored organisation approval of every client the
-    /// configuration writes, by client id; the admin API's clients are its
-    /// own to withdraw.
-    ///
-    /// # Errors
-    /// Returns [`StoreError::Database`] when the query fails.
-    pub async fn approvals(&self) -> Result<Vec<(String, Approval)>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT client_id, approved_scope, approved_by, \
-             extract(epoch FROM approved_at)::bigint AS approved_at, first_party \
-             FROM client WHERE approved_at IS NOT NULL AND source = 'config' ORDER BY client_id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter()
-            .map(|row| {
-                Ok((
-                    row.try_get("client_id")?,
-                    Approval {
-                        scopes: row.try_get("approved_scope")?,
-                        approved_by: row.try_get("approved_by")?,
-                        approved_at: row.try_get("approved_at")?,
-                        first_party: row.try_get("first_party")?,
-                    },
-                ))
-            })
-            .collect()
-    }
-}
+use crate::store::{StoreError, Transaction};
 
 impl Transaction {
     /// Withdraws the organisation approval of `client_id` given at

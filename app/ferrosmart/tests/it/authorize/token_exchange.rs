@@ -28,8 +28,6 @@ struct Platform {
     _fhir: MockServer,
     /// The openEHR server, kept for the case's length.
     _openehr: MockServer,
-    /// The directory of the client's secret hash.
-    _dir: tempfile::TempDir,
 }
 
 /// Starts the platform.
@@ -52,16 +50,13 @@ async fn platform() -> Platform {
         .await;
     let fhir_base = format!("{}/fhir", fhir.uri());
     let openehr_base = format!("{}/openehr/v1", openehr.uri());
-    let dir = tempfile::tempdir().expect("a directory");
-    let hash = dir.path().join("bridge.phc");
-    std::fs::write(&hash, crate::introspection::phc(SECRET)).expect("written");
+    let hash = crate::introspection::phc(SECRET);
     let grants = format!(
         "[\"authorization_code\"]\n\
          scopes = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\", \"user/Observation.rs\"]\n\
-         [[ferrosmart.client]]\nclient_id = \"bridge\"\nkind = \"confidential_symmetric\"\n\
-         secret_hash_file = {:?}\nresources = [{fhir_base:?}, {openehr_base:?}]\n\
-         grant_types = [\"token_exchange\"]",
-        hash.display().to_string()
+         [[client]]\nclient_id = \"bridge\"\nkind = \"confidential_symmetric\"\n\
+         secret_hash = {hash:?}\nresources = [{fhir_base:?}, {openehr_base:?}]\n\
+         grant_types = [\"token_exchange\"]"
     );
     let smart = Smart::start_over(
         &grants,
@@ -81,7 +76,6 @@ async fn platform() -> Platform {
         openehr_base,
         _fhir: fhir,
         _openehr: openehr,
-        _dir: dir,
     }
 }
 

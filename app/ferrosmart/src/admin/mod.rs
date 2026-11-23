@@ -4,15 +4,12 @@
 //! The admin API: `/admin/clients` over the registry every replica reads,
 //! and `/admin/keys`, the signing key ring (`docs/architecture.md` §13.8).
 //!
-//! The configuration seeds the registry at start; once the API creates or
-//! changes a client, the store is its source and its table is no longer
-//! written. Every change commits with its audit record, and a change that
-//! withdraws an organisation approval or disables a client revokes the
+//! [`apply`] writes a client document the way the API does, for `ferrosmart
+//! client apply`. Every change commits with its audit record, and a change
+//! that withdraws an organisation approval or disables a client revokes the
 //! grants and tokens it covered in the same transaction, so the next
 //! request at any replica sees it. No specification governs the admin API:
-//! our own design, the registry SMART leaves to the server ("SMART does not
-//! specify a standards-based registration process", SMART App Launch 2.2.0,
-//! Register App with EHR).
+//! our own design, since RFC 6749 §2 leaves registration to the server.
 
 pub mod document;
 pub mod guard;
@@ -220,6 +217,9 @@ fn answer(status: StatusCode, registered: &Registered) -> Response {
     no_store((status, Json(ClientView::from(registered))).into_response())
 }
 
+/// Who `ferrosmart client apply` is in the record of each change it makes.
+pub const APPLY_REQUESTER: &str = "ferrosmart client apply";
+
 /// The admin caller and where its request came from, as each change's
 /// record names them.
 struct Change<'a> {
@@ -265,13 +265,12 @@ impl<'a> Change<'a> {
     }
 
     /// Commits `tx` with `record`, the record of the approval it withdrew
-    /// first, and answers with the client as the store then holds it.
+    /// first, and returns the client as the store then holds it.
     async fn finish(
         &self,
         mut tx: Transaction,
         record: Record<'_>,
-        status: StatusCode,
-    ) -> Result<Response, AdminError> {
+    ) -> Result<Registered, AdminError> {
         let client_id = record.client_id;
         let endpoint = self
             .state
@@ -292,7 +291,7 @@ impl<'a> Change<'a> {
         if let Some((approval, revoked)) = record.withdrawn {
             let withdrawn = happening(
                 audit::Event::ApprovalWithdrawn,
-                crate::approvals::withdrawn_details(approval, revoked),
+                withdrawn_details(approval, revoked),
             );
             let row = self
                 .state
@@ -315,16 +314,127 @@ impl<'a> Change<'a> {
             target: "ferrosmart::audit",
             event = record.event.code(),
             client_id = %client_id,
-            "the admin API changed a client"
+            "an administrator changed a client"
         );
-        let registered = self
-            .state
+        self.state
             .store()
             .registered_client(client_id)
             .await?
-            .ok_or_else(|| AdminError::NotFound(client_id.to_owned()))?;
-        Ok(answer(status, &registered))
+            .ok_or_else(|| AdminError::NotFound(client_id.to_owned()))
     }
+
+    /// Registers the client `document` describes in `tx`.
+    async fn create(
+        &self,
+        mut tx: Transaction,
+        document: ClientDocument,
+    ) -> Result<Registered, AdminError> {
+        let client_id = document.client_id().to_owned();
+        let (section, material) =
+            document.registration(&client_id, None, jiff::Timestamp::now().as_second());
+        let client = crate::clients::resolve(&section, material)?;
+        check_names(self.state, &client)?;
+        if !tx.create_client(&client).await? {
+            return Err(AdminError::Exists(client_id));
+        }
+        let record = Record {
+            event: audit::Event::ClientCreated,
+            client_id: &client_id,
+            details: described(&client),
+            withdrawn: None,
+        };
+        self.finish(tx, record).await
+    }
+
+    /// Replaces the client `stored`, its row locked in `tx`, with the one
+    /// `document` describes. An organisation approval the document no
+    /// longer gives in the same form is withdrawn, every grant issued on it
+    /// revoked with its tokens.
+    async fn replace(
+        &self,
+        mut tx: Transaction,
+        stored: &Registered,
+        document: ClientDocument,
+    ) -> Result<Registered, AdminError> {
+        let client_id = stored.client.client_id.as_str();
+        let (section, material) = document.registration(
+            client_id,
+            Some(&stored.client),
+            jiff::Timestamp::now().as_second(),
+        );
+        let client = crate::clients::resolve(&section, material)?;
+        check_names(self.state, &client)?;
+        let lapsed = stored
+            .client
+            .approval()
+            .filter(|approval| client.approval() != Some(*approval));
+        let withdrawn = match lapsed {
+            Some(approval) => Some((
+                approval,
+                tx.withdraw_approval(client_id, approval.approved_at)
+                    .await?,
+            )),
+            None => None,
+        };
+        tx.update_client(&client).await?;
+        let record = Record {
+            event: audit::Event::ClientUpdated,
+            client_id,
+            details: described(&client),
+            withdrawn,
+        };
+        self.finish(tx, record).await
+    }
+}
+
+/// What [`apply`] did with one document.
+#[derive(Debug)]
+pub struct Applied {
+    /// The client as the store holds it.
+    pub registered: Registered,
+    /// Whether the client was new; otherwise it replaced the stored one.
+    pub created: bool,
+}
+
+/// Writes the client `document` describes as `PUT` would, or as `POST`
+/// would when no client has its `client_id`, through the same checks and
+/// with the same records, naming [`APPLY_REQUESTER`] from this host.
+///
+/// # Errors
+/// Returns [`AdminError`] for a document the registry refuses and for a
+/// store or record that fails; nothing is written then.
+pub async fn apply(state: &AppState, document: ClientDocument) -> Result<Applied, AdminError> {
+    let change = Change {
+        state,
+        by: Some(APPLY_REQUESTER),
+        from: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+    };
+    let mut tx = state.store().begin().await?;
+    match tx.lock_client(document.client_id()).await? {
+        Some(stored) => Ok(Applied {
+            registered: change.replace(tx, &stored, document).await?,
+            created: false,
+        }),
+        None => Ok(Applied {
+            registered: change.create(tx, document).await?,
+            created: true,
+        }),
+    }
+}
+
+/// What the record of a withdrawn `approval` holds: its scopes, approver,
+/// time and mark, and the `revoked` grants issued on it.
+fn withdrawn_details(
+    approval: &crate::clients::Approval,
+    revoked: u64,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("scope", approval.scopes.join(" ")),
+        ("approved_by", approval.approved_by.clone()),
+        ("approved_at", approval.approved_at.to_string()),
+        ("first_party", approval.first_party.to_string()),
+        ("revoked", revoked.to_string()),
+    ]
 }
 
 /// What a change's record says of `client`: never a secret or a key.
@@ -415,27 +525,14 @@ async fn create(
     body: Result<Json<ClientDocument>, JsonRejection>,
 ) -> Result<Response, AdminError> {
     let document = document(body)?;
-    let client_id = document.client_id().to_owned();
-    let (section, material) =
-        document.registration(&client_id, None, jiff::Timestamp::now().as_second());
-    let client = crate::clients::resolve_with(&section, material)?;
-    check_names(&state, &client)?;
-    let mut tx = state.store().begin().await?;
-    if !tx.create_client(&client).await? {
-        return Err(AdminError::Exists(client_id));
-    }
-    let record = Record {
-        event: audit::Event::ClientCreated,
-        client_id: &client_id,
-        details: described(&client),
-        withdrawn: None,
-    };
-    let mut response = Change::new(&state, &access, from)
-        .finish(tx, record, StatusCode::CREATED)
+    let tx = state.store().begin().await?;
+    let registered = Change::new(&state, &access, from)
+        .create(tx, document)
         .await?;
+    let mut response = answer(StatusCode::CREATED, &registered);
     let location = state
         .settings()
-        .endpoint(&format!("{CLIENTS_ROUTE}/{client_id}"));
+        .endpoint(&format!("{CLIENTS_ROUTE}/{}", registered.client.client_id));
     // NOTE: RFC 9110 §10.2.2, the issuer and the client id make a URI; one that
     // is no header value leaves the Location off, the client created all the same.
     if let Ok(location) = HeaderValue::from_str(&location) {
@@ -445,8 +542,6 @@ async fn create(
 }
 
 /// `PUT /admin/clients/{client_id}`: replaces the client with the body's.
-/// An organisation approval the body no longer gives in the same form is
-/// withdrawn, every grant issued on it revoked with its tokens.
 async fn update(
     on: OnClient,
     body: Result<Json<ClientDocument>, JsonRejection>,
@@ -456,34 +551,9 @@ async fn update(
     if !document.client_id().is_empty() && document.client_id() != client_id {
         return Err(AdminError::OtherClient);
     }
-    let (mut tx, stored) = change.lock(client_id).await?;
-    let (section, material) = document.registration(
-        client_id,
-        Some(&stored.client),
-        jiff::Timestamp::now().as_second(),
-    );
-    let client = crate::clients::resolve_with(&section, material)?;
-    check_names(&on.state, &client)?;
-    let lapsed = stored
-        .client
-        .approval()
-        .filter(|approval| client.approval() != Some(*approval));
-    let withdrawn = match lapsed {
-        Some(approval) => Some((
-            approval,
-            tx.withdraw_approval(client_id, approval.approved_at)
-                .await?,
-        )),
-        None => None,
-    };
-    tx.update_client(&client).await?;
-    let record = Record {
-        event: audit::Event::ClientUpdated,
-        client_id,
-        details: described(&client),
-        withdrawn,
-    };
-    change.finish(tx, record, StatusCode::OK).await
+    let (tx, stored) = change.lock(client_id).await?;
+    let registered = change.replace(tx, &stored, document).await?;
+    Ok(answer(StatusCode::OK, &registered))
 }
 
 /// `POST /admin/clients/{client_id}/disable`: no request finds the client
@@ -506,7 +576,8 @@ async fn disable(on: OnClient) -> Result<Response, AdminError> {
         details,
         withdrawn: None,
     };
-    change.finish(tx, record, StatusCode::OK).await
+    let registered = change.finish(tx, record).await?;
+    Ok(answer(StatusCode::OK, &registered))
 }
 
 /// `POST /admin/clients/{client_id}/enable`.
@@ -522,7 +593,8 @@ async fn enable(on: OnClient) -> Result<Response, AdminError> {
         details: Vec::new(),
         withdrawn: None,
     };
-    change.finish(tx, record, StatusCode::OK).await
+    let registered = change.finish(tx, record).await?;
+    Ok(answer(StatusCode::OK, &registered))
 }
 
 /// `DELETE /admin/clients/{client_id}/organisation_approval`: withdraws the
@@ -547,7 +619,8 @@ async fn withdraw(on: OnClient) -> Result<Response, AdminError> {
         details: vec![("organisation_approval", String::from("withdrawn"))],
         withdrawn: Some((&approval, revoked)),
     };
-    change.finish(tx, record, StatusCode::OK).await
+    let registered = change.finish(tx, record).await?;
+    Ok(answer(StatusCode::OK, &registered))
 }
 
 /// `GET /admin/keys`: the signing key ring this replica signs with, each

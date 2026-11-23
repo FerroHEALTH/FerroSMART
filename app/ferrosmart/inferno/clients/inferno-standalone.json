@@ -1,0 +1,24 @@
+{
+  "client_id": "inferno-standalone",
+  "name": "Inferno SMART App Launch test kit",
+  "kind": "public",
+  "redirect_uris": [
+    "http://localhost:4567/custom/smart_stu2_2/redirect"
+  ],
+  "scopes": [
+    "openid",
+    "fhirUser",
+    "launch",
+    "launch/patient",
+    "offline_access",
+    "user/Practitioner.rs",
+    "patient/Patient.rs"
+  ],
+  "resources": [
+    "https://bridge.localhost:9443/fhir"
+  ],
+  "grant_types": [
+    "authorization_code",
+    "refresh_token"
+  ]
+}

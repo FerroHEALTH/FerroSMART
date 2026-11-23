@@ -40,6 +40,9 @@ pub async fn dispatch(cli: Cli) -> Result<ExitCode, Failure> {
     let command = match cli.command {
         Command::Common(command) => command,
         Command::Client {
+            command: ClientCommand::Apply { files },
+        } => return Box::pin(apply_clients(&cli.config, &files)).await,
+        Command::Client {
             command: ClientCommand::HashSecret,
         } => return hash_secret(),
         Command::Subject { upstream, sub } => return subject(&cli.config, &upstream, &sub),
@@ -58,7 +61,7 @@ pub async fn dispatch(cli: Cli) -> Result<ExitCode, Failure> {
         Common::Healthcheck => healthcheck(&settings).await,
         Common::Config {
             command: ConfigCommand::Check,
-        } => config_check(&loaded, &settings),
+        } => config_check(&loaded),
         Common::Serve => {
             let telemetry = loaded.settings().telemetry.clone();
             Box::pin(serve(settings, telemetry)).await
@@ -89,6 +92,47 @@ fn hash_secret() -> Result<ExitCode, Failure> {
         "{}",
         crate::clients::hash_secret(secret).map_err(Failure::from)?
     );
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Runs `client apply`: each file's client document written to the
+/// registry by [`crate::admin::apply`], in the order given, one line per
+/// client. The first file that cannot be read or is refused stops the job;
+/// the clients before it stay written.
+#[expect(
+    clippy::print_stdout,
+    reason = "the job's answer, a line per client, goes to standard output"
+)]
+async fn apply_clients(
+    args: &ConfigArgs,
+    files: &[std::path::PathBuf],
+) -> Result<ExitCode, Failure> {
+    let settings = Config::load(args)
+        .and_then(|loaded| loaded.settings().resolve())
+        .map_err(Failure::refused_configuration)?;
+    let store = migrated(&settings, 1).await?;
+    let audit = crate::audit::Audit::new(settings.audit.observer.clone());
+    let state = AppState::new(settings, store, audit);
+    for file in files {
+        let named = |context: &str| format!("{context} {}", file.display());
+        let bytes = std::fs::read(file)
+            .map_err(|error| Failure::from(error).with_context(named("cannot read")))?;
+        let document: crate::admin::document::ClientDocument = serde_json::from_slice(&bytes)
+            .map_err(|error| Failure::from(error).with_context(named("no client document in")))?;
+        let applied = crate::admin::apply(&state, document)
+            .await
+            .map_err(|error| Failure::from(error).with_context(named("cannot apply")))?;
+        let client = &applied.registered.client;
+        let done = if applied.created {
+            "created"
+        } else {
+            "replaced"
+        };
+        println!("ferrosmart: client {:?} {done}", client.client_id);
+        if let Some(warning) = crate::clients::unassured_first_party(client) {
+            println!("ferrosmart: warning: {warning}");
+        }
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -137,11 +181,8 @@ fn registration(args: &ConfigArgs, name: &str) -> Result<ExitCode, Failure> {
     clippy::print_stdout,
     reason = "the job's one answer goes to standard output"
 )]
-fn config_check(loaded: &Loaded<Config>, settings: &Settings) -> Result<ExitCode, Failure> {
+fn config_check(loaded: &Loaded<Config>) -> Result<ExitCode, Failure> {
     ferrohealth_server::run::config_check(loaded)?;
-    for warning in crate::clients::unassured_first_party(&settings.clients) {
-        println!("ferrosmart: warning: {warning}");
-    }
     println!("ferrosmart: the configuration is valid");
     Ok(ExitCode::SUCCESS)
 }
@@ -191,39 +232,25 @@ async fn serve(settings: Settings, section: TelemetrySection) -> Result<ExitCode
     served
 }
 
-/// Serves the state `settings` describe until `SIGTERM` or `SIGINT`.
-async fn listen_and_serve(settings: Settings) -> Result<ExitCode, Failure> {
-    let listen = settings.server.listen;
-    let section = settings.server.clone();
-    let store = Store::connect(&settings.database_url, settings.max_connections)
+/// Returns the store `settings` name, over at most `connections`
+/// connections, with its migrations run.
+async fn migrated(settings: &Settings, connections: u32) -> Result<Store, Failure> {
+    let store = Store::connect(&settings.database_url, connections)
         .await
         .map_err(|error| Failure::not_up(error).with_context("cannot reach the database"))?;
     store
         .migrate()
         .await
         .map_err(|error| Failure::not_up(error).with_context("cannot migrate the database"))?;
+    Ok(store)
+}
+
+/// Serves the state `settings` describe until `SIGTERM` or `SIGINT`.
+async fn listen_and_serve(settings: Settings) -> Result<ExitCode, Failure> {
+    let listen = settings.server.listen;
+    let section = settings.server.clone();
+    let store = migrated(&settings, settings.max_connections).await?;
     let audit = crate::audit::Audit::new(settings.audit.observer.clone());
-    let issuer = settings.endpoint_url("");
-    let origin = crate::approvals::Origin {
-        issuer: &settings.issuer,
-        endpoint: &issuer,
-        host: listen.ip(),
-    };
-    crate::approvals::withdraw_lapsed(&store, &audit, &settings.clients, origin)
-        .await
-        .map_err(|error| {
-            Failure::not_up(error).with_context("cannot withdraw a lapsed organisation approval")
-        })?;
-    let managed = store
-        .register(&settings.clients)
-        .await
-        .map_err(|error| Failure::not_up(error).with_context("cannot register the clients"))?;
-    for client_id in managed {
-        tracing::warn!(
-            %client_id,
-            "the client's [[ferrosmart.client]] table is not written: the admin API changed the client or the app registered itself, so the store is its source"
-        );
-    }
     let forwarder = settings.audit.feed.clone().map(|feed| {
         let forwarder = Forwarder::fhir_feed_from(audit.outbox(store.clone(), FEED_IDLE), feed);
         let running = tokio::spawn(Arc::clone(&forwarder).run());

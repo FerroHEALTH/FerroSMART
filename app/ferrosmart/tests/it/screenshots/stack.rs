@@ -134,15 +134,15 @@ impl Stack {
              [[ferrosmart.resource]]\nbase = {base:?}\n\
              [[ferrosmart.role]]\nname = \"clinician\"\n\
              scopes = [\"user/Observation.rs\", \"user/Patient.rs\", \"patient/Observation.rs\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"ward-overview\"\nname = \"Ward Overview\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"ward-overview\"\nname = \"Ward Overview\"\nkind = \"public\"\n\
              redirect_uris = [{WARD_REDIRECT:?}]\ngrant_types = [\"authorization_code\", \"refresh_token\"]\n\
              scopes = [\"openid\", \"fhirUser\", \"user/Observation.rs\", \"user/Patient.rs\", \"offline_access\"]\n\
              upstreams = [\"idp\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"growth-chart\"\nname = \"Growth Chart\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"growth-chart\"\nname = \"Growth Chart\"\nkind = \"public\"\n\
              redirect_uris = [{CHART_REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
              scopes = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]\n\
              upstreams = [\"idp\"]\n\
-             [[ferrosmart.client]]\nclient_id = \"my-record\"\nname = \"My Record\"\nkind = \"public\"\n\
+             [[client]]\nclient_id = \"my-record\"\nname = \"My Record\"\nkind = \"public\"\n\
              redirect_uris = [{WARD_REDIRECT:?}]\ngrant_types = [\"authorization_code\"]\n\
              scopes = [\"openid\", \"fhirUser\", \"launch/patient\", \"patient/Observation.rs\"]",
             secrecy::ExposeSecret::expose_secret(&database.url),
@@ -156,10 +156,14 @@ impl Stack {
             .await
             .expect("connects");
         store.migrate().await.expect("migrates");
-        store.register(&settings.clients).await.expect("registered");
         let providers = crate::support::providers(&settings).await;
         let audit = audit(&settings);
         let state = AppState::new(settings, store.clone(), audit).with_login(providers);
+        crate::support::apply(
+            &state,
+            &crate::support::clients(&crate::support::reach_every_base(&text)),
+        )
+        .await;
         let app = router(Arc::new(state));
         let served = tokio::spawn({
             let app = app.clone();

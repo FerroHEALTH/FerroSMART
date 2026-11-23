@@ -100,14 +100,19 @@ curl -fsS -o /dev/null -X PUT http://localhost:8091/fhir/Patient/example \
   -d '{"resourceType":"Patient","id":"example","name":[{"family":"Example","given":["Synthetic"]}]}' ||
   fail "the FHIR server took no patient"
 
-"$root/target/debug/ferrosmart" --config "$lane/ferrosmart.toml" \
-  --set server.listen=127.0.0.1:8080 \
-  --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem" \
-  --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem" \
-  --set "ferrosmart.database.url=$LANE_PG/ferrosmart_third_party" \
-  --set "ferrosmart.client[1].jwks_file=$LANE_DIR/client.jwks.json" \
-  --set "ferrosmart.client[2].secret_hash_file=$LANE_DIR/gateway.phc" \
-  serve > "$LANE_DIR/ferrosmart-third-party.log" 2>&1 &
+ferrosmart=("$root/target/debug/ferrosmart" --config "$lane/ferrosmart.toml"
+  --set server.listen=127.0.0.1:8080
+  --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+  --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem"
+  --set "ferrosmart.database.url=$LANE_PG/ferrosmart_third_party")
+mkdir -p "$LANE_DIR/clients"
+cp "$lane/clients/example-app.json" "$LANE_DIR/clients/"
+jq --slurpfile set "$LANE_DIR/client.jwks.json" '.jwks = $set[0]' \
+  "$lane/clients/third-party-lane.json" > "$LANE_DIR/clients/third-party-lane.json"
+jq --rawfile hash "$LANE_DIR/gateway.phc" '.secret_hash = ($hash | rtrimstr("\n"))' \
+  "$lane/clients/third-party-gateway.json" > "$LANE_DIR/clients/third-party-gateway.json"
+"${ferrosmart[@]}" client apply "$LANE_DIR"/clients/*.json
+"${ferrosmart[@]}" serve > "$LANE_DIR/ferrosmart-third-party.log" 2>&1 &
 smart=$!
 for _ in $(seq 1 30); do
   curl -fsS -o /dev/null "$issuer/.well-known/smart-configuration" && break

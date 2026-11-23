@@ -16,8 +16,18 @@ use super::*;
 fn approved(scopes: &str) -> String {
     format!(
         "[\"openid\", \"fhirUser\", \"user/Observation.rs\", \"user/Patient.rs\", \"patient/Observation.rs\"]\n\
-         [ferrosmart.client.organisation_approval]\nscopes = {scopes}\n\
+         [client.organisation_approval]\nscopes = {scopes}\n\
          approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\""
+    )
+}
+
+/// Returns the state `ferrosmart client apply` writes `smart`'s registry
+/// through.
+fn administrator(smart: &Smart) -> AppState {
+    AppState::new(
+        smart.settings.clone(),
+        smart.store.clone(),
+        audit(&smart.settings),
     )
 }
 
@@ -133,33 +143,21 @@ async fn a_professional_s_launch_of_an_approved_app_skips_the_page_within_four_b
         "the person can disconnect it: {page}"
     );
 
-    // NOTE: docs/architecture.md §13.6 item 6, the administrator clears the
-    // approval; the tokens issued on it are revoked at the next start.
+    // NOTE: docs/architecture.md §13.6 item 6, the administrator applies the
+    // client without its approval; the tokens issued on it are revoked.
     let claims: Value = jsonwebtoken::dangerous::insecure_decode_claims(
         body["access_token"].as_str().expect("a token"),
     )
     .expect("claims");
     let jti = claims["jti"].as_str().expect("a jti");
-    let mut cleared = smart.settings.clients.clone();
+    let mut cleared = smart.clients.clone();
     for client in &mut cleared {
-        client.registration = ferrosmart::clients::Registration::Administered(None);
+        client
+            .as_object_mut()
+            .expect("a document")
+            .remove("organisation_approval");
     }
-    let issuer = smart.settings.endpoint_url("");
-    let origin = ferrosmart::approvals::Origin {
-        issuer: &smart.settings.issuer,
-        endpoint: &issuer,
-        host: std::net::IpAddr::from([127, 0, 0, 1]),
-    };
-    let withdrawn = ferrosmart::approvals::withdraw_lapsed(
-        &smart.store,
-        &audit(&smart.settings),
-        &cleared,
-        origin,
-    )
-    .await
-    .expect("withdrawn");
-    assert_eq!(vec![String::from("app")], withdrawn, "the cleared approval");
-    smart.store.register(&cleared).await.expect("registered");
+    crate::support::apply(&administrator(&smart), &cleared).await;
     let record = smart
         .store
         .access_token(jti)
@@ -171,7 +169,7 @@ async fn a_professional_s_launch_of_an_approved_app_skips_the_page_within_four_b
         "the token issued on the approval is revoked"
     );
     assert!(
-        events(&records(&smart.store).await)
+        events(&crate::support::all_records(&smart.store).await)
             .contains(&String::from("organisation-approval-withdrawn")),
         "the withdrawal is recorded"
     );
@@ -234,7 +232,7 @@ async fn a_patient_s_own_login_shows_the_page() {
 
 #[test]
 fn an_approval_beyond_the_ceiling_or_of_a_system_scope_is_refused() {
-    let section = |scopes: &[&str], first_party: bool| ClientSection {
+    let section = |scopes: &[&str], first_party: bool| ClientMetadata {
         client_id: String::from("app"),
         kind: ClientKind::Public,
         redirect_uris: vec![String::from(REDIRECT)],
@@ -243,29 +241,44 @@ fn an_approval_beyond_the_ceiling_or_of_a_system_scope_is_refused() {
             .into_iter()
             .map(String::from)
             .collect(),
-        organisation_approval: Some(ferrosmart::clients::ApprovalSection {
+        organisation_approval: Some(ferrosmart::clients::ApprovalMetadata {
             scopes: scopes.iter().map(|scope| String::from(*scope)).collect(),
             approved_by: String::from("Synthetic Administrator"),
             approved_at: String::from("2026-11-19T09:00:00Z"),
             first_party,
         }),
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     };
     assert!(
-        resolve(&[section(&["openid", "user/Observation.rs"], false)]).is_ok(),
+        resolve(
+            &section(&["openid", "user/Observation.rs"], false),
+            Material::default()
+        )
+        .is_ok(),
         "a user/ scope within the ceiling"
     );
     assert!(
-        resolve(&[section(&["openid", "patient/Observation.rs"], true)]).is_ok(),
+        resolve(
+            &section(&["openid", "patient/Observation.rs"], true),
+            Material::default()
+        )
+        .is_ok(),
         "a patient/ scope within the ceiling, for the organisation's own app"
     );
     for refused in [&["user/Patient.rs"][..], &["system/Observation.rs"][..]] {
-        assert!(resolve(&[section(refused, true)]).is_err(), "{refused:?}");
+        assert!(
+            resolve(&section(refused, true), Material::default()).is_err(),
+            "{refused:?}"
+        );
     }
     // NOTE: OpenID Connect Core 1.0 §3.1.2.4 (owner, 2026-11-20, #727): a staff
     // approval may cover patient/ scopes, which answer a professional's EHR launch.
     assert!(
-        resolve(&[section(&["openid", "patient/Observation.rs"], false)]).is_ok(),
+        resolve(
+            &section(&["openid", "patient/Observation.rs"], false),
+            Material::default()
+        )
+        .is_ok(),
         "a patient/ scope within the ceiling, for staff"
     );
     for refused in [
@@ -273,7 +286,10 @@ fn an_approval_beyond_the_ceiling_or_of_a_system_scope_is_refused() {
         &["system/Observation.rs"][..],
         &[][..],
     ] {
-        assert!(resolve(&[section(refused, false)]).is_err(), "{refused:?}");
+        assert!(
+            resolve(&section(refused, false), Material::default()).is_err(),
+            "{refused:?}"
+        );
     }
 }
 
@@ -324,31 +340,12 @@ async fn a_patient_s_launch_of_a_first_party_app_skips_the_page_and_is_withdrawn
     )
     .expect("claims");
     let jti = claims["jti"].as_str().expect("a jti");
-    let mut cleared = smart.settings.clients.clone();
+    let mut cleared = smart.clients.clone();
     for client in &mut cleared {
-        if let ferrosmart::clients::Registration::Administered(Some(approval)) =
-            &mut client.registration
-        {
-            approval.first_party = false;
-            approval.scopes = vec![String::from("openid"), String::from("fhirUser")];
-        }
+        client["organisation_approval"]["first_party"] = json!(false);
+        client["organisation_approval"]["scopes"] = json!(["openid", "fhirUser"]);
     }
-    let issuer = smart.settings.endpoint_url("");
-    let origin = ferrosmart::approvals::Origin {
-        issuer: &smart.settings.issuer,
-        endpoint: &issuer,
-        host: std::net::IpAddr::from([127, 0, 0, 1]),
-    };
-    let withdrawn = ferrosmart::approvals::withdraw_lapsed(
-        &smart.store,
-        &audit(&smart.settings),
-        &cleared,
-        origin,
-    )
-    .await
-    .expect("withdrawn");
-    assert_eq!(vec![String::from("app")], withdrawn, "the changed approval");
-    smart.store.register(&cleared).await.expect("registered");
+    crate::support::apply(&administrator(&smart), &cleared).await;
     let record = smart
         .store
         .access_token(jti)
@@ -393,7 +390,7 @@ async fn a_patient_disconnects_the_organisation_s_own_app_and_its_approval_stays
     let smart = Smart::start_with(
         "[\"authorization_code\", \"refresh_token\"]",
         "[\"openid\", \"fhirUser\", \"offline_access\", \"patient/Observation.rs\"]\n\
-         [ferrosmart.client.organisation_approval]\n\
+         [client.organisation_approval]\n\
          scopes = [\"openid\", \"fhirUser\", \"offline_access\", \"patient/Observation.rs\"]\n\
          approved_by = \"Synthetic Administrator\"\napproved_at = \"2026-11-19T09:00:00Z\"\n\
          first_party = true",
@@ -456,8 +453,13 @@ async fn a_patient_disconnects_the_organisation_s_own_app_and_its_approval_stays
 
     // NOTE: docs/architecture.md §13.6 item 6, the approval is an administrator's;
     // the next sign-in follows it again.
-    let approvals = smart.store.approvals().await.expect("read");
-    assert_eq!(1, approvals.len(), "the approval stands");
+    let client = smart
+        .store
+        .client("app")
+        .await
+        .expect("reads")
+        .expect("registered");
+    assert!(client.approval().is_some(), "the approval stands");
     let back = login(
         &smart,
         "openid fhirUser offline_access",

@@ -102,8 +102,8 @@ preset = "ferrosmart"
 delegates = [{ client = "growth-chart" }]
 ```
 
-An app can instead be registered once, at FerroSMART. Give each
-`[[ferrosmart.client]]` the bases its tokens may name in `resources`
+An app can instead be registered once, at FerroSMART. Give each client
+document the bases its tokens may name in `resources`
 ([clients](../configure/clients.md#the-client-registry)); FerroSMART then
 refuses a token for any other base with `invalid_target`. A product's table
 can admit every app whose token names the product in `aud`, in place of

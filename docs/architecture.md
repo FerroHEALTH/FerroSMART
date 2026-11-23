@@ -3548,7 +3548,7 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 
 | Table | Key | Holds |
 |---|---|---|
-| `client` | `client_id` | type (public, symmetric, asymmetric), secret hash, `jwks` or `jwks_uri`, redirect URIs, post-logout redirect URIs, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, registered origins, scope ceiling, grant types, offline access allowed, name and logo, the organisation approval, the source (`config`, `admin` (13.27) or `dynamic` (13.6 item 14)), disabled time |
+| `client` | `client_id` | type (public, symmetric, asymmetric), secret hash, `jwks` or `jwks_uri`, redirect URIs, post-logout redirect URIs, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, registered origins, scope ceiling, grant types, offline access allowed, name and logo, the organisation approval, `registered_by` (`admin` (13.27) or `self` (13.6 item 14)), disabled time |
 | `signing_key` | `kid` | state (`next`, `active`, `retiring`, `retired`) and the time it reached each one; the key itself stays in the files of `[ferrosmart.keys]` (13.11) |
 | `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
 | `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time |
@@ -3668,41 +3668,6 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 [[ferrosmart.role]]                           # policy as content: what a role may be granted
 name = "clinician"
 scopes = ["user/Observation.rs", "user/Patient.rs"]    # user/ and patient/ scopes only
-
-[[ferrosmart.client]]                         # one table per client, seeding the store at start (13.27)
-client_id = "bulk-export"
-name = "Bulk export"
-kind = "confidential_asymmetric"
-resources = ["https://ehr.example.org/fhir"]  # the bases its tokens may name in aud; none reaches no server (13.6 item 13)              # or "public", or "confidential_symmetric"
-jwks_uri = "https://export.example.org/jwks.json"   # or jwks_file, a JWK Set by value
-scopes = ["system/Patient.rs", "system/Observation.rs"]   # the client's ceiling
-grant_types = ["client_credentials"]
-
-# [[ferrosmart.client]]                       # a product that reads a patient's own EHR as them (13.29)
-# client_id = "bridge"
-# kind = "confidential_symmetric"             # or "confidential_asymmetric"; never public
-# resources = ["https://ehr.example.org/fhir", "https://ehr.example.org/openehr/v1"]   # the FHIR base it serves and the paired openEHR base
-# scopes = ["patient/composition-*.r"]
-# grant_types = ["token_exchange"]
-
-[[ferrosmart.client]]                         # a confidential symmetric app (SMART 2.2, Client Authentication: Symmetric)
-client_id = "portal"
-kind = "confidential_symmetric"
-secret_hash_file = "/run/secrets/portal-secret.phc"   # the Argon2id PHC hash, at least m=19456,t=2,p=1
-resources = ["https://ehr.example.org/fhir"]
-redirect_uris = ["https://portal.example.org/callback"]
-post_logout_redirect_uris = ["https://portal.example.org/logged-out"]   # optional: where the end-session endpoint may send the browser back (RP-Initiated Logout 1.0 §3.1)
-launch_uri = "https://portal.example.org/launch"   # optional: the app's launch URL, which POST /launch may name (13.17)
-client_uri = "https://portal.example.org/"    # optional, with logo_uri, policy_uri and tos_uri: shown on the consent page (RFC 7591 §2)
-grant_types = ["authorization_code", "refresh_token"]   # never client_credentials
-# assurance_minimum = "high"                  # the eIDAS level its people's logins reach, above the floor (13.28)
-# upstreams = ["idp"]                         # the providers its people log in at; every provider when absent, a chooser with several
-
-[ferrosmart.client.organisation_approval]     # optional: the organisation's own app, no consent page for its staff (13.6 item 6)
-scopes = ["openid", "fhirUser", "launch", "user/Observation.rs"]   # user/, launch, OpenID, refresh and __ scopes, within the ceiling
-approved_by = "J. de Vries, information security"   # the administrator, as the controller names them
-approved_at = "2026-11-19T09:00:00Z"          # RFC 3339; a change of any key is a new approval
-# first_party = true                           # the organisation's own app: patient/ scopes too, and no page for a patient
 
 [ferrosmart.branding]                          # content, never code (13.15)
 name = "Example Hospital"                     # the name the pages carry
@@ -3910,8 +3875,10 @@ change that lets one drift:
   launch URI with `iss` and `launch`. The app it launches is the kit as a
   confidential symmetric client (`inferno-ehr`, `auth_type: symmetric`),
   so every client type runs: public in groups 1 and 4, symmetric in group
-  2, asymmetric in group 3. The lane hashes the kit's synthetic secret
-  with `ferrosmart client hash-secret` for the run.
+  2, asymmetric in group 3. The kit's clients are the documents under
+  `app/ferrosmart/inferno/clients/`, which the lane applies with
+  `ferrosmart client apply` after adding their keys and the Argon2id hash
+  of the kit's synthetic secret.
 - `exceptions.tsv` lists each test of a run group that the expected results
   do not hold to `pass`, with its reason; any other test expected to be
   anything but `pass` fails the run. It holds one row: group 2's
@@ -4037,19 +4004,20 @@ This is what an EHR, FerroEHR's sandbox or any other, does to launch an app
 through FerroSMART. SMART fixes only the last step, the app's launch URL;
 the rest is FerroSMART's own API of 13.6 item 3.
 
-1. **Register once.** The EHR is a `[[ferrosmart.client]]` of kind
-   `confidential_asymmetric` with its JWK Set (`jwks_uri` or `jwks_file`)
-   and `system/launch.c` in its `scopes`; each app it launches is a client
-   of the `authorization_code` grant with its redirect URIs:
+1. **Register once.** The EHR is a client of kind
+   `confidential_asymmetric` with its JWK Set (`jwks_uri` or `jwks`) and
+   `system/launch.c` in its `scopes`; each app it launches is a client of
+   the `authorization_code` grant with its redirect URIs (13.27):
 
-   ```toml
-   [[ferrosmart.client]]
-   client_id = "ehr"
-   name = "Example EHR"
-   kind = "confidential_asymmetric"
-   jwks_uri = "https://ehr.example.org/.well-known/jwks.json"
-   scopes = ["system/launch.c"]
-   grant_types = ["client_credentials"]
+   ```json
+   {
+     "client_id": "ehr",
+     "name": "Example EHR",
+     "kind": "confidential_asymmetric",
+     "jwks_uri": "https://ehr.example.org/.well-known/jwks.json",
+     "scopes": ["system/launch.c"],
+     "grant_types": ["client_credentials"]
+   }
    ```
 
 2. **On each launch, get a `launch` value**, one per click and never
@@ -4597,7 +4565,7 @@ keyword of its own, so its rows are the profile's statements.
 | Requirement | Level | Holder and status | Test |
 |---|---|---|---|
 | The client generates a key pair and registers its public key set, by URL or by value, as a JWK Set (Registering a client) | SHALL | the client's; FerroSMART refuses a confidential asymmetric client without exactly one set | `clients::a_confidential_asymmetric_client_registers_exactly_one_jwk_set` |
-| The server supports both registrations, a JWK Set URL and a JWK Set by value | SHALL | met: `jwks_uri` and `jwks_file` | `clients::a_backend_services_client_registers_its_jwk_set_by_url`, `clients::a_jwk_set_by_value_holds_bare_public_keys_with_kty_and_kid` |
+| The server supports both registrations, a JWK Set URL and a JWK Set by value | SHALL | met: `jwks_uri` and `jwks` | `clients::a_backend_services_client_registers_its_jwk_set_by_url`, `clients::a_jwk_set_by_value_holds_bare_public_keys_with_kty_and_kid` |
 | The JWK Set URL is reachable over TLS without authentication; the client returns `Cache-Control` | SHALL, SHOULD | the client's; FerroSMART requires `https` outside loopback and honours the header | `token::a_jwk_set_url_is_read_and_cached_as_the_client_allows` |
 | The server protects a JWK Set given by value from corruption, and reminds the client to update it | SHALL, SHOULD | the deployment's: the set is a configuration file the operator owns, read at start, or a value the admin API stores (13.27), which an administrator replaces; FerroSMART has no channel to the client to send a reminder over | none |
 | The client signs with RS384 and ES384; the server validates at least one | SHALL | met: both, and nothing else | `token::a_backend_services_client_gets_an_rfc_9068_token`, `token::an_rs384_assertion_typed_by_rfc_10070_naming_the_issuer_is_admitted` |
@@ -5020,14 +4988,14 @@ that are each established, and the case
 `app/ferrosmart/tests/it/saml/interop.rs` holds it against a response
 canonicalized by libxml2 and signed by OpenSSL.
 
-### 13.27 The admin API
+### 13.27 The admin API and `client apply`
 
-The owner's decision of 2026-11-19 (#683): the registry is changed live
-through `/admin/clients`, behind a `ferrohealth-smart` guard, audited, over
-the store every replica reads, and the configuration seeds it. SMART App
-Launch 2.2.0 specifies no registration process (Register App with EHR) and
-RFC 7591 is a MAY, so the API is our own design; Keycloak's admin REST API
-changes clients live in the same way.
+A client lives only in the store every replica reads. RFC 6749 §2 leaves
+the means of registration to the server, and SMART App Launch 2.2.0
+(Register App with EHR) asks only what a registration holds, so the admin
+API and `ferrosmart client apply` are our own design. Both take one client
+document, check it by one validator and write it with one store path, each
+change audited.
 
 - **The guard.** Every admin route sits behind the `ferrohealth-smart`
   layer with `Requirement::Scope("system/admin")`, and the layer writes its
@@ -5045,14 +5013,19 @@ changes clients live in the same way.
   /admin/clients` registers one (`201` with `Location`); `PUT
   /admin/clients/{client_id}` replaces one; `POST .../disable` and `POST
   .../enable` disable and enable one; `DELETE .../organisation_approval`
-  withdraws its approval. The document carries the keys of a
-  `[[ferrosmart.client]]` table with the JWK Set (`jwks`) and the Argon2id
-  hash (`secret_hash`) by value, never a secret; an answer never carries
-  the hash, and an update of a symmetric client that names none keeps the
-  stored one. An approval without `approved_at` keeps the stored time when
-  its scopes, approver and mark are unchanged, and takes the request's
-  time otherwise. Every document is checked by the rules a table is
-  checked by at load.
+  withdraws its approval. The document carries the JWK Set (`jwks`) and
+  the Argon2id hash (`secret_hash`) by value, never a secret; an answer
+  never carries the hash, and an update of a symmetric client that names
+  none keeps the stored one. An approval without `approved_at` keeps the
+  stored time when its scopes, approver and mark are unchanged, and takes
+  the request's time otherwise.
+- **`ferrosmart client apply <file>...`.** Each file is one client
+  document, applied as `PUT` replaces a client, or as `POST` registers one
+  when no client has its `client_id`, with the same checks and records,
+  naming `ferrosmart client apply` from the host as the requester. It
+  migrates the store first and runs only when the operator runs it, so it
+  creates the first administrator client, and a deployment that keeps its
+  clients as files applies them the same way.
 - **Typed refusals.** A rule broken answers `400` with the RFC 7591
   §3.2.2 code (`invalid_redirect_uri`, `invalid_client_metadata`); a body
   is read only as `application/json` of at most 64 KiB into the closed
@@ -5066,8 +5039,8 @@ changes clients live in the same way.
 - **The record.** Every change commits in one transaction with its
   `AuditEvent` (`client-created`, `client-updated`, `client-disabled`,
   `client-enabled`, and `organisation-approval-withdrawn` before the
-  change that withdrew it), naming the admin client as the requester and
-  the client changed, never a key or a hash.
+  change that withdrew it), naming the admin client, or `ferrosmart client
+  apply`, as the requester and the client changed, never a key or a hash.
 - **Withdrawal at once.** A `PUT` that no longer gives the stored approval
   in the same form, or a `DELETE` of it, withdraws it in the change's own
   transaction: every grant issued on it is revoked with its refresh and
@@ -5079,16 +5052,6 @@ changes clients live in the same way.
   token inactive at once; a resource server that checks the JWT alone
   honours the revocation when the token expires, at most
   `access_token_lifetime` later (3.2).
-- **The configuration as the seed.** A client's row carries its source. At
-  start a `[[ferrosmart.client]]` table writes its client, and a client
-  the configuration wrote and no longer lists is removed, as before. Once
-  the API creates or changes a client (an update, a disable, an enable, a
-  withdrawal), its source is `admin`: the store is its source from then
-  on, its table is no longer written, start logs a warning naming it, and
-  the start-time withdrawal of lapsed approvals leaves its approval to the
-  API. So a client disabled or withdrawn through the API stays so across a
-  restart, and no route hands a client back to the configuration. No
-  specification governs the seed rule: our own design.
 - **The key ring.** `GET /admin/keys` lists the public JWK of each key the
   replica publishes with its state: `active`, `next` or `retiring` (13.11).
   The private keys stay in the files of `[ferrosmart.keys]`; the API never

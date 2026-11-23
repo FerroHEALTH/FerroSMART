@@ -4,7 +4,7 @@
 //! The front-channel logout URI (OpenID Connect Front-Channel Logout 1.0)
 //! and the end-session endpoint (OpenID Connect RP-Initiated Logout 1.0).
 
-use ferrosmart::clients::ClientError;
+use ferrosmart::clients::{ClientError, Material};
 use ferrosmart::logout::end_session::LOGOUT_COOKIE;
 
 use super::*;
@@ -361,24 +361,36 @@ async fn a_logout_request_that_does_not_check_is_a_page_and_no_redirect() {
 
 #[test]
 fn post_logout_redirect_uris_need_the_code_grant_and_absolute_urls() {
-    let section = |grant: GrantType, uri: &str| ClientSection {
+    let section = |grant: GrantType, uri: &str| ClientMetadata {
         client_id: String::from("app"),
         kind: ClientKind::Public,
         redirect_uris: vec![String::from(REDIRECT)],
         post_logout_redirect_uris: vec![String::from(uri)],
         grant_types: vec![grant],
         scopes: vec![String::from("openid")],
-        ..ClientSection::default()
+        ..ClientMetadata::default()
     };
-    assert!(resolve(&[section(GrantType::AuthorizationCode, POST_LOGOUT)]).is_ok());
+    assert!(
+        resolve(
+            &section(GrantType::AuthorizationCode, POST_LOGOUT),
+            Material::default()
+        )
+        .is_ok()
+    );
     assert!(matches!(
-        resolve(&[section(GrantType::ClientCredentials, POST_LOGOUT)]),
+        resolve(
+            &section(GrantType::ClientCredentials, POST_LOGOUT),
+            Material::default()
+        ),
         Err(ClientError::Rule { .. })
     ));
     for uri in ["/logged-out", "https://app.example.org/logged-out#top"] {
         assert!(
             matches!(
-                resolve(&[section(GrantType::AuthorizationCode, uri)]),
+                resolve(
+                    &section(GrantType::AuthorizationCode, uri),
+                    Material::default()
+                ),
                 Err(ClientError::PostLogoutRedirectUri { .. })
             ),
             "{uri}"

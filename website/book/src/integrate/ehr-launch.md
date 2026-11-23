@@ -17,16 +17,18 @@ five minutes and is redeemed once.
 
 The EHR is a confidential client with its JWK Set, and its ceiling lists
 `system/launch.c`. Each app it launches is a client of the
-`authorization_code` grant whose ceiling lists `launch`:
+`authorization_code` grant whose ceiling lists `launch`. Apply its
+document with `ferrosmart client apply`:
 
-```toml
-[[ferrosmart.client]]
-client_id = "ehr"
-name = "Example EHR"
-kind = "confidential_asymmetric"
-jwks_uri = "https://ehr.example.org/.well-known/jwks.json"
-scopes = ["system/launch.c"]
-grant_types = ["client_credentials"]
+```json
+{
+  "client_id": "ehr",
+  "name": "Example EHR",
+  "kind": "confidential_asymmetric",
+  "jwks_uri": "https://ehr.example.org/.well-known/jwks.json",
+  "scopes": ["system/launch.c"],
+  "grant_types": ["client_credentials"]
+}
 ```
 
 ## Way 1: register the launch

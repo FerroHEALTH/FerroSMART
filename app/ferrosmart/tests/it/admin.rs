@@ -3,11 +3,10 @@
 
 //! The admin API through the whole stack against a real PostgreSQL
 //! (`docs/architecture.md` §13.8): the guard, the registry's reads and
-//! writes with their typed refusals, the record of every change, the
-//! configuration as the seed, and a withdrawal or a disable that every
+//! writes with their typed refusals, the record of every change,
+//! `ferrosmart client apply`, and a withdrawal or a disable that every
 //! replica honours on its next request.
 
-use ferrosmart::approvals::{Origin, withdraw_lapsed};
 use ferrosmart::store::grant::{Access, NewGrant};
 use http::{Method, StatusCode, header};
 use serde_json::{Value, json};
@@ -185,7 +184,7 @@ async fn the_registry_is_listed_read_created_and_updated() {
         .call(Method::GET, "/admin/clients/vault", None, Some(&token))
         .await;
     assert_eq!(StatusCode::OK, status);
-    assert_eq!(json!("config"), vault["source"]);
+    assert_eq!(json!("admin"), vault["registered_by"]);
     assert_eq!(json!("confidential_symmetric"), vault["kind"]);
     assert!(
         vault.get("secret_hash").is_none(),
@@ -206,7 +205,7 @@ async fn the_registry_is_listed_read_created_and_updated() {
             .get(header::LOCATION)
             .and_then(|value| value.to_str().ok())
     );
-    assert_eq!(json!("admin"), created["source"]);
+    assert_eq!(json!("admin"), created["registered_by"]);
     assert_eq!(json!("Staff app"), created["name"]);
     let client = server
         .store
@@ -537,7 +536,7 @@ async fn disabling_a_client_revokes_its_grants_and_tokens_at_once_at_every_repli
         .call(Method::GET, "/admin/clients/export", None, Some(&token))
         .await;
     assert!(listed["disabled_at"].is_string(), "{listed}");
-    assert_eq!(json!("admin"), listed["source"]);
+    assert_eq!(json!("admin"), listed["registered_by"]);
     let (status, _, _) = replica
         .call(
             Method::POST,
@@ -649,72 +648,67 @@ async fn withdrawing_an_approval_revokes_what_was_issued_on_it_at_every_replica(
 }
 
 #[tokio::test]
-async fn the_configuration_seeds_the_registry_and_leaves_a_client_the_api_changed() {
+async fn client_apply_creates_then_replaces_a_client_and_records_the_command() {
     let server = Server::start().await;
-    let token = admin_token(&server).await;
-    let portal = json!({
+    let settings = server.settings();
+    let state =
+        ferrosmart::server::AppState::new(settings.clone(), server.store.clone(), audit(settings));
+    let mut kiosk = json!({
+        "client_id": "kiosk",
         "kind": "public",
-        "name": "Portal, changed",
-        "redirect_uris": ["https://portal.example.org/callback"],
+        "name": "Kiosk",
+        "redirect_uris": ["https://kiosk.example.org/callback"],
         "grant_types": ["authorization_code"],
         "scopes": ["openid"],
-        "organisation_approval": {
-            "scopes": ["openid"],
-            "approved_by": "Synthetic Administrator",
-        },
     });
-    let (status, _, body) = server
-        .call(
-            Method::PUT,
-            "/admin/clients/portal",
-            Some(&portal),
-            Some(&token),
-        )
-        .await;
-    assert_eq!(StatusCode::OK, status, "{body}");
-    assert_eq!(json!("admin"), body["source"]);
-    assert!(
-        body["organisation_approval"]["approved_at"].is_string(),
-        "{body}"
-    );
-    let settings = server.settings();
-    let issuer = settings.endpoint_url("");
-    let origin = Origin {
-        issuer: &settings.issuer,
-        endpoint: &issuer,
-        host: std::net::Ipv4Addr::LOCALHOST.into(),
+    let apply = |document: &Value| {
+        let document = serde_json::from_value(document.clone()).expect("a client document");
+        ferrosmart::admin::apply(&state, document)
     };
-    let withdrawn = withdraw_lapsed(&server.store, &audit(settings), &settings.clients, origin)
-        .await
-        .expect("withdraws");
-    assert!(
-        withdrawn.is_empty(),
-        "the API's approval is not the configuration's to withdraw"
-    );
-    let managed = server
-        .store
-        .register(&settings.clients)
-        .await
-        .expect("registered");
-    assert_eq!(vec![String::from("portal")], managed);
-    let kept = server
-        .store
-        .client("portal")
-        .await
-        .expect("reads")
-        .expect("registered");
-    assert_eq!(
-        "Portal, changed", kept.name,
-        "a restart leaves the API's change"
-    );
-    assert!(kept.approval().is_some());
-    let (_, _, app) = server
-        .call(Method::GET, "/admin/clients/app", None, Some(&token))
+    let applied = apply(&kiosk).await.expect("applies");
+    assert!(applied.created, "a new client is created");
+    kiosk["name"] = json!("Kiosk, changed");
+    let applied = apply(&kiosk).await.expect("applies again");
+    assert!(!applied.created, "the client with the id is replaced");
+    assert_eq!("Kiosk, changed", applied.registered.client.name);
+    let token = admin_token(&server).await;
+    let (_, _, read) = server
+        .call(Method::GET, "/admin/clients/kiosk", None, Some(&token))
         .await;
+    assert_eq!(json!("admin"), read["registered_by"]);
+    let kept = crate::support::all_records(&server.store).await;
+    let applied: Vec<&Value> = kept
+        .iter()
+        .filter(|record| record.to_string().contains("kiosk"))
+        .collect();
     assert_eq!(
-        json!("config"),
-        app["source"],
-        "an unchanged client stays the configuration's"
+        vec![
+            vec![String::from("client-created")],
+            vec![String::from("client-updated")]
+        ],
+        applied
+            .iter()
+            .map(|record| events(std::slice::from_ref(*record)))
+            .collect::<Vec<_>>()
+    );
+    for record in applied {
+        assert_eq!(
+            json!(ferrosmart::admin::APPLY_REQUESTER),
+            record["agent"][0]["who"]["display"],
+            "{record}"
+        );
+    }
+    let mut other = kiosk.clone();
+    other["client_id"] = json!("kiosk-2");
+    other["launch_uri"] = json!("https://kiosk.example.org/launch");
+    kiosk["launch_uri"] = json!("https://kiosk.example.org/launch");
+    apply(&kiosk).await.expect("the launch URL is the kiosk's");
+    assert!(
+        matches!(
+            apply(&other).await,
+            Err(ferrosmart::admin::AdminError::LaunchUriTaken)
+        ),
+        "a launch URL names one client"
     );
     server.stop().await;
 }
