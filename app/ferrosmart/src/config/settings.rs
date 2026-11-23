@@ -79,7 +79,9 @@ pub struct Settings {
     pub saml: Option<Arc<crate::upstream::saml::ServiceProviderSettings>>,
     /// The scopes each role may be granted.
     pub roles: BTreeMap<String, Vec<String>>,
-    /// The deployment's name and words on the pages.
+    /// The deployment's name.
+    pub name: String,
+    /// The deployment's words on the pages.
     pub branding: BrandingSection,
     /// The scopes an app that registered itself may be granted at most,
     /// when the deployment lets apps register themselves.
@@ -213,6 +215,7 @@ impl Config {
             upstreams: upstreams(&section.upstream, &keys, section.assurance_minimum)?,
             saml: service_provider(section)?,
             roles: roles(&section.role)?,
+            name: section.name.clone(),
             branding: branding(&section.branding)?,
             registration: registration(&section.registration)?,
             brand: section
@@ -230,7 +233,11 @@ impl Config {
                         section.issuer.trim_end_matches('/'),
                         crate::brands::BRANDS_ROUTE
                     );
-                    crate::brands::Brands::resolve(brand, &fhir, &bundle)
+                    let mut brand = brand.clone();
+                    if brand.name.trim().is_empty() {
+                        brand.name.clone_from(&section.name);
+                    }
+                    crate::brands::Brands::resolve(&brand, &fhir, &bundle)
                 })
                 .transpose()?,
             audit: audit(&section.audit, &issuer)?,

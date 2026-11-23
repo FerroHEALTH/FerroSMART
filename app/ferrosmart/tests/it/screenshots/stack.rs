@@ -122,14 +122,14 @@ impl Stack {
         let database = Database::create().await;
         let assertion = crate::support::upstream_assertion(keys.dir.path());
         let text = format!(
-            "[ferrosmart]\nissuer = {issuer:?}\n[ferrosmart.database]\nurl = {:?}\n\
+            "[ferrosmart]\nname = \"Example Hospital\"\nissuer = {issuer:?}\n[ferrosmart.database]\nurl = {:?}\n\
              [[ferrosmart.upstream]]\nname = \"idp\"\nlabel = \"Hospital staff\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
              fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
              [[ferrosmart.upstream]]\nname = \"portal\"\nlabel = \"Patient portal\"\n\
              [ferrosmart.upstream.oidc]\nissuer = {:?}\nclient_id = {UPSTREAM_CLIENT:?}\n\
              fhir_user_claim = \"fhir_user\"\n{assertion}{ASSURANCE}\
-             [ferrosmart.branding]\nname = \"Example Hospital\"\n\
+             [ferrosmart.branding]\n\
              consent_text = \"Example Hospital records every access to your record.\"\n\
              [[ferrosmart.resource]]\nbase = {base:?}\n\
              [[ferrosmart.role]]\nname = \"clinician\"\n\

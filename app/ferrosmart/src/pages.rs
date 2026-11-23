@@ -132,7 +132,7 @@ impl Fault {
 fn brand_lockup(state: &AppState, locale: &Locale) -> Html {
     lockup_plain(
         ferrosmart_mark(),
-        &state.settings().branding.name,
+        &state.settings().name,
         locale.lookup(&*CATALOG, "product-word"),
     )
 }

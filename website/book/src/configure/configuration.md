@@ -54,6 +54,7 @@ secret or an assertion.
 
 | Key | Default | What it is |
 |---|---|---|
+| `name` | `FerroSMART` | The deployment's name, such as the hospital's: every page carries it, and the User Access Brand's name when `[ferrosmart.brand]` names none |
 | `issuer` | required | The issuer identifier (RFC 8414 §2): an `https` URL with no query or fragment, or `http` on a loopback host. Its path is `[server] base_path`. Every document repeats it exactly |
 | `access_token_lifetime` | `5min` | How long an access token lives, for every grant; at most one hour (SMART App Launch 2.2.0, App Launch) |
 | `refresh_idle` | `30d` | How long an `offline_access` refresh token lasts unused; each refresh starts it again |
@@ -292,7 +293,6 @@ The deployment's own words on the pages. Content, never code.
 
 | Key | What it is |
 |---|---|
-| `name` | The name the pages carry, such as the hospital's |
 | `consent_text` | The deployment's words on the consent page, such as what it does with the access a person gives |
 | `smart_style_url` | The `smart_style_url` every token response carries: an `https` URL of the deployment's SMART style document; empty for none |
 
@@ -310,7 +310,7 @@ The table is the primary brand. Every FHIR server it publishes is a
 
 | Key | What it is |
 |---|---|
-| `name` | The name people recognize the brand by. Required |
+| `name` | The name people recognize the brand by; `[ferrosmart] name` when absent. An affiliate names its own |
 | `website` | The brand's own `https` website, apart from any portal. Required |
 | `identifier` | The identifiers apps merge brands by, each `{ system, value }`; SMART recommends `system = "urn:ietf:rfc:3986"` with the website's origin, without `www.`, as `value`. An identifier belongs to one brand |
 | `alias` | Other names people may search by, such as a former name |
@@ -370,6 +370,7 @@ where it forwards them.
 
 ```toml
 [ferrosmart]
+name = "Example Hospital"
 issuer = "https://smart.example.org"
 
 [ferrosmart.database]
@@ -396,9 +397,6 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 [[ferrosmart.role]]
 name = "clinician"
 scopes = ["user/Patient.rs", "user/Observation.rs"]
-
-[ferrosmart.branding]
-name = "Example Hospital"
 
 [ferrosmart.audit]
 site = "Example Hospital"
