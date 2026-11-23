@@ -26,6 +26,7 @@ mod resources;
 mod revocation;
 mod saml;
 mod screenshots;
+mod signing;
 mod store;
 mod support;
 mod symmetric;

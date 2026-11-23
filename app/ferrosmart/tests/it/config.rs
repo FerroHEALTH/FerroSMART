@@ -195,13 +195,13 @@ fn the_refresh_idle_times_default_and_refuse_zero() {
 fn a_missing_or_unreadable_key_is_refused() {
     let keys = Keys::new();
     let missing = format!(
-        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_file = {:?}",
+        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_files = [{:?}]",
         keys.dir.path().join("absent.pem").display().to_string()
     );
     assert!(matches!(
         config(&missing, &keys).resolve(),
         Err(Error::KeyFile {
-            key: "ferrosmart.keys.private_key_file",
+            key: "ferrosmart.keys.private_key_files",
             ..
         })
     ));
@@ -216,7 +216,7 @@ fn a_missing_or_unreadable_key_is_refused() {
     assert!(matches!(
         none.resolve(),
         Err(Error::Missing {
-            key: "ferrosmart.keys.private_key_file"
+            key: "ferrosmart.keys.private_key_files"
         })
     ));
 }
@@ -226,13 +226,13 @@ fn a_key_that_cannot_sign_rs256_is_refused() {
     let keys = Keys::new();
     let ec = ec_key(keys.dir.path(), "ec.pem");
     let text = format!(
-        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_file = {:?}",
+        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_files = [{:?}]",
         ec.display().to_string()
     );
     assert!(matches!(
         config(&text, &keys).resolve(),
         Err(Error::Key {
-            key: "ferrosmart.keys.private_key_file",
+            key: "ferrosmart.keys.private_key_files",
             ..
         })
     ));
@@ -242,12 +242,12 @@ fn a_key_that_cannot_sign_rs256_is_refused() {
 fn a_ring_that_names_one_key_twice_is_refused() {
     let keys = Keys::new();
     let text = format!(
-        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_file = {current:?}\nnext_private_key_file = {current:?}",
+        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.keys]\nprivate_key_files = [{current:?}, {current:?}]",
         current = keys.current.display().to_string()
     );
     assert!(matches!(
         config(&text, &keys).resolve(),
-        Err(Error::KeyRing { .. })
+        Err(Error::RepeatedKey { .. })
     ));
 }
 
@@ -264,7 +264,7 @@ fn an_unknown_key_is_refused_when_the_file_loads() {
 fn a_missing_database_url_is_refused() {
     let keys = Keys::new();
     let text = format!(
-        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.database]\nmax_connections = 4\n[ferrosmart.keys]\nprivate_key_file = {:?}",
+        "[ferrosmart]\nissuer = \"https://smart.example.org\"\n[ferrosmart.database]\nmax_connections = 4\n[ferrosmart.keys]\nprivate_key_files = [{:?}]",
         keys.current.display().to_string()
     );
     assert!(matches!(
@@ -441,7 +441,7 @@ fn upstream(keys: &Keys, extra: &str) -> String {
     let current = keys.current.display().to_string();
     format!(
         "[ferrosmart]\nissuer = \"https://smart.example.org\"\n\
-         [ferrosmart.keys]\nprivate_key_file = {current:?}\n\
+         [ferrosmart.keys]\nprivate_key_files = [{current:?}]\n\
          [[ferrosmart.upstream]]\nname = \"idp\"\n{ASSURANCE}\
          [ferrosmart.upstream.oidc]\nissuer = \"https://idp.example.org\"\nclient_id = \"ferrosmart\"\n{extra}"
     )

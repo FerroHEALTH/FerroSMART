@@ -705,6 +705,7 @@ async fn as_the(
     // NOTE: RFC 9068 §2.1, typ at+jwt.
     let token = settings
         .keys
+        .ring()
         .current()
         .sign("at+jwt", &claims)
         .map_err(PickerError::Sign)?;

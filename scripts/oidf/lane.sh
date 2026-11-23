@@ -241,7 +241,7 @@ start_provider() {
     "$root/target/debug/ferrosmart" --config "$lane/ferrosmart-op.toml" \
     --set "server.tls.certificate_file=$LANE_DIR/host.crt" \
     --set "server.tls.key_file=$LANE_DIR/host.key" \
-    --set "ferrosmart.keys.private_key_file=$LANE_DIR/signing.pem" \
+    --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem" \
     --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem" \
     --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_op" \
     --set "ferrosmart.client[0].secret_hash_file=$LANE_DIR/client.phc" \

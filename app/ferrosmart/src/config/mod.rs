@@ -23,8 +23,11 @@
 //! online_idle = "8h"
 //!
 //! [ferrosmart.keys]
-//! private_key_file = "/run/secrets/ferrosmart-rs256.pem"
-//! next_private_key_file = "/run/secrets/ferrosmart-rs256-next.pem"
+//! private_key_files = [
+//!     "/run/secrets/ferrosmart-rs256-1.pem",
+//!     "/run/secrets/ferrosmart-rs256-2.pem",
+//! ]
+//! rotation_period = "90d"
 //!
 //! [ferrosmart.database]
 //! url_file = "/run/secrets/ferrosmart-database-url"
@@ -134,8 +137,8 @@ pub struct FerroSmartSection {
     /// The eIDAS level every person's login reaches; `substantial` by
     /// default (`docs/architecture.md` §13.28).
     pub assurance_minimum: crate::assurance::Floor,
-    /// `[ferrosmart.keys]`: the key ring that signs every token.
-    pub keys: KeysSection,
+    /// `[ferrosmart.keys]`: the keys that sign every token, in rotation.
+    pub keys: SigningKeysSection,
     /// `[ferrosmart.database]`: the PostgreSQL database of the state.
     pub database: DatabaseSection,
     /// `[[ferrosmart.client]]`: the registered clients.
@@ -346,7 +349,7 @@ impl Default for FerroSmartSection {
             refresh_idle: Span::from_days(30),
             online_idle: Span::from_hours(8),
             assurance_minimum: crate::assurance::Floor::Substantial,
-            keys: KeysSection::default(),
+            keys: SigningKeysSection::default(),
             database: DatabaseSection::default(),
             client: Vec::new(),
             resource: Vec::new(),
@@ -360,9 +363,31 @@ impl Default for FerroSmartSection {
     }
 }
 
-/// `[ferrosmart.keys]`: the RSA keys that sign under `RS256`, the one
-/// algorithm RFC 9068 §2.1 and OpenID Connect Discovery §3 have every
-/// authorization server support.
+/// `[ferrosmart.keys]`: the RSA keys that sign in turn (`docs/architecture.md` §13.11).
+///
+/// They sign under `RS256`, the one algorithm RFC 9068 §2.1 and OpenID
+/// Connect Discovery §3 have every authorization server support.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SigningKeysSection {
+    /// The PEM files of the keys, in the order they take over; each is
+    /// published under its RFC 7638 thumbprint.
+    pub private_key_files: Vec<PathBuf>,
+    /// How long a key signs before the next one takes over.
+    pub rotation_period: Span,
+}
+
+impl Default for SigningKeysSection {
+    fn default() -> Self {
+        Self {
+            private_key_files: Vec::new(),
+            rotation_period: Span::from_days(90),
+        }
+    }
+}
+
+/// `[ferrosmart.upstream.oidc.private_key_jwt.keys]`: the ring of keys
+/// FerroSMART signs its own client assertions with.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct KeysSection {

@@ -166,6 +166,7 @@ pub(crate) fn mint(state: &AppState, client: &Client, grant: Grant<'_>) -> Resul
     // NOTE: RFC 9068 §2.1, typ at+jwt.
     let access_token = settings
         .keys
+        .ring()
         .current()
         .sign("at+jwt", &claims)
         .map_err(|error| server_error("the access token could not be signed", &error))?;
@@ -188,6 +189,7 @@ pub(crate) fn mint(state: &AppState, client: &Client, grant: Grant<'_>) -> Resul
             Some(
                 settings
                     .keys
+                    .ring()
                     .current()
                     .sign("JWT", &claims)
                     .map_err(|error| server_error("the ID token could not be signed", &error))?,

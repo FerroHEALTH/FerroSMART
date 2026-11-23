@@ -3530,7 +3530,7 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 | Table | Key | Holds |
 |---|---|---|
 | `client` | `client_id` | type (public, symmetric, asymmetric), secret hash, `jwks` or `jwks_uri`, redirect URIs, post-logout redirect URIs, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, registered origins, scope ceiling, grant types, offline access allowed, name and logo, the organisation approval, the source (`config` or `admin`, 13.27), disabled time |
-| `signing_key` | `kid` | algorithm, public JWK, signer reference (file path or KMS key id), state (`next`, `active`, `retiring`), the times of each state |
+| `signing_key` | `kid` | state (`next`, `active`, `retiring`, `retired`) and the time it reached each one; the key itself stays in the files of `[ferrosmart.keys]` (13.11) |
 | `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
 | `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time |
 | `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
@@ -3562,12 +3562,12 @@ assurance_minimum = "substantial"            # the eIDAS level every login reach
 url_file = "/run/secrets/ferrosmart-db-url"
 max_connections = 16
 
-[ferrosmart.keys]                             # the RS256 ring of ferrohealth-smart's KeyRing
-private_key_file = "/run/secrets/rs256.pem"   # signs
-kid = ""                                      # the RFC 7638 thumbprint when empty
-next_private_key_file = "/run/secrets/rs256-next.pem"          # published before it signs
-previous_private_key_file = "/run/secrets/rs256-previous.pem"  # published, never signs
-previous_key_overlap = "1h"                   # "0s": published while it is configured
+[ferrosmart.keys]                             # the RS256 keys, signing in turn (13.11)
+private_key_files = [                         # in the order they take over; each kid its RFC 7638 thumbprint
+    "/run/secrets/rs256-1.pem",
+    "/run/secrets/rs256-2.pem",
+]
+rotation_period = "90d"                       # how long a key signs before the next takes over
 
 [[ferrosmart.resource]]                       # each base an `aud` may name; at least one
 base = "https://ehr.example.org/fhir"
@@ -3773,16 +3773,29 @@ presets or the commands: our own design.
   OpenID Connect Discovery §3 require it and SMART signs ID Tokens with it;
   `ES256`, `ES384` and `PS256` can sign beside it. Names follow RFC 9864's
   fully-specified registrations; `none` and HMAC never sign.
-- **Rotation.** A key is published as `next` at least the JWKS cache
-  lifetime (`Cache-Control: max-age`, default one hour) before it becomes
-  `active`, and stays published as `retiring` for the longest lifetime of a
-  token it signed plus that cache lifetime, which the resource servers'
-  refetch on an unknown `kid` (3.2) relies on. The replicas agree on the state
-  through the `signing_key` table; the private material never enters the
-  database.
-- **Signers.** The ring is `ferrohealth-smart`'s `client::keys::KeyRing`
-  over PEM files from mounted secrets, the same ring a product's
-  `private_key_jwt` key lives in, so rotation has one implementation. A
+- **Rotation.** `[ferrosmart.keys]` names a pool of key files, and the
+  `signing_key` table (13.9) holds where each key stands, so every replica
+  signs with the same one. A key is `next` from the moment it is
+  published, `active` while it signs, `retiring` after, and `retired` for
+  good. The first key of the pool signs at the first start, and the next
+  unseen key of the pool is published as `next` at once. The active key
+  hands over after `rotation_period` (90 days by default), once the next
+  key has been published for the JWK Set's cache lifetime
+  (`Cache-Control: max-age`, one hour) plus the refresh interval, which
+  the resource servers' refetch on an unknown `kid` (3.2) relies on. The
+  old key stays published as `retiring` for that same time plus
+  `access_token_lifetime`, the longest lifetime of a token it signed; a
+  shorter `rotation_period` is refused at load. Each replica moves the
+  keys on and reads the table every minute under the table's own lock,
+  and a replica whose files lack the next key never makes it sign. With
+  no unseen key left the active key keeps signing; adding a key file to
+  every replica is the operator's part of a rotation. RFC 7517 §5 and
+  OpenID Connect Core 1.0 §10.1.1 describe publishing a key before it
+  signs; the schedule is our own design. The private material never
+  enters the database.
+- **Signers.** The ring each replica signs with is `ferrohealth-smart`'s
+  `client::keys::KeyRing` over PEM files from mounted secrets, the same
+  ring a product's `private_key_jwt` key lives in. A
   KMS or PKCS#11 HSM signer, which keeps the private key in hardware, joins
   as a second source of the ring's keys.
 - **Separation.** One key ring signs access tokens and ID Tokens; RFC 9068
@@ -4431,8 +4444,8 @@ by its certificate; each assertion then names it by `x5t#S256`
 (`rfc7515 §4.1.8`), and a certificate of another key is refused at load.
 
 **One key per purpose.** The assertion ring is
-`[ferrosmart.upstream.oidc.private_key_jwt.keys]`, read as `[ferrosmart.keys]` is
-(current, previous for its overlap, next) and never holding one of its keys:
+`[ferrosmart.upstream.oidc.private_key_jwt.keys]` (a current key, the previous
+one for its overlap and the next one) and never holding a key of `[ferrosmart.keys]`:
 a ring that shares a key with the token ring is refused at load. RFC 8725
 §3.12 has JWTs of different kinds validated by mutually exclusive rules, and
 separate keys give that by construction: an assertion key, leaked or
@@ -5054,13 +5067,10 @@ changes clients live in the same way.
   API. So a client disabled or withdrawn through the API stays so across a
   restart, and no route hands a client back to the configuration. No
   specification governs the seed rule: our own design.
-- **The key ring.** `GET /admin/keys` lists the public JWK of each key of
-  the ring with its state: `active`, `next`, and `retiring` with whether
-  it is still published. The private keys stay in the files of
-  `[ferrosmart.keys]`, and a rotation is a change of those files (13.11);
-  the API never carries private material. The `signing_key` table of 13.9,
-  which would let replicas agree on a rotation without a restart, is not
-  built.
+- **The key ring.** `GET /admin/keys` lists the public JWK of each key the
+  replica publishes with its state: `active`, `next` or `retiring` (13.11).
+  The private keys stay in the files of `[ferrosmart.keys]`; the API never
+  carries private material.
 
 ### 13.28 The level of assurance of a login
 

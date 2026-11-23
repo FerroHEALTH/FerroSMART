@@ -280,7 +280,7 @@ struct Smart {
 fn example_config(example: &str, keys: &Keys, database: Option<&Database>) -> Config {
     let mut environment = std::collections::BTreeMap::new();
     environment.insert(
-        String::from("FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILE"),
+        String::from("FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILES"),
         keys.current.display().to_string(),
     );
     let url = database.map_or_else(
