@@ -426,21 +426,6 @@ such a scope ("use any string starting with `__`" or a full URI), and
 section 9 asks the owner whether the two products' existing names move to one
 of those forms.
 
-**The scopeless-subject allowlist.** A token that carries no resource scope
-of either grammar (this section's or the SMART on openEHR grammar of 3.9) is
-admitted system-wide when its `sub` is on the deployment's allowlist, and
-nowhere otherwise; `Caller::scopeless` reads the flag. No specification governs this: our own design, the
-one FerroBRIDGE runs for an authorization server that cannot mint SMART
-scopes for a service account. The allowlist is a list of exact subjects, and
-a subject on it that does carry scopes gets only its scopes. A `sub` is
-unique only within its issuer (`rfc7519 §4.1.2`), so an entry is
-`{ issuer, sub }` and holds for that issuer's tokens alone, and only for a
-`System` caller (3.14): a person, a patient or another party is never
-admitted by it, and an entry naming a `patients` or `federation` issuer
-refuses the start (4). A product may answer the same question per request
-through its `Standing` in place of the list (3.14, #484); the rule that a
-caller carrying a resource scope gets only its scopes stays the crate's.
-
 **A Basic principal** carries the scope the product grants it, so the same
 check serves a Basic caller and a bearer caller, and a handler never asks
 which it was. No specification governs this: our own design. The
@@ -948,11 +933,6 @@ FerroFED's migration:
   whole claim and keeps its own grants, and a token may carry both
   `system/Observation.rs` and `system/composition-*.rs`. A scope string that
   parses in neither grammar grants nothing in either.
-- The scopeless-subject allowlist of 3.4 holds here too: a subject on it
-  whose token carries no resource scope of either grammar meets every
-  `Requirement::OpenEhr`, and one whose token carries a resource scope of
-  either grammar gets only its scopes, on this grammar's routes and on the
-  FHIR grammar's alike.
 
 **Which grammar applies to which route is the product's declaration**, not
 the listener's: the classifier of section 5 names a `Requirement` per route, and the
@@ -1045,8 +1025,8 @@ deployment. Zero caches nothing. At most `cache_capacity` responses are held;
 a full cache drops its expired entries, then the one that expires first. An
 inactive response is never held, so a token activated later is not refused
 from the cache. A caller admitted from the cache reports `cached()`, and
-a held response is classified again on each request, so the issuer's
-standing (3.14) answers every one. The cache bounds are no
+a held response is classified again on each request (3.14). The cache
+bounds are no
 specification's: our own design (FerroBRIDGE #533, #484).
 
 ### 3.11 Roles and role requirements
@@ -1151,11 +1131,8 @@ layers, all in `ferrohealth-smart`:
    the Dutch Annex B binding as an example. The keys: `person_key`, `tenant_claim`,
    `client_claims`, `app_only` and `guest` (markers), `impersonation_marker`,
    `expect`, `user_claims` (claims every token that is not app-only must
-   carry), `person_equality`, `unstable_claims`, `first_party_clients`,
-   `delegates` (actors by `{ sub, issuer }` and clients by `{ client }`),
-   `audience_delegates` (every client of a token for this resource server
-   is a delegate, on a `persons` issuer under the `ferrosmart` preset
-   alone, #682), `max_actor_chain`, `representation`, `act_represents_patient`,
+   carry), `person_equality`, `unstable_claims`, `max_actor_chain`,
+   `representation`, `act_represents_patient`,
    `fhir_user_patient` (3.13), `token_types`, `required_claims`,
    `scope_claim` and `app_only_scope_claim`, and `adapter`.
    The `keycloak` preset names no impersonation marker: Keycloak 26.8.2
@@ -1190,62 +1167,34 @@ order, and a token that matches no step for its issuer's kind is refused as
    2025/327 Art 4(2) lets a natural person authorise others to act for
    them). `act_represents_patient` on another kind of issuer refuses the
    issuer at load. On a `persons` issuer whose profile sets
-   `fhir_user_patient`, a token through a first-party or delegate client
-   that names no actor and no represented subject is `Patient` when its
-   `fhirUser` names the `Patient` its `patient` claim names and its scopes
-   are `patient/` alone (3.13); the client admission comes first, so an
-   unlisted client is refused as `UnlistedClient`. Other kinds of issuer
-   ignore the key.
+   `fhir_user_patient`, a token that names no actor and no represented
+   subject is `Patient` when its `fhirUser` names the `Patient` its
+   `patient` claim names and its scopes are `patient/` alone (3.13). Other
+   kinds of issuer ignore the key.
 2. `System`: the profile's app-only markers all match (they must agree, or
    the token is refused), on a `persons` or `machines` issuer.
-3. `Delegated`: an `act` whose actor is a declared delegate (a chain deeper
-   than `max_actor_chain` refused), or a third-party client that is a
-   declared delegate.
+3. `Delegated`: a `persons` token whose RFC 8693 §4.1 `act` names the
+   current actor, read as the issuer asserts it (a chain deeper than
+   `max_actor_chain` refused).
 4. `Representative`: a token of a `persons` issuer that declares
    `representation` and carries its claim, with the represented subject and
-   the ground as asserted; with an `act`, or through a delegate client, it is
-   refused, and `representation` on another kind of issuer refuses the
-   issuer at load.
-5. `Person`: a token of a `persons` issuer through a first-party client.
+   the ground as asserted; with an `act` it is refused, and
+   `representation` on another kind of issuer refuses the issuer at load.
+5. `Person`: any other token of a `persons` issuer.
 
 Before the steps, a token missing an `expect` value or carrying the
 impersonation marker is refused, and a user token missing a `user_claims`
-claim is refused naming it. A `persons` token with no client claim, or with a
-client outside both lists, is refused; the client is always recorded
-(`Caller::client_id`). A guest marker wraps the kind as `Guest`, which a
+claim is refused naming it. A `persons` token with no client claim is
+refused, and the client is always recorded (`Caller::client_id`). The
+authorization server's registry is the one list of clients: a token whose
+`aud` names this resource server was issued for it (`rfc9068 §4`,
+`rfc8707`), so the resource server keeps no list of clients or actors, and
+a product's policy may still decide on the recorded client. A guest marker wraps the kind as `Guest`, which a
 product admits only by a setting of its own. A Basic credential is a
 person's and always a `Person`, never a `System` (owner ruling of
 2026-11-05): a machine authenticates with the client credentials grant
-(RFC 6749 §4.4). The scopeless allowlist (3.4) admits only a `System`
-caller, the audit line records the kind (3.6), and `Caller::person_key` and
+(RFC 6749 §4.4). The audit line records the kind (3.6), and `Caller::person_key` and
 `Caller::tenant` carry the profile's key and tenant values.
-
-**Who answers the standing questions** (`kind::standing`). The steps ask
-three questions the token cannot answer: the standing of a `persons`
-token's client (first party, delegate or unlisted), whether its current
-RFC 8693 actor is a declared delegate, and whether a `System` caller of a
-`persons` or `machines` issuer is admitted without a scope (3.4). The
-issuer's `StandingSource` answers them. `Lists`, the default, reads the
-profile's `first_party_clients` and `delegates` and the issuer's
-`scopeless_subjects`. `Product` asks the product's `Standing`, for a
-product that keeps these lists as its own data and changes them with no
-restart (FerroEHR keeps them in its CDR, FerroHEALTH/FerroEHR#5437). The
-crate asks at most one question per token, holds no answer, and forces no
-read, so a product answers from memory; an introspected response held in
-the cache (3.10) is classified again on each request, so its standing is
-asked again too. The answers decide as the lists do: `FirstParty` is a
-`Person` or a `Representative`, `Delegate` is `Delegated` and refuses a
-representation (`RepresentationThroughDelegate`), `Unlisted` is
-`UnlistedClient`, and an actor the product does not declare is
-`UnlistedActor`. A `Standing` that cannot answer refuses the token as
-`Rejection::Upstream` (`503`), never as an unlisted client. Beside
-`Product`, a set list refuses the issuer at load
-(`ResourceError::ListedBesideStanding`), so no list is ever read in two
-places; a product reads `[auth]` as `config::ProductStandingSection`, where
-the three keys are unknown (4). No specification governs which clients a
-resource server admits for a person or which subjects it admits without a
-scope: our own design (#484), since SMART App Launch 2.2.0 and
-`rfc8693 §4.1` leave both to the resource server.
 
 How callers are classified is our own design over those sources.
 
@@ -1398,15 +1347,14 @@ token, Response), and `fhir_user_patient` reads a patient's own token as
 `Patient` (3.13, #681). The launch context claims (`patient`, `encounter`,
 `fhirUser`, `ehrId`, §13.6 item 2) need no key. A product trusts FerroSMART
 in one `persons` table, which also reads a client credentials token as
-`System`, since its `sub` is its `client_id` (`rfc9068 §2.2`). A
-SMART app acts for the signed-in person, so a product lists the apps it
-admits in `delegates` and reads their callers as `Delegated`. The preset
-lists none, because the apps belong to each deployment. FerroSMART grants
-one token exchange, of a patient's own token for the openEHR base paired
-with its FHIR base (13.29); the issued token names the exchanging client
-as `client_id` and no `act`, so a product that lists that client in
-`delegates` reads it as the patient. FerroSMART's own tests read the
-tokens it issues under the preset.
+`System`, since its `sub` is its `client_id` (`rfc9068 §2.2`). A token
+FerroSMART issued for a product's base names it in `aud` (`rfc9068 §4`,
+`rfc8707`), so the product admits every app FerroSMART registered and
+reads the signed-in person through it. FerroSMART grants one token
+exchange, of a patient's own token for the openEHR base paired with its
+FHIR base (13.29); the issued token names the exchanging client as
+`client_id` and no `act`, so a product reads it as the patient.
+FerroSMART's own tests read the tokens it issues under the preset.
 
 **A national binding as a profile file.** The products ship no country
 content (owner rule, #732). The harmonised BgZ and eOverdracht
@@ -1939,7 +1887,6 @@ kind = "persons"                     # persons, patients, machines or federation
 preset = "rfc9068"                   # or "entra", "keycloak", "okta", "ferrosmart"
 # profile_file = "/etc/ferro/profile.toml"   # a deployment's profile, set over the preset
 audience = ["https://bridge.example.org/fhir"]   # `aud` must contain one; unset: the product's own base URLs
-scopeless_subjects = ["batch-client"]   # app-only subjects granted system-wide access without a scope (3.4)
 algorithms = ["RS256", "RS384", "PS256", "PS384", "ES256", "ES384"]
 clock_skew = "60s"                   # at most 300s
 jwks_max_age = "10min"
@@ -1951,8 +1898,6 @@ mode = "jwt"                         # or "introspection" (3.10), with the table
 sender_constraint = "none"           # or "required": a DPoP- or certificate-bound token alone (3.15)
 
 [auth.issuer.sso.profile]            # the profile keys, over the preset and the profile file
-first_party_clients = ["ferrobridge-console"]       # the clients a person signs in through (3.14)
-delegates = [{ client = "partner-app" }, { sub = "actor-service" }]
 patient_context = false              # whether the `patient` claim is the launch context; true under ferrosmart
 
 [auth.issuer.sso.assurance]          # the level this issuer's tokens carry (3.12)
@@ -2012,12 +1957,7 @@ and its `identifier_type` the profile's `party_identifier_type`; an
 explicit value wins. `patient_context` is the one setting every product
 reads for whether an issuer may assert the launch context's `patient`: on
 under the `ferrosmart` preset, off otherwise, and the `patient` claim of an
-issuer without it is not read. Under the `ferrosmart` preset
-`issuer_client_is_person` reads a token whose client is the issuer itself
-as the person acting with no app: SMART App Launch 2.2.0 makes the
-authorization server responsible for the patient picker, so trusting
-FerroSMART covers its picker, and the access record still names FerroSMART
-as the client (Regulation (EU) 2025/327 Annex II). `Resolved` holds each
+issuer without it is not read. `Resolved` holds each
 JWT issuer's `Settings`, each introspected issuer's settings, every
 issuer's kind and its identifier by name; `Resolved::issuer_named` reads a
 product key that names an issuer, and `Resolved::role_issuers` holds a
@@ -2078,24 +2018,14 @@ the table's minimum version holds; `resolve` refuses such a table
 `ferrohealth_config::units::Duration` (`"30s"`). No specification governs the seam: our own
 design.
 
-A product whose `Standing` answers the client lists and the scopeless
-subjects (3.14) reads `[auth]` as `config::ProductStandingSection`: the
-same section, read by `AuthSection`'s own reader with `scopeless_subjects`
-and each issuer's `first_party_clients` and `delegates` unknown, refused as
-any unknown key is with the accepted keys named, and absent from its
-schema. `ProductStandingSection::resolve` (and `resolve_with_tls`) hands
-every issuer the product's standing and refuses a list set in code
-(`ConfigError::ListedBesideStanding`). Every other product keeps
-`AuthSection` and its lists (#484).
-
 An outbound integration is one table, `config::endpoint::EndpointSection`:
 `url`, `timeout`, `connect_timeout`, `retry` (`max_attempts`,
 `initial_backoff`, `max_backoff`), `tls` and `credentials`, so an operator
 writes every product's integrations with the same keys. `url` is a
 `SecretUrl`, so its userinfo and query render masked, and so is every
 issuer identifier a table names (`[auth.issuer.<name>] issuer`, the onward and
-the `oauth` issuer, and the issuer `[auth.issuer.<name>.attributes]`, `[auth.issuer.<name>.federation]`,
-`[auth.issuer.<name>.party]` and `scopeless_subjects` name), which renders masked even
+the `oauth` issuer, and the issuer `[auth.issuer.<name>.attributes]`,
+`[auth.issuer.<name>.federation]` and `[auth.issuer.<name>.party]` name), which renders masked even
 before the start refuses an issuer with userinfo (RFC 3986 §3.2.1; #445,
 #456). One call,
 `client::outbound::OutboundClient::build`, turns the table into the HTTP
@@ -2361,10 +2291,9 @@ four agree on and settles each difference:
   That is the OAuth model, and the mitigation is operational (one issuer per
   deployment, its keys rotated, its audit read), not the library's.
 - **Several issuers.** A section that trusts several issuers trusts each
-  only for its own tokens: a `sub` the scopeless allowlist names and the
-  claims roles are read from hold for the issuer an entry names, so one
-  issuer cannot mint the subject or the role another was trusted for
-  (`rfc7519 §4.1.2`; 3.4, 3.11; GHSA-pfgx-xq28-2629).
+  only for its own tokens: the claims roles are read from hold for the
+  issuer whose table names them, so one issuer cannot mint the role another
+  was trusted for (`rfc7519 §4.1.2`; 3.11; GHSA-pfgx-xq28-2629).
 
 ## 9. Decision register
 
@@ -2410,15 +2339,15 @@ four agree on and settles each difference:
 | `Caller` carries a typed extension map a resource server or a product verifier fills; the configuration sections still take no product field (#49) | our own design: the verifier that routed the token already knows the issuer's policy, and the crate reads no extension (#61) | none |
 | `Caller::basic_user_in` and `Requirement::basic_users` answer whether a Basic caller is one of a list | our own design (#62) | none |
 | `[[auth.basic.users]]` holds the credential alone; a Basic user's scopes and roles are the product's to grant, from its configuration through `config::BasicGrants` or from its data through `Caller::with_granted_scope` and `Caller::with_granted_roles` | our own design: policy stays out of the shared credential table, so a product that keeps it as data drops the keys (#479, FerroEHR #5438) | FerroEHR drops `roles` and `scopes` and grants them to the admitted caller; FerroBRIDGE, FerroTERM and FerroPIX move them into a `BasicGrants` table of their own configuration and call `PasswordStore::with_grants` |
-| A `persons` token's client standing, a declared RFC 8693 actor and a `System` caller's scopeless access are answered by the issuer's `StandingSource`: its lists by default, or a product `Standing` asked per request with no cache; beside a product's standing a set list is refused, and `ProductStandingSection` reads `[auth]` with the three keys unknown (3.14) | our own design: SMART App Launch 2.2.0 and `rfc8693 §4.1` leave both to the resource server (#484, FerroEHR #5437) | FerroEHR reads `[auth]` as `ProductStandingSection`, drops the three keys and implements `Standing` over its CDR; the other products keep their lists |
+| The authorization server's registry is the one list of clients: a token from a trusted issuer whose `aud` names this resource server admits its client, an RFC 8693 actor is read as asserted, and a caller reaches only what its scopes grant; `first_party_clients`, `delegates`, `audience_delegates`, `scopeless_subjects` and `issuer_client_is_person` are unknown keys (3.14) | `rfc9068 §4`; `rfc8707`; `rfc8693 §4.1` (#804) | a product deletes the five keys; FerroEHR reads `[auth]` as `AuthSection` and drops its `Standing` |
 | The outcome of a Basic check says whether the verified-credential cache admitted it | our own design (#63) | none |
 | Concurrent Basic cache misses for one credential share one derivation; each entry's lifetime is jittered down by up to a tenth of `cache_ttl`, and one request refreshes it in its last tenth | our own design: FerroEHR measured the expiry burst as its capacity knee (FerroEHR #5742, #498) | none |
 | The metadata `issuer` is compared as exact text; a product may also hold the configured issuer to its canonical URL form | `rfc8414 §3.3`, `§4`; the canonical form is our own design (#67) | none |
 | A metadata document whose objects repeat a member name is refused | `rfc8259 §4` leaves the meaning to each parser; the refusal is our own design (#69) | none |
 | A product may refuse metadata whose endpoints are off the issuer's origin; the check is opt-in | `rfc6454 §4`, `§5` define the origin; RFC 8414 places no endpoint, so the policy is our own design (#68) | none |
 | Token introspection is a deployment's opt-in (`mode = "introspection"`), under client authentication or a grant's bearer token, with `scope`, `client_id` and `exp` required, `iss` and `aud` checked when present, and a response without `sub` read as the client's | `rfc7662 §2.1`, `§2.2`, `§4`; `smart token-introspection`; `rfc9068 §2.2` | none |
-| A `scopeless_subjects` entry is `{ issuer, sub }` and admits a `System` caller of that issuer alone; `role_claims` sit on each issuer table; the string forms, bare or `<issuer>#<value>`, are refused at load | `rfc7519 §4.1.2` (a `sub` is unique within its issuer); our own design (#215, after GHSA-pfgx-xq28-2629) | a deployment rewrites each entry as a table and moves `role_claims` onto its issuer tables |
-| Every issuer declares its `kind` and a profile (a preset with keys over it), every issuer setting lives on its table, and a valid token is classified as `Patient`, `System`, `Delegated`, `Representative`, `Person` or `Guest`, or refused as `Rejection::Unclassified`; a Basic credential is always a `Person` (3.14) | `rfc9068 §2.2`, `§4`, `§5`; `rfc8693 §4.1`; `oidc-core §5.7`; the vendor documents each preset cites; the classification is our own design (#215, owner ruling 2026-11-05 on Basic) | a deployment writes `[auth.issuer.<name>]` tables with `kind`, lists its `first_party_clients`, and drops `token_profile`, `acting_for_claim` and `client_tokens` |
+| `role_claims` sit on each issuer table; the string forms, bare or `<issuer>#<value>`, are refused at load | `rfc7519 §4.1.2`; our own design (#215, after GHSA-pfgx-xq28-2629) | a deployment moves `role_claims` onto its issuer tables |
+| Every issuer declares its `kind` and a profile (a preset with keys over it), every issuer setting lives on its table, and a valid token is classified as `Patient`, `System`, `Delegated`, `Representative`, `Person` or `Guest`, or refused as `Rejection::Unclassified`; a Basic credential is always a `Person` (3.14) | `rfc9068 §2.2`, `§4`, `§5`; `rfc8693 §4.1`; `oidc-core §5.7`; the vendor documents each preset cites; the classification is our own design (#215, owner ruling 2026-11-05 on Basic) | a deployment writes `[auth.issuer.<name>]` tables with `kind`, and drops `token_profile`, `acting_for_claim` and `client_tokens` |
 | A `persons` login is resolved to its party through a `PartySource` the product supplies, once per request with no cache, keyed by the issuer profile's `person_key` in the canonical form of its `identifier_type`, against the identifiers of one `[auth.issuer.<name>.party]` table's `identifier_issuer`; two matches are `Ambiguous`, a source failure is an error and never `Unbound`, and the outcome is the product's to answer (3.17) | `oidc-core §5.7`; `rfc7519 §4.1.2`; Microsoft, "Access token claims reference" (the overage markers); the binding is our own design (#216, owner ruling 2026-11-05 on the cache) | a product binds its `persons` issuers with `[auth.issuer.<name>.party]` tables, implements `PartySource`, maps each Basic user to a key, and answers each outcome |
 | A `persons` issuer's `[auth.issuer.<name>.attributes]` table reads the IHE IUA professional attributes and purposes of use, from claims or constants and, with `authorization_details_purposes`, the `system\|code` of each `authorization_details` entry, onto every non-`System` caller as `Caller::attributes`, and the purposes of use alone onto a `System` caller and every caller of a `patients` or `machines` issuer's table; a claim of the wrong shape refuses the token, and a coding with an empty code names none (3.14) | IHE IUA §3.71.4.2.2.1.1; `rfc9396 §2`; FHIR R4 datatypes.html; our own design over them (#376, #438) | a product reads the professional, the organisation and the purposes from `Caller::attributes` and drops its own IUA claim parser |
 | A `patients` token that carries `act` is the patient's representative under `act_represents_patient`, with the top-level actor only, and is refused without it (3.14) | `rfc8693 §4.1`; Regulation (EU) 2025/327 Art 4(2); our own design (#377) | a product that records a patient's representative sets `act_represents_patient` and reads `CallerKind::PatientRepresentative` |
@@ -3471,12 +3400,11 @@ specification governs.
     is refused from the next request. A client that lists none reaches no
     resource server, and a client credentials request without `resource`
     takes the one base its client lists alone (`rfc9068 §3`). A token's
-    `aud` therefore says the client was admitted for that server, which
-    lets a product admit every client FerroSMART issued for its audience
-    (`audience_delegates`, 3.14, 13.21) instead of listing each one; RFC
-    9068 §4 has a resource server check `aud`, and SMART 2.2 leaves the
-    rest to the server's own policy. Which clients reach which server is
-    our own design.
+    `aud` therefore says the client was admitted for that server, so a
+    product admits every client FerroSMART issued a token for its audience
+    and keeps no list of its own (3.14, 13.21); RFC 9068 §4 has a resource
+    server check `aud`, and SMART 2.2 leaves the rest to the server's own
+    policy. Which clients reach which server is our own design.
 14. **A client that registered itself.** RFC 7591 §5 has the server "treat
     all client metadata as self-asserted", so a client the app registered
     itself (`source` `dynamic` in the `client` table, written by the
@@ -3868,8 +3796,7 @@ is TLS:
 - FerroBRIDGE's FHIR R4 facade as the FHIR server, the kit's `url`. Its
   SMART document describes FerroSMART as a `persons` issuer, it checks
   FerroSMART's tokens through `ferrohealth-smart` under the `ferrosmart`
-  preset with the kit's app and the picker in `delegates`, as 13.21
-  deploys a product, and it serves the
+  preset, as 13.21 deploys a product, and it serves the
   person's `fhirUser` as a `Practitioner`, mapped onto a `PERSON` by the
   party context its own release ships (vendored under
   `docs/specs/ferrobridge-party/`). The lane stores that `PERSON` in
@@ -4319,10 +4246,15 @@ adoption issue tracks its own side (#521).
    the `ferrosmart` preset (3.3, the profile section). The preset keeps
    every `rfc9068` default except three: `typ` is `at+jwt` alone, `scope`
    is required, and `fhir_user_patient` reads a patient's own token as the
-   person (3.13). The product lists the SMART apps it admits for a person in
-   `delegates`, a patient's apps among them, and reads the person's own
-   access with `Caller::is_the_person`; one table serves professionals and
-   patients, so a deployment needs no second FerroSMART for patients. The same table reads a Backend Services token as `System`,
+   person (3.13). A token FerroSMART issued for the product's base names it
+   in `aud`, since FerroSMART issues a client's tokens only for the bases
+   its `resources` lists (13.6 item 13), so the product admits every app
+   registered at FerroSMART and keeps no list of its own (`rfc9068 §4`,
+   `rfc8707`). It reads the person's own access with
+   `Caller::is_the_person`; one table serves professionals and patients, so
+   a deployment needs no second FerroSMART for patients. Its own access
+   policy still decides each request. The same table reads a Backend
+   Services token as `System`,
    because its `sub` is its `client_id` (`rfc9068 §2.2`), and a `persons`
    issuer reads the app-only tokens of its machines too. One issuer takes one
    table: `AuthSection::resolve` refuses a second table naming it (#591).
@@ -4331,24 +4263,6 @@ adoption issue tracks its own side (#521).
    [auth.issuer.smart]
    issuer = "https://smart.example.org"
    preset = "ferrosmart"
-
-   [auth.issuer.smart.profile]
-   delegates = [{ client = "growth-chart" }]
-   ```
-
-   The administrator chooses per issuer table (owner, 2026-11-19, #682):
-   `delegates` keeps the product's own list, and `audience_delegates =
-   true` admits every client whose FerroSMART token names this product in
-   `aud`, since FerroSMART issues a client's tokens only for the bases its
-   `resources` lists (13.6 item 13). An app is then registered once, at
-   FerroSMART. The key is read on a `persons` table under the `ferrosmart`
-   preset alone, and a product whose standing answers its client lists
-   (FerroEHR's CDR grant) takes neither; its own access policy still
-   decides each request.
-
-   ```toml
-   [auth.issuer.smart.profile]
-   audience_delegates = true
    ```
 
 3. **The product's discovery document describes FerroSMART.** The
@@ -5194,8 +5108,8 @@ choice to the server, the rules below are our own design.
   token's grant, so revoking the grant revokes it. The response names
   `issued_token_type` as an access token (`rfc8693 §2.2.1`), and an audit
   line names the client and both tokens' `jti`, never a value.
-- **What a product reads.** Under the `ferrosmart` preset with the
-  exchanging client among the `delegates`, the issued token reads as
+- **What a product reads.** Under the `ferrosmart` preset the issued
+  token reads as
   `CallerKind::Patient` and `is_the_person` (3.13, 3.14).
 
 The tests are `app/ferrosmart/tests/it/authorize/token_exchange.rs`.

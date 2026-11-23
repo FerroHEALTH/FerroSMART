@@ -21,7 +21,6 @@ audience = ["api://ferro"]
 jwks_file = "/dev/null"
 
 [issuer.i1.profile]
-first_party_clients = ["first-party-app"]
 
 [issuer.i2]
 issuer = "https://as.example.org/realms/other"
@@ -88,8 +87,8 @@ identifier_type = "login"
 #[test]
 fn a_banned_claim_as_key_fails_to_load() -> Outcome2 {
     let banned = ISSUERS.replacen(
-        "first_party_clients = [\"first-party-app\"]",
-        "first_party_clients = [\"first-party-app\"]\nperson_key = \"email\"",
+        "[issuer.i1.profile]\n",
+        "[issuer.i1.profile]\nperson_key = \"email\"\n",
         1,
     );
     let text = format!(

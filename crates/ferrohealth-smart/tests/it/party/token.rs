@@ -49,7 +49,6 @@ async fn an_entra_token_is_looked_up_by_its_oid_in_lower_case() -> Result<(), Bo
     let mut settings = Settings::new(ISSUER, AUDIENCE, IssuerKind::Persons);
     settings.jwks_file = Some(temp_file("party-entra-jwks.json", set.as_bytes()));
     settings.profile = Profile::resolve(Preset::Entra, &ProfileKeys::default())?;
-    settings.profile.first_party_clients = vec![String::from(CLIENT)];
     assert_eq!("oid", settings.profile.person_key);
     let server = ResourceServer::discover(settings.clone()).await?;
     let claims = json!({

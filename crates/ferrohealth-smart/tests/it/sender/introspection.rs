@@ -70,7 +70,6 @@ async fn introspector(
     )));
     let mut settings =
         IntrospectionSettings::new(issuer.uri(), AUDIENCE, auth, IssuerKind::Persons);
-    settings.profile.first_party_clients = vec![String::from(CLIENT)];
     settings.sender_constraint = constraint;
     Ok(Introspector::discover(settings).await?)
 }

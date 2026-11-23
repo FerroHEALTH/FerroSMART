@@ -43,7 +43,6 @@ fn planted(kind: CallerKind) -> Caller {
         Some(String::from("synthetic-client")),
         &format!("patient/{PLANTED}.rs {PLANTED}"),
         Some(String::from(PLANTED)),
-        false,
         kind,
     )
     .with_issuer(String::from("https://as.example.org"))

@@ -193,7 +193,7 @@ async fn a_patient_s_own_token_is_exchanged_for_their_ehr_at_the_paired_base() {
         ISSUER,
         &platform.openehr_base,
         ferrohealth_smart::kind::IssuerKind::Persons,
-        &crate::support::one_table("bridge"),
+        &ferrohealth_smart::profile::ProfileKeys::default(),
         body["access_token"].as_str().expect("a token"),
     )
     .await
