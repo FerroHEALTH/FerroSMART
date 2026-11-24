@@ -12,6 +12,26 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-24
+
+FerroSMART 0.5.0 lets a person log in with the PID in their EUDI Wallet as
+an ISO mdoc as well as an SD-JWT VC. The wallet login asks for both formats
+by default, and `credential_formats` narrows the request to one.
+
+### Added
+
+- The EUDI Wallet verifier accepts the PID as an ISO mdoc (`mso_mdoc`)
+  beside the SD-JWT VC, over the redirect and the Digital Credentials API.
+  The request offers both formats as one choice, and the wallet presents
+  one. FerroSMART checks the issuer's signature under the same anchors and
+  list of PID providers, each element's digest, the validity, the device
+  signature over the OpenID4VP session transcript and, when the MSO names
+  one, the Token Status List or identifier list in CWT format, with the
+  same refusal reasons as the SD-JWT VC. The new keys of
+  `[ferrosmart.upstream.openid4vp]` are `credential_formats` (both by
+  default), `doctype` and `mdoc_claims`. The same person gets the same
+  `sub` whichever format the wallet presents (#793).
+
 ## [0.4.0] - 2026-11-24
 
 FerroSMART 0.4.0 registers clients by RFC 7591 and RFC 7592, with the client
@@ -888,7 +908,8 @@ Shipped with functional changes because: the `url` fix is a lockfile move on `ma
   read its token response (SMART App Launch 2.2.0, Considerations for CORS
   support). Every other origin gets no CORS header (#560).
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.4.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.5.0...HEAD
+[0.5.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.4.0...ferrosmart-v0.5.0
 [0.4.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.3.0...ferrosmart-v0.4.0
 [0.3.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.2.0...ferrosmart-v0.3.0
 [0.2.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.1.0...ferrosmart-v0.2.0
