@@ -408,7 +408,33 @@ system = "http://fhir.nl/fhir/NamingSystem/bsn"
 
 The PID's administrative number names the person, and the `fhirUser`
 lookup finds their record by it. A PID without one is refused, since
-FerroSMART does not match people by name and birth date. FerroSMART
+FerroSMART does not match people by name and birth date.
+
+With a patient index such as FerroPIX, the index resolves the person
+instead. `identifier_systems` names the identifier system of each issuing
+country's administrative numbers, and the FHIR server's `patient_index`
+names the index and the system of the server's own patients there.
+FerroSMART asks the index by PIXm ITI-83 (or PDQm ITI-78 with
+`transaction = "pdqm"`) for the person's identifier in that system, as
+itself with the scope `system/Patient.rs`, and then searches the FHIR
+server for it as the person. Exactly one patient at each step is the
+person's `fhirUser` and the app's `patient`; no patient or several refuse
+the launch, and the app gets `access_denied`.
+
+```toml
+[ferrosmart.upstream.openid4vp]
+# ...
+identifier_systems = { NL = "http://fhir.nl/fhir/NamingSystem/bsn" }
+
+[[ferrosmart.resource]]
+base = "https://ehr.example.org/fhir"
+
+[ferrosmart.resource.patient_index]
+base = "https://pix.example.org/fhir"
+system = "urn:oid:2.16.840.1.113883.2.4.6.3.1"
+```
+
+FerroSMART
 refuses a presentation whose issuer does not chain to an anchor, whose
 type was not asked for, that has expired or been revoked, whose key
 binding does not hold, whose nonce was answered before, or that leaves out

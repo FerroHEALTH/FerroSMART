@@ -258,8 +258,8 @@ struct IdClaims<'a> {
     /// requesting identity data).
     #[serde(rename = "fhirUser", skip_serializing_if = "Option::is_none")]
     fhir_user: Option<&'a str>,
-    /// `name`, `preferred_username`, `email` and `email_verified`, as the
-    /// granted scope passes them on (OpenID Connect Core 1.0 §5.4).
+    /// The person's standard claims, as the granted scope passes them on
+    /// (OpenID Connect Core 1.0 §5.4).
     #[serde(flatten)]
     person: &'a crate::store::PersonClaims,
 }

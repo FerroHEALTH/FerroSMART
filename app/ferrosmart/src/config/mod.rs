@@ -280,6 +280,11 @@ pub struct ResourceSection {
     /// is found there by an identifier (`docs/architecture.md` §13.6
     /// item 9); empty, no search is made.
     pub fhir_user_lookup: Vec<FhirUserLookupSection>,
+    /// For a FHIR server, the patient index a wallet login's identifier is
+    /// resolved at to the person's `Patient` here (`docs/architecture.md`
+    /// §13.32); unset, a wallet login takes the `fhir_user_lookup`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patient_index: Option<PatientIndexSection>,
     /// For an openEHR server, the HTTP header a professional's patient
     /// picker lookup declares its purpose of use in; unset,
     /// `x-purpose-of-use`. Only with `purpose`.
@@ -330,6 +335,33 @@ pub struct FhirUserLookupSection {
     pub claim: String,
     /// The identifier's `system`, an absolute URI.
     pub system: String,
+}
+
+/// `[ferrosmart.resource.patient_index]`: a FerroPIX or other IHE PIXm
+/// Manager or PDQm Supplier, and the identifier system of the resource
+/// server's own patients in it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PatientIndexSection {
+    /// The index's FHIR base, the audience of the token FerroSMART asks it
+    /// with.
+    pub base: String,
+    /// The transaction the index is asked by.
+    pub transaction: IndexTransaction,
+    /// The `system` of the `Patient.identifier` the resource server's
+    /// patients carry, in which the index cross-references the person.
+    pub system: String,
+}
+
+/// The IHE transaction a patient index is asked by.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IndexTransaction {
+    /// PIXm 3.1.0 ITI-83, the `$ihe-pix` cross-reference query.
+    #[default]
+    Pixm,
+    /// PDQm 3.2.0 ITI-78, the `Patient` search by identifier.
+    Pdqm,
 }
 
 /// The resource type a `fhirUser` lookup searches (SMART App Launch 2.2.0,
