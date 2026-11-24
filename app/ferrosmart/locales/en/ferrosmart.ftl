@@ -129,3 +129,6 @@ chooser-intro = Sign in with the account you use for this app.
 saml-post-title = Continue to sign in
 saml-post-intro = Your sign-in continues at your identity provider.
 saml-post-continue = Continue
+wallet-title = Sign in with your EUDI Wallet
+wallet-intro = Share your person identification data from your European Digital Identity Wallet. Your browser may offer a wallet on this device or on your phone.
+wallet-open = Open your wallet

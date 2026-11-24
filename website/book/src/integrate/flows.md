@@ -265,6 +265,13 @@ The end-session endpoint's confirmation.
 The chooser of an app whose people log in at either of two providers.
 [Dark theme](img/chooser-dark.png).
 
+![The page titled "Sign in with your EUDI Wallet": it asks the person to share their person identification data from their European Digital Identity Wallet and offers Open your wallet](img/wallet.png)
+
+The page of an app whose people log in with their EUDI Wallet. Its link
+opens the wallet; where the browser has the Digital Credentials API, the
+press asks the browser instead.
+[Dark theme](img/wallet-dark.png).
+
 **Introspection.** `POST {issuer}/introspect` (RFC 7662) answers for any
 token FerroSMART issued. The caller is a confidential client that
 authenticates as at the token endpoint, by its `private_key_jwt` assertion

@@ -162,13 +162,9 @@ impl Verifier {
             .public_jwk(request.state)
             .map_err(|_failed| VerifierError::Key)?;
         let mut claims = json!({
-            "aud": AUDIENCE,
             "client_id": self.client_id,
             "response_type": "vp_token",
-            "response_mode": "direct_post.jwt",
-            "response_uri": self.response_uri,
             "nonce": request.nonce,
-            "state": request.state,
             "dcql_query": self.query,
             "client_metadata": {
                 "jwks": {"keys": [jwk]},
@@ -181,8 +177,26 @@ impl Verifier {
             "iat": request.issued_at,
             "exp": request.expires_at,
         });
-        if let (Some(wallet_nonce), Some(object)) = (request.wallet_nonce, claims.as_object_mut()) {
-            object.insert(String::from("wallet_nonce"), Value::from(wallet_nonce));
+        let Some(object) = claims.as_object_mut() else {
+            return Err(VerifierError::Sign);
+        };
+        let mut put = |name: &str, value: Value| object.insert(name.to_owned(), value);
+        match request.lane {
+            Lane::Redirect { wallet_nonce } => {
+                put("aud", Value::from(AUDIENCE));
+                put("response_mode", Value::from("direct_post.jwt"));
+                put("response_uri", Value::from(self.response_uri.as_str()));
+                put("state", Value::from(request.state));
+                if let Some(wallet_nonce) = wallet_nonce {
+                    put("wallet_nonce", Value::from(wallet_nonce));
+                }
+            }
+            // NOTE: OpenID4VP 1.0 Appendix A.2, a signed request names its origins and the
+            // dc_api.jwt response mode; HAIP 1.0 §5.2.
+            Lane::DigitalCredentials { origin } => {
+                put("response_mode", Value::from("dc_api.jwt"));
+                put("expected_origins", json!([origin]));
+            }
         }
         let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::ES256);
         header.typ = Some(String::from("oauth-authz-req+jwt"));
@@ -202,13 +216,30 @@ pub struct Request<'a> {
     pub nonce: &'a str,
     /// The ephemeral key the response is encrypted to.
     pub key: &'a EphemeralKey,
-    /// The `wallet_nonce` a wallet posted to the `request_uri` (OpenID4VP
-    /// 1.0 §5.10).
-    pub wallet_nonce: Option<&'a str>,
+    /// How the wallet is reached.
+    pub lane: Lane<'a>,
     /// When the object is signed, in seconds since the epoch.
     pub issued_at: i64,
     /// When the request lapses, in seconds since the epoch.
     pub expires_at: i64,
+}
+
+/// How a request reaches the wallet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lane<'a> {
+    /// By redirect, the answer posted to the response URI, with the
+    /// `wallet_nonce` a wallet posted to the `request_uri` (OpenID4VP 1.0
+    /// §5.10).
+    Redirect {
+        /// The `wallet_nonce`.
+        wallet_nonce: Option<&'a str>,
+    },
+    /// Over the Digital Credentials API from the page at `origin`
+    /// (OpenID4VP 1.0 Appendix A).
+    DigitalCredentials {
+        /// The page's origin.
+        origin: &'a str,
+    },
 }
 
 /// Returns the DCQL query of `asks`: one SD-JWT VC of the accepted types

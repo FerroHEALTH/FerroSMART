@@ -46,10 +46,10 @@ pub const JWKS_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(360
 
 /// The routes that answer a person's browser with a page.
 ///
-/// They are the consent page, the patient picker, the management page, and
-/// the error pages the authorization endpoint and the upstream callback
-/// draw. The book shows each (`website/book/src/integrate/img/`).
-pub const PAGES: [&str; 7] = [
+/// They are the consent page, the patient picker, the management page, the
+/// chooser, the EUDI Wallet page, and the error pages the authorization
+/// endpoint and the upstream callback draw. The book shows each (`website/book/src/integrate/img/`).
+pub const PAGES: [&str; 8] = [
     AUTHORIZE_ROUTE,
     CALLBACK_ROUTE,
     CONSENT_ROUTE,
@@ -57,6 +57,7 @@ pub const PAGES: [&str; 7] = [
     MANAGE_ROUTE,
     crate::logout::end_session::END_SESSION_ROUTE,
     authorize::choose::LOGIN_ROUTE,
+    crate::upstream::wallet::PAGE_ROUTE,
 ];
 
 /// What every request reads.

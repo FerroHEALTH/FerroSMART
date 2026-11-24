@@ -93,12 +93,14 @@ enum Visit {
     Logout,
     /// The chooser of an app whose people log in at either provider.
     Chooser,
+    /// The EUDI Wallet page.
+    Wallet,
 }
 
 /// Every shot: the image's name, without the theme suffix and the
 /// extension, the route of [`ferrosmart::server::PAGES`] it shows, and how
 /// the browser reaches it.
-const SHOTS: [(&str, &str, Visit); 9] = [
+const SHOTS: [(&str, &str, Visit); 10] = [
     ("consent-clinician", "/consent", Visit::ClinicianConsent),
     ("consent-patient", "/consent", Visit::PatientConsent),
     ("picker", "/picker", Visit::Picker),
@@ -108,6 +110,7 @@ const SHOTS: [(&str, &str, Visit); 9] = [
     ("error-other-browser", "/callback", Visit::OtherBrowser),
     ("logout-confirm", "/logout", Visit::Logout),
     ("chooser", "/login", Visit::Chooser),
+    ("wallet", "/wallet", Visit::Wallet),
 ];
 
 /// Whether the page in front of the browser has loaded and, when it loads
@@ -318,6 +321,7 @@ async fn reach(stack: &Stack, visit: Visit) -> (String, Option<String>) {
         Visit::OtherBrowser => (stack.url(&stack.other_browser().await), None),
         Visit::Logout => (stack.url("/logout?client_id=ward-overview"), None),
         Visit::Chooser => (stack.url("/login"), Some(stack.chooser().await)),
+        Visit::Wallet => (stack.url("/wallet"), Some(stack.wallet().await)),
     }
 }
 
@@ -339,6 +343,9 @@ async fn the_book_shows_every_page_in_light_and_dark() {
             browser.cookie(&stack, cookie.as_deref()).await;
             browser.open(&address).await;
             browser.capture(&output(image, suffix)).await;
+        }
+        if theme == "light" {
+            wallet_journey(&browser, &stack).await;
         }
         browser.driver.quit().await.expect("the browser closes");
         stack.stop().await;
@@ -438,4 +445,69 @@ fn every_page_route_has_a_screenshot_in_light_and_dark() {
             "no page of the book links {image}-dark.png"
         );
     }
+}
+
+/// The Digital Credentials API the journey hands the page before its module
+/// runs: `navigator.credentials.get` answers `ANSWER` to a signed OpenID4VP
+/// request whose `nonce` is `NONCE`, and an error to anything else.
+const STUBBED_API: &str = r#"
+window.DigitalCredential = function DigitalCredential() {};
+const stubbed = {
+  get: async (options) => {
+    const asked = options?.digital?.requests?.[0];
+    const payload = asked?.data?.request?.split(".")[1]?.replaceAll("-", "+").replaceAll("_", "/");
+    const nonce = payload ? JSON.parse(atob(payload)).nonce : null;
+    const matches = asked?.protocol === "openid4vp-v1-signed" && nonce === NONCE;
+    return { protocol: "openid4vp-v1-signed", data: matches ? ANSWER : { error: "invalid_request" } };
+  },
+};
+Object.defineProperty(Navigator.prototype, "credentials", { configurable: true, get: () => stubbed });
+"#;
+
+/// Drives the wallet page's module through a stubbed Digital Credentials
+/// API: a press on its link hands the API the page's signed request, and
+/// the wallet's answer, posted back by the page's form, completes the login
+/// on the consent page (#840).
+async fn wallet_journey(browser: &Browser, stack: &Stack) {
+    let cookie = stack.wallet().await;
+    let (nonce, answer) = stack.wallet_answer(&cookie).await;
+    let source = STUBBED_API
+        .replace("NONCE", &serde_json::to_string(&nonce).expect("a string"))
+        .replace("ANSWER", &answer.to_string());
+    let added = browser
+        .devtools(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({ "source": source }),
+        )
+        .await;
+    browser.cookie(stack, Some(&cookie)).await;
+    browser.open(&stack.url("/wallet")).await;
+    browser
+        .driver
+        .query(By::Css("[data-wallet-ready] a"))
+        .wait(WAIT, POLL)
+        .first()
+        .await
+        .expect("the module enhances the wallet link")
+        .click()
+        .await
+        .expect("the link is pressed");
+    let started = Instant::now();
+    loop {
+        let address = browser.driver.current_url().await.expect("an address");
+        if address.path() == "/consent" {
+            break;
+        }
+        assert!(
+            started.elapsed() <= WAIT,
+            "the wallet answer never reached the consent page: {address}"
+        );
+        tokio::time::sleep(POLL).await;
+    }
+    browser
+        .devtools(
+            "Page.removeScriptToEvaluateOnNewDocument",
+            json!({ "identifier": added.get("identifier").expect("an identifier") }),
+        )
+        .await;
 }

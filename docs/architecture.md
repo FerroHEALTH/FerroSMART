@@ -3270,6 +3270,8 @@ differently.
 | `GET /callback` | the upstream provider's redirect back, completed with the settings of the provider the request went to | `oidc core §3.1.2.5` |
 | `GET /saml/metadata` | FerroSMART's SAML 2.0 service provider metadata (`application/samlmetadata+xml`), when `[ferrosmart.saml]` is set | `saml-metadata §2.4.4`, `§4.1.1` |
 | `GET`, `POST /saml/acs` | the assertion consumer service: a `SAMLResponse` posted, or a `SAMLart` posted or redirected and resolved over mutual TLS, with the `RelayState` that names the pending request (13.26) | `saml-bindings §3.5`, `§3.6`; `saml-profiles §4.1.4` |
+| `GET /wallet`, `GET /wallet/dc.js` | the page that offers the EUDI Wallet by its link and, through its module, the W3C Digital Credentials API, with a request signed for the page's origin (13.32) | `openid4vp` Appendix A; `haip §5.2` |
+| `POST /wallet/dc` | the Digital Credentials API's answer, posted by the page's form in the browser that began the request (13.32) | `openid4vp` Appendix A.4 |
 | `GET`, `POST /wallet/request/{state}` | the signed request object of an EUDI Wallet login, served as often as the wallet asks, echoing a posted `wallet_nonce` (13.32) | `openid4vp §5.10`; `rfc9101 §5.2` |
 | `POST /wallet/response` | the wallet's encrypted answer: a refusal is a `400` naming its reason, an accepted answer a `redirect_uri` with a fresh response code (13.32) | `openid4vp §8.2`, `§8.3.1` |
 | `GET /wallet/complete` | the response code brought back by the browser that began the request, where the login completes (13.32) | `openid4vp §14.2`; `haip §5.1` |
@@ -3437,6 +3439,7 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 # vct_values = ["urn:eudi:pid:1"]
 # claims = ["family_name", "given_name", "birthdate", "personal_administrative_number", "issuing_country"]
 # identifier_claim = "personal_administrative_number"       # the claim the fhirUser lookup reads
+# digital_credentials_api = true            # the page offers the W3C Digital Credentials API beside the link
 
 [[ferrosmart.role]]                           # policy as content: what a role may be granted
 name = "clinician"
@@ -5034,9 +5037,9 @@ is ETSI TS 119 472-2 V1.2.1, recorded by sha256 under
 amended by 2026/1731 (Annex XII), applies `etsi 472-2` clauses 4.1, 4.2, 5
 and 6: an ISO/IEC mdoc profile and the OpenID4VP profile under `haip`. A
 relying party "shall" meet clause 6.5, the Digital Credentials API
-(OIDFVP-HAIP-SUPPORT-05), which FerroHEALTH/FerroSMART#840 builds. The
-redirect mechanism of clause 6.4 is built here and is what the OpenID
-Foundation's verifier plan tests. The ISO/IEC 18013-7 Annex C mdoc API is
+(OIDFVP-HAIP-SUPPORT-05), and both mechanisms are built: the redirect of
+clause 6.4, which the OpenID Foundation's verifier plan tests, and the
+API of clause 6.5 (FerroHEALTH/FerroSMART#840). The ISO/IEC 18013-7 Annex C mdoc API is
 an RP "should" (ISO/IEC 18013-SUPPORT-04) and is not built. The PID is
 accepted as an SD-JWT VC (`dc+sd-jwt`, `haip §5.3.2`) of type
 `urn:eudi:pid:1` (Implementing Regulation (EU) 2024/2977 Annex as amended,
@@ -5112,6 +5115,30 @@ the login completes there; an answer brought back in another session is
 refused (`haip §5.1`; `openid4vp §14.2`). The answer is taken once and its
 row stays until the request lapses.
 
+**The Digital Credentials API.** With `digital_credentials_api` on, the
+default, the browser goes first to `GET {issuer}/wallet`. That page's link
+is the redirect invocation above, so the page works with no script. Its
+module, `{issuer}/wallet/dc.js`, is a plain ES module served from
+FerroSMART's own origin under `script-src 'self'`. Where the browser has
+the API, the module answers a press of the link by calling
+`navigator.credentials.get` with the protocol `openid4vp-v1-signed`
+(`openid4vp` Appendix A.1; `haip §5.2`; `etsi 472-2` OIDFVP-HAIP-API-03
+rules out the unsigned request). The request object is the redirect
+lane's, with `response_mode` `dc_api.jwt` and `expected_origins` naming
+the issuer's origin, and with no `response_uri` and no `state`
+(`openid4vp` Appendix A.2, A.3.2). The page's own form then posts the
+answer to `POST {issuer}/wallet/dc`, in the browser that began the request,
+with the page's form token. The presentation is checked as above, with the
+Key Binding JWT's `aud` set to `origin:` and the page's origin, never the
+client identifier (`openid4vp` Appendix A.4, B.3.6). The answer takes the
+nonce the same way, so a presentation is admitted once whichever lane
+carries it. A refusal or a wallet's error there ends the request with
+`access_denied` for the app and is recorded. The page's `form-action`
+names the app's origin, since that redirect follows the post (CSP Level 3
+§6.4.2). A browser without the API, or a person who cancels its dialog,
+follows the link. With `digital_credentials_api` off, the browser goes
+straight to the wallet endpoint.
+
 **The person.** The PID's `issuing_country` and identifier claim name the
 person. The FerroSMART `sub` is pairwise (13.6 item 9) over the entry's
 first credential type and `{issuing_country}:{identifier}`, which
@@ -5132,8 +5159,9 @@ and its path), `access_key_file` (its PKCS#8 P-256 key), and
 the certificate and the certificate refused when self-signed.
 `issuer_anchor_files` hold the PID providers' anchors as PEM certificates.
 `wallet_endpoint`, `vct_values`, `claims` (dotted for a nested claim, the
-identifier claim and `issuing_country` among them) and `identifier_claim`
-have the defaults above. `ferrosmart upstream registration <entry>` prints
+identifier claim and `issuing_country` among them), `identifier_claim` and
+`digital_credentials_api` have the defaults above.
+`ferrosmart upstream registration <entry>` prints
 the request URI, the response URI, the redirect URI, the types and the
 attributes the registrar records (Implementing Regulation (EU) 2025/848
 Art 5, Annex I).

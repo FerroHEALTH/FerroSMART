@@ -270,6 +270,7 @@ only a `minimum`.
 | `vct_values` | The credential types accepted; `["urn:eudi:pid:1"]` by default. The first names the person's pairwise `sub` |
 | `claims` | The PID claims asked for, dotted for a nested claim, with `identifier_claim` and `issuing_country` among them; the PID's names and the administrative number by default |
 | `identifier_claim` | The claim whose value names the person and that a [`fhirUser` lookup](#ferrosmartresource) reads; `personal_administrative_number` by default |
+| `digital_credentials_api` | Whether the wallet page offers the W3C Digital Credentials API beside its link; `true` by default. With `false` the browser goes straight to `wallet_endpoint` |
 
 ## `[ferrosmart.saml]`
 

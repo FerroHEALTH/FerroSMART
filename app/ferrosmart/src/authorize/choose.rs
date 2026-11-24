@@ -163,7 +163,7 @@ pub(super) fn sign_in_at(
         let begun = login.begin().map_err(fail)?;
         return Ok((
             Departure::Redirect {
-                to: begun.invocation,
+                to: begun.departure,
                 saml: false,
             },
             [begun.state, begun.nonce, begun.key],
