@@ -21,7 +21,9 @@
 #                                same way, once with the PID as an SD-JWT VC
 #                                and once as an mdoc (#793),
 #                                scripts/oidf/verifier-client.sh starting each
-#                                presentation
+#                                presentation and uploading the screenshot of
+#                                FerroSMART's page each accepted one asks for
+#                                (#851)
 #   scripts/oidf/lane.sh certify  the verifier plan at the OpenID Foundation's
 #                                hosted suite, with CONFORMANCE_TOKEN, and
 #                                FerroSMART reached at TUNNEL_URL
@@ -31,8 +33,10 @@
 # superuser URL without a database); OIDF_PYTHON, a Python with the
 # packages of app/ferrosmart/oidf/requirements.txt; docker, npm, openssl,
 # psql, jq, xxd and curl; ports 8080, 8180, 8443 to 8445, 9443 and 27017
-# free on the loopback interface; and sudo for the /etc/hosts name. It
-# writes its files and logs to LANE_DIR.
+# free on the loopback interface; and sudo for the /etc/hosts name.
+# `verifier` and `certify` also need OIDF_CHROMEDRIVER, a chromedriver
+# beside its Chrome, and port 9515 free. It writes its files and logs to
+# LANE_DIR.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -320,6 +324,26 @@ run_plan() {
   done < <(jq -r '.modules[] | [.testModule, (.instances[-1] // "")] | @tsv' "$LANE_DIR/plan-$plan.json")
 }
 
+# Every verifier module the suite holds in REVIEW carries the screenshot
+# of FerroSMART's page and no placeholder left open; any other fails the lane.
+screenshots() {
+  local plan=$1 module instance images failures=0
+  local -a auth=()
+  [ -z "${CONFORMANCE_TOKEN:-}" ] || auth=(-H "Authorization: Bearer $CONFORMANCE_TOKEN")
+  while IFS=$'\t' read -r module instance; do
+    [ "$(awk -F'\t' -v plan="$plan" -v module="$module" '$1 == plan && $2 == module { print $3 }' "$LANE_DIR/actual.tsv")" = REVIEW ] ||
+      continue
+    images=$(curl -sS --cacert "$LANE_DIR/trust.pem" "${auth[@]}" "$suite/api/log/$instance/images")
+    if ! jq -e 'any(.[]; (.img // "") | startswith("data:image/png;base64,")) and all(.[]; has("upload") | not)' \
+      <<< "$images" > /dev/null; then
+      echo "oidf-lane: $plan $module is in REVIEW without the screenshot of FerroSMART's page" >&2
+      failures=$((failures + 1))
+    fi
+  done < <(jq -r '.modules[] | [.testModule, (.instances[-1] // "")] | @tsv' "$LANE_DIR/plan-$plan.json")
+  [ "$failures" -eq 0 ] || return 1
+  echo "oidf-lane: every $plan module in REVIEW carries the screenshot of FerroSMART's page"
+}
+
 # Every module's result against expected.tsv, in the log and the job
 # summary; any difference fails the lane.
 compare() {
@@ -485,7 +509,8 @@ verifier_plans() {
 verifier() {
   : "${LANE_PG:?the PostgreSQL URL}" "${LANE_DIR:?the lane directory}" "${OIDF_PYTHON:?the Python of the runner}"
   local plan
-  export LANE_PG LANE_DIR OIDF_SUITE=$suite OIDF_ISSUER=$issuer
+  : "${OIDF_CHROMEDRIVER:?the chromedriver of headless Chrome}"
+  export LANE_PG LANE_DIR OIDF_SUITE=$suite OIDF_ISSUER=$issuer OIDF_CHROMEDRIVER
   export CONFORMANCE_SERVER="$suite/" CONFORMANCE_SERVER_MTLS="https://$host:8444/" CONFORMANCE_DEV_MODE=1
   export CONFORMANCE_MAX_CONSECUTIVE_FAILURES=1000
   mkdir -p "$LANE_DIR"
@@ -501,6 +526,9 @@ verifier() {
   start_suite
   verifier_plans "$issuer" "$suite/" ferrosmart-verifier
   compare
+  for plan in "${plans[@]}"; do
+    if [ "${plan##* }" = verifier ]; then screenshots "$(plan_key "${plan%% *}")"; fi
+  done
 }
 
 # The runner calls the verifier's driver, not the relying party's.
@@ -514,6 +542,8 @@ verifier_driver() {
 certify() {
   : "${LANE_PG:?the PostgreSQL URL}" "${LANE_DIR:?the lane directory}" "${OIDF_PYTHON:?the Python of the runner}"
   : "${CONFORMANCE_TOKEN:?the token of the hosted suite}" "${TUNNEL_URL:?the public URL of FerroSMART}"
+  : "${OIDF_CHROMEDRIVER:?the chromedriver of headless Chrome}"
+  export OIDF_CHROMEDRIVER
   local hosted=https://www.certification.openid.net plan
   suite=$hosted
   export LANE_PG LANE_DIR OIDF_SUITE=$hosted OIDF_ISSUER=$TUNNEL_URL CONFORMANCE_SERVER="$hosted/"
@@ -529,6 +559,9 @@ certify() {
   : > "$LANE_DIR/actual.tsv"
   verifier_plans "$TUNNEL_URL" "$hosted/" ferrosmart-verifier-certification plain
   compare
+  for plan in "${plans[@]}"; do
+    if [ "${plan##* }" = verifier ]; then screenshots "$(plan_key "${plan%% *}")"; fi
+  done
 }
 
 case "${1:-}" in

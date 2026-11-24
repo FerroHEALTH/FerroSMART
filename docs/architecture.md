@@ -4552,9 +4552,13 @@ makes. `scripts/oidf/verifier-client.sh` starts each presentation at
 FerroSMART, whose wallet endpoint is the suite's authorization endpoint,
 and records whether FerroSMART accepted or refused it. Every module's
 result is a row of `expected.tsv`. A negative module ends in FerroSMART's
-`400` at the response URI. A positive one ends as REVIEW, since the suite
-asks for a screenshot of the verifier's success, which the lane does not
-upload. The `certification` job runs the same plan at
+`400` at the response URI. After a positive one, headless Chrome takes the
+way back with the browser's session, and the driver uploads its screenshot
+of the page FerroSMART shows to the module's image placeholder through the
+suite's `POST /api/log/{id}/images/{placeholder}` (#851). The suite then
+ends the module as REVIEW, the result it gives every module with an
+image, for its reviewers; the lane fails when a module in REVIEW lacks
+the screenshot or keeps a placeholder open. The `certification` job runs the same plan at
 www.certification.openid.net, by hand or weekly from `main`. It reaches
 FerroSMART through a Cloudflare quick tunnel (cloudflared, pinned by
 sha256), reads the suite's token from the `OIDF_CONFORMANCE_TOKEN` secret
