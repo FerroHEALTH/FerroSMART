@@ -76,7 +76,7 @@ jobs:
           cargo build -p ferrosmart --locked
           python3 -m venv "$RUNNER_TEMP/oidf-python"
           "$OIDF_PYTHON" -m pip install --quiet --require-hashes --no-deps -r app/ferrosmart/oidf/requirements.txt
-          scripts/oidf/lane.sh verifier
+          OIDF_CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" scripts/oidf/lane.sh verifier
       - if: failure() || cancelled()
         name: Keep the lane's logs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -85,6 +85,7 @@ jobs:
           path: |
             ${{ runner.temp }}/oidf-verifier/*.log
             ${{ runner.temp }}/oidf-verifier/*.tsv
+            ${{ runner.temp }}/oidf-verifier/*.png
             ${{ runner.temp }}/oidf-verifier/plan-*.json
           if-no-files-found: ignore
 
@@ -153,7 +154,7 @@ jobs:
             sleep 1
           done
           [ -n "$tunnel" ] || { echo "the tunnel gave no URL" >&2; exit 1; }
-          TUNNEL_URL="$tunnel" scripts/oidf/lane.sh certify
+          TUNNEL_URL="$tunnel" OIDF_CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" scripts/oidf/lane.sh certify
       - if: failure() || cancelled()
         name: Keep the run's logs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -162,4 +163,5 @@ jobs:
           path: |
             ${{ runner.temp }}/oidf-verifier/*.log
             ${{ runner.temp }}/oidf-verifier/*.tsv
+            ${{ runner.temp }}/oidf-verifier/*.png
           if-no-files-found: ignore

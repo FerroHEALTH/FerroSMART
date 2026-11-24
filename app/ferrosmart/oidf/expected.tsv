@@ -87,10 +87,10 @@ oidcc-basic-certification-test-plan	oidcc-claims-essential	FAILED	-	650	FerroSMA
 oidcc-basic-certification-test-plan	oidcc-ensure-request-object-with-redirect-uri	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
 oidcc-basic-certification-test-plan	oidcc-refresh-token	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
 oidcc-basic-certification-test-plan	oidcc-ensure-request-with-valid-pkce-succeeds	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-happy-flow	REVIEW	accepted	-	the suite asks for a screenshot of the verifier's success, which this lane does not upload
-oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-minimal-cnf-jwk	REVIEW	accepted	-	the suite asks for a screenshot of the verifier's success, which this lane does not upload
-oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-request-uri-method-post	REVIEW	accepted	-	the suite asks for a screenshot of the verifier's success, which this lane does not upload
-oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-request-uri-fetched-twice	REVIEW	accepted	-	the suite asks for a screenshot of the verifier's success, which this lane does not upload
+oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-happy-flow	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
+oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-minimal-cnf-jwk	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
+oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-request-uri-method-post	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
+oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-request-uri-fetched-twice	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-invalid-kb-jwt-signature	PASSED	refused	-	
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-invalid-credential-signature	PASSED	refused	-	
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-invalid-sd-hash	PASSED	refused	-	
@@ -99,5 +99,5 @@ oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-invalid-kb-jwt-aud	
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-kb-jwt-iat-in-past	PASSED	refused	-	
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-kb-jwt-iat-in-future	PASSED	refused	-	
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-present-revoked-credential	PASSED	refused	-	
-oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-present-credential-without-status	REVIEW	accepted	-	the suite asks for a screenshot of the verifier's success, which this lane does not upload
+oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-present-credential-without-status	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-wrong-vct	PASSED	refused	-	
