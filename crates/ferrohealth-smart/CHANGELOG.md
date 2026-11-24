@@ -11,7 +11,54 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.34.0] - Unreleased
+## [0.34.0] - 2026-11-24
+
+### Added
+
+- `ProofCheck::check_token_request` checks the `DPoP` proof of a token
+  request, which presents no access token and so carries no `ath` (RFC 9449
+  §5) (#807).
+
+### Changed
+
+- Breaking: the caller is read from the token's standard claims the same
+  way for every issuer. An issuer is a SMART App Launch 2.2 authorization
+  server unless its table declares `kind = "federation"`, so a product
+  trusts FerroSMART with an `[auth.issuer.<name>]` table naming only its
+  `issuer`. `CallerKind` is `System`, a user by the type of their
+  `fhirUser` (`Patient`, `Practitioner`, `PractitionerRole`,
+  `RelatedPerson`, `Person`, or `User` with none), `ExternalPerson` or
+  `ExternalOrganisation`; `Caller::actor` is the RFC 8693 actor,
+  `Caller::fhir_user` the `fhirUser` and `Caller::represented` the patient
+  a `RelatedPerson` acts for. A token's `typ` is `at+jwt` or
+  `application/at+jwt` and its `scope` required (#805).
+
+### Removed
+
+- Breaking: the authorization server's registry is the one list of
+  clients. A token from a trusted issuer whose `aud` names the resource
+  server admits its client, and an RFC 8693 `act` is read as asserted
+  (`Caller::actor` carries the actor). The profile keys
+  `first_party_clients`, `delegates`, `audience_delegates` and
+  `issuer_client_is_person`, the issuer key `scopeless_subjects`, the
+  `kind::standing` module with `Standing` and `StandingSource`,
+  `config::ProductStandingSection`, `Caller::scopeless`, the `scopeless`
+  argument of `Caller::new`, and the `UnlistedClient`, `UnlistedActor` and
+  `RepresentationThroughDelegate` refusals are removed; a configuration
+  that sets one of the keys is refused as an unknown key (#804).
+- Breaking: the `persons`, `patients` and `machines` issuer kinds, the
+  `preset` and `profile_file` keys with the `rfc9068`, `entra`, `keycloak`,
+  `okta` and `ferrosmart` presets, the `[auth.idp]` table with the
+  `idp-entra` feature and the party adapters, the party table's `guests`
+  key, and the profile keys `person_key`, `tenant_claim`, `client_claims`,
+  `app_only`, `guest`, `impersonation_marker`, `expect`, `user_claims`,
+  `person_equality`, `unstable_claims`, `representation`,
+  `act_represents_patient`, `fhir_user_patient`, `patient_context`,
+  `party_identifier_type`, `scope_claim`, `app_only_scope_claim` and
+  `adapter` are removed, and a configuration that sets one is refused as an
+  unknown key. `CallerKind::Delegated`, `Representative`,
+  `PatientRepresentative` and `Guest`, `Caller::person_key` and
+  `Caller::tenant` go with them (#805).
 
 ## [0.33.1] - 2026-11-22
 
@@ -2576,7 +2623,8 @@ it issues no token and holds no key that signs one.
   `TODO(#N)` guards, the issue and pull request templates, the labels, the
   rulesets and the `crates-io` environment.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.1...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.34.0...HEAD
+[0.34.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.1...ferrohealth-smart-v0.34.0
 [0.33.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.0...ferrohealth-smart-v0.33.1
 [0.33.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.32.0...ferrohealth-smart-v0.33.0
 [0.32.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.31.0...ferrohealth-smart-v0.32.0
