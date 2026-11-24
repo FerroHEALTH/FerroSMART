@@ -85,6 +85,8 @@ pub(crate) struct Pki {
     pub(crate) pid_root: Authority,
     /// The PID provider, under the anchor.
     pub(crate) issuer: Authority,
+    /// Another root, which no list names.
+    pub(crate) other_root: Authority,
     /// A provider under another root.
     pub(crate) stranger: Authority,
 }
@@ -102,6 +104,7 @@ impl Pki {
             access,
             pid_root,
             issuer,
+            other_root,
             stranger,
         }
     }
@@ -268,4 +271,78 @@ pub(crate) fn status_list(signer: &Authority, uri: &str, size: usize, revoked: &
 /// request's `jwk` with A256GCM.
 pub(crate) fn sealed(payload: &Value, jwk: &Value) -> String {
     ferrosmart::wallet::jwe::encrypt(payload.to_string().as_bytes(), jwk, "A256GCM").expect("seals")
+}
+
+/// The operator of the list of PID providers, which its signer's subject
+/// names (ETSI TS 119 602 §6.8.0).
+pub(crate) const OPERATOR: &str = "European Commission";
+
+impl Authority {
+    /// Makes the certificate that signs the list of PID providers, its
+    /// subject naming `country` and `organization`.
+    pub(crate) fn list_signer(country: &str, organization: &str) -> Self {
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("a key");
+        let mut params = CertificateParams::new(Vec::<String>::new()).expect("params");
+        params.distinguished_name.push(DnType::CountryName, country);
+        params
+            .distinguished_name
+            .push(DnType::OrganizationName, organization);
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "PID providers list signer");
+        let certificate = params.self_signed(&key).expect("the certificate signs");
+        Self {
+            params,
+            key,
+            der: certificate.der().to_vec(),
+            pem: certificate.pem(),
+        }
+    }
+}
+
+/// Returns the list of PID providers `signer` signs, listing the issuance
+/// certificate of each of `listed`, next updated at `next_update` (ETSI TS
+/// 119 602 Annex D).
+pub(crate) fn providers_list(
+    signer: &Authority,
+    listed: &[&Authority],
+    next_update: i64,
+) -> String {
+    let at = |seconds: i64| {
+        jiff::Timestamp::from_second(seconds)
+            .expect("an instant")
+            .to_string()
+    };
+    let entities: Vec<Value> = listed
+        .iter()
+        .map(|provider| {
+            json!({
+                "TrustedEntityInformation": {"TEName": [{"lang": "en", "value": "A PID provider"}]},
+                "TrustedEntityServices": [{"ServiceInformation": {
+                    "ServiceName": [{"lang": "en", "value": "PID issuance"}],
+                    "ServiceTypeIdentifier": "http://uri.etsi.org/19602/SvcType/PID/Issuance",
+                    "ServiceDigitalIdentity": {"X509Certificates": [{"val": STANDARD.encode(&provider.der)}]},
+                }}],
+            })
+        })
+        .collect();
+    let lote = json!({"LoTE": {
+        "ListAndSchemeInformation": {
+            "LoTEVersionIdentifier": 1,
+            "LoTESequenceNumber": 1,
+            "LoTEType": "http://uri.etsi.org/19602/LoTEType/EUPIDProvidersList",
+            "SchemeOperatorName": [{"lang": "en", "value": OPERATOR}],
+            "SchemeTerritory": "EU",
+            "ListIssueDateTime": at(now() - 60),
+            "NextUpdate": at(next_update),
+        },
+        "TrustedEntitiesList": entities,
+    }});
+    let mut header = Header::new(Algorithm::ES256);
+    header.typ = None;
+    header.x5t_s256 = Some(URL_SAFE_NO_PAD.encode(aws_lc_rs::digest::digest(
+        &aws_lc_rs::digest::SHA256,
+        &signer.der,
+    )));
+    signer.sign(&header, &lote)
 }

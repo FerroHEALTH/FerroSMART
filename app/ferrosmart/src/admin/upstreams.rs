@@ -42,6 +42,13 @@ pub(super) async fn upstreams(State(state): State<Arc<AppState>>) -> Result<Resp
         }
     }
     let mut read: Vec<Option<Vec<Value>>> = vec![None; state.providers().iter().count()];
+    for (index, provider) in state.providers().iter().enumerate() {
+        if let (Some(login), Some(slot)) = (provider.wallet(), read.get_mut(index))
+            && let Some(list) = login.list_read().await
+        {
+            *slot = Some(wallet_documents(&list));
+        }
+    }
     while let Some(joined) = probes.join_next().await {
         // NOTE: our own design, a probe that panicked reports nothing; the others stand.
         if let Ok((index, documents)) = joined
@@ -152,6 +159,27 @@ fn jwk_expiries(set: &Value) -> Vec<String> {
         .collect();
     expiries.sort();
     expiries
+}
+
+/// Returns the state of a wallet's list of PID providers as this replica
+/// last read it, with the next update of the list in use.
+fn wallet_documents(read: &crate::upstream::wallet::ListRead) -> Vec<Value> {
+    let at = read
+        .read_at
+        .and_then(|at| Timestamp::from_second(at).ok())
+        .unwrap_or_else(Timestamp::now);
+    let failure = if read.read_at.is_none() {
+        Some("the list has not been read yet")
+    } else {
+        read.failure.as_deref()
+    };
+    let mut entry = document("pid_providers_list", at, failure);
+    if let (Some(list), Some(members)) = (&read.list, entry.as_object_mut())
+        && let Ok(until) = Timestamp::from_second(list.next_update)
+    {
+        members.insert(String::from("valid_until"), Value::from(until.to_string()));
+    }
+    vec![entry]
 }
 
 /// Returns the state of a SAML provider's metadata as this replica last
