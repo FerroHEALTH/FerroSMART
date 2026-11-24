@@ -9,6 +9,7 @@
 mod api;
 pub(crate) mod kit;
 mod list;
+mod mdoc;
 mod refusals;
 
 use base64::Engine as _;

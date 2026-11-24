@@ -19,12 +19,13 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::{Identity, UPSTREAM_TIMEOUT};
-use crate::wallet::Refusal;
 use crate::wallet::jwe::EphemeralKey;
+use crate::wallet::mdoc::{self, Handover, MsoStatus};
 use crate::wallet::request::{Asks, Lane, Request, Verifier, VerifierError};
-use crate::wallet::sdjwt::{Expected, IssuerKey, Presentation, Verified};
-use crate::wallet::status::StatusToken;
+use crate::wallet::sdjwt::{Expected, IssuerKey, Presentation};
+use crate::wallet::status::{CwtKind, CwtList, StatusToken};
 use crate::wallet::x509::{AnchorError, Anchors};
+use crate::wallet::{Format, Refusal};
 
 /// The login page that offers the wallet by redirect and through the
 /// Digital Credentials API.
@@ -87,12 +88,26 @@ pub struct WalletSection {
     /// Where the wallet is invoked: `eu-eaap://` by default (ETSI TS 119
     /// 472-2 OIDFVP-HAIP-REDIRECTS-03).
     pub wallet_endpoint: String,
-    /// The credential types accepted; the PID's `urn:eudi:pid:1` by
-    /// default (Implementing Regulation (EU) 2024/2977 Annex §4.2).
+    /// The credential formats asked for, of which the wallet presents one:
+    /// `dc+sd-jwt` and `mso_mdoc` by default, the two the PID is issued in
+    /// (Implementing Regulation (EU) 2024/2977 Annex, as amended by
+    /// 2026/1731, §4).
+    pub credential_formats: Vec<Format>,
+    /// The credential types accepted as an SD-JWT VC; the PID's
+    /// `urn:eudi:pid:1` by default (Implementing Regulation (EU) 2024/2977
+    /// Annex §4.2).
     pub vct_values: Vec<String>,
-    /// The claims asked for, dotted for a nested claim; the PID's names,
-    /// the identifier claim and `issuing_country` among them.
+    /// The claims asked for of an SD-JWT VC, dotted for a nested claim; the
+    /// PID's names, the identifier claim and `issuing_country` among them.
     pub claims: Vec<String>,
+    /// The document type accepted as an mdoc, which is also the namespace
+    /// of its elements; the PID's `eu.europa.ec.eudi.pid.1` by default (PID
+    /// Rulebook §3.1.1).
+    pub doctype: String,
+    /// The data elements asked for of an mdoc; the PID's names, the
+    /// identifier claim and `issuing_country` among them (PID Rulebook
+    /// §3.1.2).
+    pub mdoc_claims: Vec<String>,
     /// The claim whose value is the person's identifier, which the
     /// `fhirUser` lookup reads; `personal_administrative_number` by default.
     pub identifier_claim: String,
@@ -113,11 +128,23 @@ impl Default for WalletSection {
             issuer_anchor_files: Vec::new(),
             pid_providers_list: None,
             wallet_endpoint: String::from("eu-eaap://"),
+            credential_formats: vec![Format::SdJwtVc, Format::Mdoc],
             vct_values: vec![String::from("urn:eudi:pid:1")],
             claims: [
                 "family_name",
                 "given_name",
                 "birthdate",
+                "personal_administrative_number",
+                ISSUING_COUNTRY,
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+            doctype: String::from("eu.europa.ec.eudi.pid.1"),
+            mdoc_claims: [
+                "family_name",
+                "given_name",
+                "birth_date",
                 "personal_administrative_number",
                 ISSUING_COUNTRY,
             ]
@@ -212,10 +239,16 @@ pub struct WalletUpstream {
     request_base: Url,
     /// The login page that offers the wallet.
     page: Url,
-    /// The credential types accepted.
+    /// The credential formats asked for.
+    formats: Vec<Format>,
+    /// The credential types accepted as an SD-JWT VC.
     vct_values: Vec<String>,
-    /// The claims asked for, by name.
+    /// The claims asked for of an SD-JWT VC, by name.
     claims: Vec<String>,
+    /// The document type accepted as an mdoc.
+    doctype: String,
+    /// The data elements asked for of an mdoc.
+    mdoc_claims: Vec<String>,
     /// The identifier claim.
     identifier_claim: String,
     /// The origin of the issuer, where the login page is served.
@@ -253,6 +286,18 @@ impl WalletUpstream {
     pub const fn digital_credentials_api(&self) -> bool {
         self.digital_credentials_api
     }
+
+    /// Returns the URI the wallet posts its response to.
+    #[must_use]
+    pub fn response_uri(&self) -> &str {
+        self.verifier.response_uri()
+    }
+
+    /// Whether the request asks for the format `format`.
+    #[must_use]
+    pub fn asks_for(&self, format: Format) -> bool {
+        self.formats.contains(&format)
+    }
 }
 
 /// Returns the wallet entry `section` describes, answering under the
@@ -273,12 +318,33 @@ pub fn upstream(
         .ok_or(WalletConfigError::Rule(
             "`vct_values` names at least one type, the first an absolute URI",
         ))?;
-    if section.identifier_claim.is_empty()
-        || !section.claims.contains(&section.identifier_claim)
-        || !section.claims.iter().any(|claim| claim == ISSUING_COUNTRY)
+    let formats = &section.credential_formats;
+    if formats.is_empty()
+        || formats.iter().enumerate().any(|(index, format)| {
+            formats
+                .get(index + 1..)
+                .is_some_and(|rest| rest.contains(format))
+        })
     {
         return Err(WalletConfigError::Rule(
+            "`credential_formats` names each format once, at least one",
+        ));
+    }
+    let names_the_person = |claims: &[String]| {
+        !section.identifier_claim.is_empty()
+            && claims.contains(&section.identifier_claim)
+            && claims.iter().any(|claim| claim == ISSUING_COUNTRY)
+    };
+    if formats.contains(&Format::SdJwtVc) && !names_the_person(&section.claims) {
+        return Err(WalletConfigError::Rule(
             "`claims` names `identifier_claim` and `issuing_country`",
+        ));
+    }
+    if formats.contains(&Format::Mdoc)
+        && (section.doctype.is_empty() || !names_the_person(&section.mdoc_claims))
+    {
+        return Err(WalletConfigError::Rule(
+            "`doctype` is set and `mdoc_claims` names `identifier_claim` and `issuing_country`",
         ));
     }
     let anchor_files = section
@@ -303,8 +369,11 @@ pub fn upstream(
         .collect();
     let key_identifiers = anchors.key_identifiers();
     let asks = Asks {
+        formats,
         vct_values: &section.vct_values,
         claims: &paths,
+        doctype: &section.doctype,
+        elements: &section.mdoc_claims,
         key_identifiers: &key_identifiers,
     };
     let verifier = Verifier::new(
@@ -332,8 +401,11 @@ pub fn upstream(
         endpoint,
         request_base: route(issuer, "/wallet/request"),
         page: route(issuer, PAGE_ROUTE),
+        formats: formats.clone(),
         vct_values: section.vct_values.clone(),
         claims: section.claims.clone(),
+        doctype: section.doctype.clone(),
+        mdoc_claims: section.mdoc_claims.clone(),
         identifier_claim: section.identifier_claim.clone(),
         origin: issuer.origin().ascii_serialization(),
         digital_credentials_api: section.digital_credentials_api,
@@ -580,13 +652,12 @@ impl WalletLogin {
             .map_err(WalletError::Sign)
     }
 
-    /// Checks the one presentation `presentation` against the request's
-    /// `nonce` and the `audience` of its lane at `now`, and returns the
-    /// person it names.
+    /// Checks the SD-JWT VC `presentation` against the request's `nonce` and
+    /// the `audience` of its lane at `now`, and returns the person it names.
     ///
     /// # Errors
     /// Returns the [`Refusal`] of the first check that fails.
-    pub async fn verify(
+    pub async fn verify_sd_jwt(
         &self,
         presentation: &str,
         nonce: &str,
@@ -626,7 +697,62 @@ impl WalletLogin {
                 .map_err(|_untrusted| Refusal::StatusUnavailable)?;
             token.check(&signer, reference, now)?;
         }
-        self.identity(verified)
+        self.identity(
+            verified.claims,
+            verified.presented_at,
+            &self.upstream.claims,
+        )
+    }
+
+    /// Checks the mdoc `presentation`, a base64url `DeviceResponse`, against
+    /// the session transcript of `handover` at `now`, and returns the person
+    /// it names.
+    ///
+    /// # Errors
+    /// Returns the [`Refusal`] of the first check that fails.
+    pub async fn verify_mdoc(
+        &self,
+        presentation: &str,
+        handover: &Handover<'_>,
+        now: i64,
+    ) -> Result<Identity, Refusal> {
+        let read = mdoc::Presentation::parse(presentation)?;
+        let chain = read.issuer_chain()?;
+        let (anchors, status_anchors) = self.anchors(now).await?;
+        let issuer = anchors
+            .verify(&chain, now)
+            .map_err(|_untrusted| Refusal::UntrustedIssuer)?;
+        let transcript = mdoc::session_transcript(handover);
+        let verified = read.verify(
+            &issuer,
+            &mdoc::Expected {
+                doctype: &self.upstream.doctype,
+                elements: &self.upstream.mdoc_claims,
+                transcript: &transcript,
+                now,
+            },
+        )?;
+        // NOTE: draft-ietf-oauth-status-list-20 §6.3, §8.3, the status is checked when the
+        // MSO carries one, as for an SD-JWT VC.
+        if let Some(status) = &verified.status {
+            let (uri, kind) = match status {
+                MsoStatus::StatusList(reference) => (&reference.uri, CwtKind::StatusList),
+                MsoStatus::IdentifierList { uri, .. } => (uri, CwtKind::IdentifierList),
+            };
+            let bytes = self
+                .fetch_bytes(uri, Some(kind.media_type()))
+                .await
+                .map_err(|error| unreached(&error, Refusal::StatusUnavailable))?;
+            let list = CwtList::parse(&bytes, kind)?;
+            let signer = status_anchors
+                .verify(&list.chain()?, now)
+                .map_err(|_untrusted| Refusal::StatusUnavailable)?;
+            match status {
+                MsoStatus::StatusList(reference) => list.status(&signer, reference, now)?,
+                MsoStatus::IdentifierList { id, uri } => list.identifier(&signer, uri, id, now)?,
+            }
+        }
+        self.identity(verified.claims, now, &self.upstream.mdoc_claims)
     }
 
     /// Returns the anchors of credentials and of status lists at `now`: the
@@ -700,10 +826,15 @@ impl WalletLogin {
         Some(self.held.lock().await.clone())
     }
 
-    /// Returns the person `verified` names, refusing one without the
-    /// identifier or another claim asked for.
-    fn identity(&self, verified: Verified) -> Result<Identity, Refusal> {
-        let claims = verified.claims;
+    /// Returns the person the verified `claims`, presented at
+    /// `presented_at`, name, refusing them without the identifier or
+    /// another claim of `asked`.
+    fn identity(
+        &self,
+        claims: serde_json::Map<String, serde_json::Value>,
+        presented_at: i64,
+        asked: &[String],
+    ) -> Result<Identity, Refusal> {
         let text = |name: &str| {
             ferrohealth_smart::roles::claim_text(&claims, name)
                 .filter(|value| !value.trim().is_empty())
@@ -712,7 +843,7 @@ impl WalletLogin {
         let identifier =
             text(&self.upstream.identifier_claim).ok_or(Refusal::NoAdministrativeNumber)?;
         let present = |name: &String| claim_at(&claims, name).is_some_and(|value| !value.is_null());
-        if !self.upstream.claims.iter().all(present) {
+        if !asked.iter().all(present) {
             return Err(Refusal::MissingClaim);
         }
         let country = text(ISSUING_COUNTRY).ok_or(Refusal::MissingClaim)?;
@@ -730,7 +861,7 @@ impl WalletLogin {
             preferred_username: None,
             claims,
             session: None,
-            auth_time: Some(verified.presented_at),
+            auth_time: Some(presented_at),
             acr: Some(String::from(ACR)),
         })
     }
@@ -759,8 +890,14 @@ impl WalletLogin {
         Ok(chain)
     }
 
-    /// Fetches the document at `url`, capped at [`MAX_BODY`].
+    /// Fetches the text document at `url`, capped at [`MAX_BODY`].
     async fn fetch(&self, url: &str, accept: Option<&str>) -> Result<String, FetchError> {
+        let body = self.fetch_bytes(url, accept).await?;
+        String::from_utf8(body).map_err(|_not_utf8| FetchError::Body)
+    }
+
+    /// Fetches the document at `url`, capped at [`MAX_BODY`].
+    async fn fetch_bytes(&self, url: &str, accept: Option<&str>) -> Result<Vec<u8>, FetchError> {
         let mut request = self.http.get(url);
         if let Some(accept) = accept {
             request = request.header(http::header::ACCEPT, accept);
@@ -776,7 +913,7 @@ impl WalletLogin {
             }
             body.extend_from_slice(&chunk);
         }
-        String::from_utf8(body).map_err(|_not_utf8| FetchError::Body)
+        Ok(body)
     }
 }
 
@@ -789,7 +926,8 @@ enum FetchError {
     /// The server answered with a status other than success.
     #[error("the document's server answered {0}")]
     Status(http::StatusCode),
-    /// The document is larger than FerroSMART reads, or not UTF-8.
+    /// The document is larger than FerroSMART reads, or a text document is
+    /// not UTF-8.
     #[error("the document is too large or not UTF-8")]
     Body,
 }

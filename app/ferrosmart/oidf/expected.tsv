@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: BUSL-1.1
 # The OpenID Foundation conformance suite lane's pass list (#621,
 # scripts/oidf/lane.sh): every module of the four OpenID Connect plans and
-# of the OpenID4VP verifier plan (#817), in the order the
+# of the OpenID4VP verifier plan (#817), the PID as an SD-JWT VC and, under
+# the plan name with `.iso_mdl`, as an mdoc (#793), in the order the
 # suite runs them, with the result the suite gives it and, for a relying
 # party module, what FerroSMART made of the provider's answer (accepted,
 # refused, no-start, started; none when the module did not run), and for a
@@ -101,3 +102,10 @@ oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-kb-jwt-iat-in-futur
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-present-revoked-credential	PASSED	refused	-	
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-present-credential-without-status	REVIEW	accepted	-	the suite asks for a screenshot of the verifier's success, which this lane does not upload
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-wrong-vct	PASSED	refused	-	
+oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-happy-flow	REVIEW	accepted	-	the suite asks for a screenshot of the verifier's success, which this lane does not upload
+oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-request-uri-method-post	REVIEW	accepted	-	the suite asks for a screenshot of the verifier's success, which this lane does not upload
+oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-request-uri-fetched-twice	REVIEW	accepted	-	the suite asks for a screenshot of the verifier's success, which this lane does not upload
+oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-invalid-session-transcript	PASSED	refused	-	
+oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-revoked-credential	PASSED	refused	-	
+oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-credential-on-identifier-list	PASSED	refused	-	
+oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-credential-without-status	REVIEW	accepted	-	the suite asks for a screenshot of the verifier's success, which this lane does not upload

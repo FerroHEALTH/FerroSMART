@@ -112,6 +112,21 @@ impl EphemeralKey {
         }))
     }
 
+    /// Returns the SHA-256 JWK Thumbprint of the public key (RFC 7638 §3),
+    /// which an mdoc's session transcript binds (OpenID4VP 1.0 Appendix
+    /// B.2.6).
+    ///
+    /// # Errors
+    /// Returns [`JweError::Key`] when the public key cannot be computed.
+    pub fn thumbprint(&self) -> Result<Vec<u8>, JweError> {
+        let jwk = self.public_jwk("")?;
+        let text = |name: &str| jwk.get(name).and_then(serde_json::Value::as_str);
+        let (Some(x), Some(y)) = (text("x"), text("y")) else {
+            return Err(JweError::Key);
+        };
+        Ok(thumbprint_of(x, y))
+    }
+
     /// Returns the plaintext of the compact JWE `jwe`, encrypted to this key
     /// named `kid`.
     ///
@@ -189,6 +204,14 @@ pub fn kid(jwe: &str) -> Option<String> {
         .get("kid")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
+}
+
+/// Returns the SHA-256 JWK Thumbprint of the P-256 key whose base64url
+/// coordinates are `x` and `y`: the digest of its required members in
+/// lexicographic order (RFC 7638 §3.2, §3.3).
+fn thumbprint_of(x: &str, y: &str) -> Vec<u8> {
+    let members = format!(r#"{{"crv":"P-256","kty":"EC","x":"{x}","y":"{y}"}}"#);
+    super::sha256(members.as_bytes())
 }
 
 /// Returns the `OtherInfo` of the Concat KDF for the encryption `enc` of
@@ -272,6 +295,24 @@ pub fn encrypt(plaintext: &[u8], to: &serde_json::Value, enc: &str) -> Result<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_thumbprint_is_the_openid4vp_example() {
+        // NOTE: OpenID4VP 1.0 Appendix B.2.6.1, the example JWK and the thumbprint its handover carries.
+        let thumbprint = thumbprint_of(
+            "DxiH5Q4Yx3UrukE2lWCErq8N8bqC9CHLLrAwLz5BmE0",
+            "XtLM4-3h5o3HUH0MHVJV0kyq0iBlrBwlh8qEDMZ4-Pc",
+        );
+        let expected: Vec<u8> = [
+            0x42, 0x83, 0xec, 0x92, 0x7a, 0xe0, 0xf2, 0x08, 0xda, 0xaa, 0x2d, 0x02, 0x6a, 0x81,
+            0x4f, 0x2b, 0x22, 0xdc, 0xa5, 0x2c, 0xf8, 0x5f, 0xfa, 0x8f, 0x3f, 0x86, 0x26, 0xc6,
+            0xbd, 0x66, 0x90, 0x47,
+        ]
+        .to_vec();
+        assert_eq!(expected, thumbprint);
+        let key = EphemeralKey::generate().expect("a key should generate");
+        assert_eq!(32, key.thumbprint().expect("a thumbprint").len());
+    }
 
     #[test]
     fn a_response_encrypted_to_the_request_key_decrypts_under_either_encryption() {

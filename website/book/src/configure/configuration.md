@@ -267,9 +267,12 @@ only a `minimum`.
 | `registration_certificate_file` | The registration certificate as the registrar issued it; every request object carries it |
 | `issuer_anchor_files` | The PEM certificates of the PID providers' trust anchors. A PID's issuer and its status list must chain to one of these or to the list below |
 | `wallet_endpoint` | Where the wallet is invoked; `eu-eaap://` by default |
-| `vct_values` | The credential types accepted; `["urn:eudi:pid:1"]` by default. The first names the person's pairwise `sub` |
-| `claims` | The PID claims asked for, dotted for a nested claim, with `identifier_claim` and `issuing_country` among them; the PID's names and the administrative number by default |
-| `identifier_claim` | The claim whose value names the person and that a [`fhirUser` lookup](#ferrosmartresource) reads; `personal_administrative_number` by default |
+| `credential_formats` | The formats the PID is asked for in, of which the wallet presents one: `["dc+sd-jwt", "mso_mdoc"]` by default |
+| `vct_values` | The credential types accepted as an SD-JWT VC; `["urn:eudi:pid:1"]` by default. The first names the person's pairwise `sub`, whichever format the wallet presents |
+| `claims` | The PID claims asked for of an SD-JWT VC, dotted for a nested claim, with `identifier_claim` and `issuing_country` among them; the PID's names and the administrative number by default |
+| `doctype` | The document type accepted as an mdoc, which is also the namespace of its elements; `eu.europa.ec.eudi.pid.1` by default |
+| `mdoc_claims` | The data elements asked for of an mdoc, with `identifier_claim` and `issuing_country` among them; the PID's names, `birth_date` and the administrative number by default |
+| `identifier_claim` | The claim or element whose value names the person and that a [`fhirUser` lookup](#ferrosmartresource) reads; `personal_administrative_number` by default |
 | `digital_credentials_api` | Whether the wallet page offers the W3C Digital Credentials API beside its link; `true` by default. With `false` the browser goes straight to `wallet_endpoint` |
 
 `[ferrosmart.upstream.openid4vp.pid_providers_list]` is the list of PID

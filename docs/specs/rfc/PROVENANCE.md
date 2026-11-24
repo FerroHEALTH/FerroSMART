@@ -7,10 +7,10 @@ Vendored verbatim by `scripts/vendor/rfcs.sh` from the RFC Editor
 (<https://www.rfc-editor.org/rfc/>), the text form of each, as published. Never edit a file here:
 change the pin in docs/VERSIONS.md and re-run the script.
 
-- Fetched: 2026-11-23
-- Files: 37
+- Fetched: 2026-11-24
+- Files: 44
 - Tree digest (sha256 over the sorted per-file `sha256  path` listing,
-  `PROVENANCE.md` excluded): `e6eed274a1f1e922c30890cee686ec6bfe5af5c2035de0c2a503b67ea8302554`
+  `PROVENANCE.md` excluded): `09af981628ed22fe863063764cbdacbde3ec968ba501af5652832af19926424a`
 - Upstream licence: each RFC but RFC 3986 is "Copyright (c) <year> IETF Trust and the
   persons identified as the document authors. All rights reserved." and is
   "subject to BCP 78 and the IETF Trust's Legal Provisions Relating to IETF
@@ -78,6 +78,13 @@ change the pin in docs/VERSIONS.md and re-run the script.
 | RFC 9207 | OAuth 2.0 Authorization Server Issuer Identification | March 2022 | PROPOSED STANDARD | none | `c9c17b9824315aca9bda5c0b5e3627cb24aa28d54324292f3761006209b705fd` |
 | RFC 9864 | Fully-Specified Algorithms for JSON Object Signing and Encryption (JOSE) and CBOR Object Signing and Encryption (COSE) | October 2025 | PROPOSED STANDARD | none | `0f9b6dd26b3285fd9fe7f7e0a82e684d06512dee642703d51c6f88a7b0edaa2b` |
 | RFC 10070 | Updates to OAuth 2.0 JSON Web Token (JWT) Client Authentication and Assertion-Based Authorization Grants | November 2026 | PROPOSED STANDARD | none | `bca193c44b10f864396706e29192a091256d9c15a66c1549b01e75866165e163` |
+| RFC 8949 | Concise Binary Object Representation (CBOR) | December 2020 | INTERNET STANDARD | none | `f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a` |
+| RFC 8943 | Concise Binary Object Representation (CBOR) Tags for Date | November 2020 | PROPOSED STANDARD | none | `bb3a62834af19f6d5d15e5a7faca922e2eab58541050f5bddf9cf477af3b7850` |
+| RFC 9052 | CBOR Object Signing and Encryption (COSE): Structures and Process | August 2022 | INTERNET STANDARD | RFC9338 | `01eecd7f646537600e7aad665b1fa581ce6ec33dae4ef4add0997aaf38cd0a45` |
+| RFC 9053 | CBOR Object Signing and Encryption (COSE): Initial Algorithms | August 2022 | INFORMATIONAL | RFC9864 | `3d470615875620375f8453ba25b8dce7e4d0271e76b0b79a46df34ccb2d56ab0` |
+| RFC 9360 | CBOR Object Signing and Encryption (COSE): Header Parameters for Carrying and Referencing X.509 Certificates | February 2023 | PROPOSED STANDARD | none | `3dbe546adf08e309b429c8e71b2ee8384292fb8767338d3eb17d1c4e5adefc23` |
+| RFC 8392 | CBOR Web Token (CWT) | May 2018 | PROPOSED STANDARD | none | `9021ff7c4d274cf34873fe4f4fb17c4fe323247dd0f96bfcab54909bfcdc5f13` |
+| RFC 9596 | CBOR Object Signing and Encryption (COSE) "typ" (type) Header Parameter | June 2024 | PROPOSED STANDARD | none | `4beb37fe8cb3eec78cec2445c65dcf2db4866ba99a72e7b1e54e23e5bfa69b5e` |
 | RFC 9110 | HTTP Semantics | June 2022 | INTERNET STANDARD | none | `21c1cdce6ab0e5509b04d84a28000836c7a087cf786efe6f04877ebfff47232a` |
 
 An "Updated by" entry names an RFC that changes the document without
