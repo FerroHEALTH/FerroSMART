@@ -224,6 +224,7 @@ pins, so every book in the family builds with the same tools.
 | mdBook | `0.5.4` | `scripts/site/toolchain.sh` reads it |
 | mdbook-lint | `0.14.4` | `scripts/site/toolchain.sh` reads it |
 | lychee | `0.24.2` | `scripts/site/toolchain.sh` reads it |
+| mermaid | `11.6.0` | `scripts/vendor/mermaid.sh` pins its sha256, recorded in `website/book/vendor/mermaid/PROVENANCE.md` |
 
 ## The screenshot capture
 

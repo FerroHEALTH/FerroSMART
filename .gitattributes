@@ -7,3 +7,4 @@
 # The vendored specification corpora keep their upstream bytes: no line-ending
 # normalization, and collapsed in diffs and language statistics.
 docs/specs/** linguist-vendored -text
+website/book/vendor/** linguist-vendored -text
