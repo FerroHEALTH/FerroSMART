@@ -7,19 +7,22 @@ A FHIR or openEHR server sits behind FerroSMART as a resource server: it
 reads the tokens FerroSMART issues and never sees the person log in. The
 identity provider runs upstream for login only.
 
-```text
- browser            SMART app           FerroSMART           identity provider
-    |  1. launch        |                    |                       |
-    |------------------>| 2. /authorize      |                       |
-    |                   |    aud = the base  |                       |
-    |<---------------------------------------|  3. login             |
-    |--------------------------------------------------------------->|
-    |<---------------------------------------------------------------|
-    |  4. picker and consent                 |                       |
-    |--------------------------------------->|                       |
-    |                   |<- 5. code, token ->|                       |
-    |                   |  6. API call with the access token         |
-    |                   |------------------------------> the server
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant A as SMART app
+    participant S as FerroSMART
+    participant I as Identity provider
+    participant R as The server
+    B->>A: 1. Launch
+    A->>S: 2. /authorize, aud = the base
+    S-->>B: 3. Login
+    B->>I: 3. Login
+    I-->>B: The person is authenticated
+    B->>S: 4. Picker and consent
+    A->>S: 5. Code, token
+    S-->>A: Access token
+    A->>R: 6. API call with the access token
 ```
 
 ## On FerroSMART's side

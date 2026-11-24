@@ -31,20 +31,32 @@ master08` is `docs/specs/smart-on-openehr/docs/smart_app_launch/master08-scopes.
 
 ## 0. The picture
 
-```text
-                 inbound                                   outbound
-  client ──Bearer/Basic──▶ product listener            product ──▶ upstream
-                            │                                 ▲
-                      AuthLayer (tower)                 BasicSender
-                      ├─ Verifier (JWT)                 ClientCredentials
-                      │    ├─ discovery (RFC 8414 / OIDC)   ├─ client_secret_basic
-                      │    ├─ KeySet cache (RFC 7517)        ├─ client_secret_post
-                      │    └─ token checks (RFC 9068)        └─ private_key_jwt
-                      ├─ BasicVerifier (RFC 7617, Argon2id)       (RFC 7523)
-                      ├─ Scopes (SMART App Launch 2.2)
-                      └─ Audit (one line per request)
-                            │
-                       Access extension ──▶ product handlers (axum extractor)
+```mermaid
+flowchart LR
+    subgraph inbound
+        direction TB
+        client["client"] -- "Bearer or Basic" --> listener["product listener"]
+        listener --> auth["AuthLayer (tower)"]
+        auth --> verifier["Verifier (JWT)"]
+        verifier --> discovery["discovery (RFC 8414, OIDC)"]
+        verifier --> keyset["KeySet cache (RFC 7517)"]
+        verifier --> checks["token checks (RFC 9068)"]
+        auth --> basic["BasicVerifier (RFC 7617, Argon2id)"]
+        auth --> scopes["Scopes (SMART App Launch 2.2)"]
+        auth --> audit["Audit (one line per request)"]
+        auth --> access["Access extension"]
+        access --> handlers["product handlers (axum extractor)"]
+    end
+    subgraph outbound
+        direction TB
+        product["product"] --> sender["BasicSender"]
+        product --> cc["ClientCredentials"]
+        cc -.- csb["client_secret_basic"]
+        cc -.- csp["client_secret_post"]
+        cc -.- pkj["private_key_jwt (RFC 7523)"]
+        sender --> upstream["upstream"]
+        cc --> upstream
+    end
 ```
 
 One crate, four consumers. The library owns everything in the middle column:
@@ -4039,24 +4051,23 @@ name Keycloak, Microsoft Entra ID, Okta and ZITADEL. The resource server
 can be FerroEHR, FerroBRIDGE, FerroTERM, FerroPIX or FerroFED. Each product's
 adoption issue tracks its own side (#521).
 
-```
- browser                SMART app             FerroSMART               IdP (login only)
-    |   1. launch          |                       |                          |
-    |--------------------->|  2. /authorize        |                          |
-    |                      |  aud = product base   |                          |
-    |<---------------------------------------------|  3. OIDC login           |
-    |------------------------------------------------------------------------>|
-    |<------------------------------------------------------------------------|
-    |  4. patient picker and consent (13.6 items 4 and 6)                      |
-    |--------------------------------------------->|                          |
-    |                      |<-- 5. code, /token -->|                          |
-    |                      |   RFC 9068 access token, launch context          |
-    |                      |                                                   |
-    |                      |  6. API call, Bearer token                        |
-    |                      |-------------------------> product (resource server)
-    |                      |                          reads the token under the
-    |                      |                          `ferrosmart` preset, keys
-    |                      |                          from FerroSMART's jwks_uri
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant A as SMART app
+    participant S as FerroSMART
+    participant I as IdP (login only)
+    participant P as Product (resource server)
+    B->>A: 1. Launch
+    A->>S: 2. /authorize, aud = product base
+    S-->>B: 3. OIDC login
+    B->>I: 3. OIDC login
+    I-->>B: The person is authenticated
+    B->>S: 4. Patient picker and consent (13.6 items 4 and 6)
+    A->>S: 5. Code, /token
+    S-->>A: RFC 9068 access token, launch context
+    A->>P: 6. API call, Bearer token
+    Note over P: Reads the token under the ferrosmart preset,<br/>keys from FerroSMART's jwks_uri
 ```
 
 1. **FerroSMART names the product's base** as a resource, so a launch can
