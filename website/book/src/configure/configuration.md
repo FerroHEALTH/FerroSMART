@@ -281,7 +281,7 @@ verified stays in use until its own next update.
 
 | Key | What it is |
 |---|---|
-| `url` | The https URL the list is read from; exclusive with `file` |
+| `url` | The HTTPS URL the list is read from; exclusive with `file` |
 | `file` | A file holding a copy of the list |
 | `signing_certificate_files` | The PEM certificates the Commission publishes to verify the list's signature |
 | `refresh` | How often the list is read again; `1h` by default. It is read again at its next update too |
