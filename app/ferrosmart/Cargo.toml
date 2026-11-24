@@ -5,7 +5,7 @@ name = "ferrosmart"
 description = "FerroSMART, the SMART App Launch 2.x authorization server of the FerroHEALTH products, with any OpenID Connect provider upstream for login"
 # Its own version line, released as an OCI image and release artefacts by
 # the tag ferrosmart-v<version> (#519).
-version = "0.5.0"
+version = "0.6.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -12,6 +12,28 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+FerroSMART 0.6.0 resolves the patient of an EUDI Wallet login at a patient
+index such as FerroPIX, by PIXm or PDQm on the PID's administrative number,
+and never from the wallet's values alone. It also passes the PID's names,
+birth date, place of birth and nationalities into the ID Token under
+`profile`.
+
+### Added
+
+- A wallet login's patient comes from a patient index such as FerroPIX:
+  `[ferrosmart.upstream.openid4vp] identifier_systems` names each issuing
+  country's identifier system, and a FHIR base's
+  `[ferrosmart.resource.patient_index]` names the index, asked by PIXm
+  ITI-83 or PDQm ITI-78 as FerroSMART with `system/Patient.rs`, and the
+  system of the base's own patients. One patient becomes the `fhirUser`
+  and the launch's `patient`. No patient, several, or a failed index
+  refuses the launch. The ID Token carries the PID's `given_name`,
+  `family_name`, `birthdate`, `place_of_birth` and `nationalities` under
+  `profile`, and an upstream ID Token's `given_name`, `family_name` and
+  `birthdate` the same way (#857).
+
 ## [0.5.0] - 2026-11-24
 
 FerroSMART 0.5.0 lets a person log in with the PID in their EUDI Wallet as
@@ -908,7 +930,8 @@ Shipped with functional changes because: the `url` fix is a lockfile move on `ma
   read its token response (SMART App Launch 2.2.0, Considerations for CORS
   support). Every other origin gets no CORS header (#560).
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.5.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.6.0...HEAD
+[0.6.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.5.0...ferrosmart-v0.6.0
 [0.5.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.4.0...ferrosmart-v0.5.0
 [0.4.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.3.0...ferrosmart-v0.4.0
 [0.3.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.2.0...ferrosmart-v0.3.0
