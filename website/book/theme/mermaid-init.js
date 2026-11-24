@@ -7,7 +7,7 @@
 // and each style attribute is set again through the CSSOM, which the policy
 // allows.
 // No specification governs this: our own design.
-(async () => {
+async function drawDiagrams() {
   const fences = [...document.querySelectorAll('pre > code.language-mermaid')];
   if (fences.length === 0) {
     return;
@@ -49,4 +49,7 @@
       window.location.reload();
     }
   }).observe(html, { attributes: true, attributeFilter: ['class'] });
-})();
+}
+
+// Mermaid renders one diagram at a time, so the renders run in turn.
+drawDiagrams().catch((error) => console.error('mermaid:', error));
