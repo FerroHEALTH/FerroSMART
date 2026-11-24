@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: Cadasto B.V.
+# SPDX-License-Identifier: BUSL-1.1
+# The PID Rulebook 1.6 attributes FerroSMART reads (#857, #859): the
+# mandatory attributes of section 2.2 and the administrative number of
+# section 2.3, each with its SD-JWT VC and mdoc name and where it goes (a
+# claim name, `identifier`, or - for none). The unit test
+# wallet::pid::tests::the_conformance_table_is_the_mapping holds it to
+# app/ferrosmart/src/wallet/pid.rs, and scripts/checks/conformance.sh counts
+# it for the README badge. Columns, tab separated: data identifier,
+# mandatory (yes or no), SD-JWT VC name, mdoc name, target.
+family_name	yes	family_name	family_name	family_name
+given_name	yes	given_name	given_name	given_name
+birth_date	yes	birthdate	birth_date	birthdate
+birth_place	yes	place_of_birth	place_of_birth	place_of_birth
+nationality	yes	nationalities	nationality	nationalities
+portrait	yes	picture	portrait	-
+personal_administrative_number	no	personal_administrative_number	personal_administrative_number	identifier

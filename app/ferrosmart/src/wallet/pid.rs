@@ -406,6 +406,36 @@ mod tests {
     }
 
     #[test]
+    fn the_conformance_table_is_the_mapping() {
+        let table = include_str!("../../../../conformance/pid-attributes.tsv");
+        let rows: Vec<Vec<&str>> = table
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+            .map(|line| line.split('\t').collect())
+            .collect();
+        let expected: Vec<Vec<&str>> = ATTRIBUTES
+            .iter()
+            .map(|attribute| {
+                vec![
+                    attribute.data_identifier,
+                    if attribute.mandatory { "yes" } else { "no" },
+                    attribute.sd_jwt_vc,
+                    attribute.mdoc,
+                    match attribute.target {
+                        Target::Claim(name) => name,
+                        Target::Identifier => "identifier",
+                        Target::NotMapped => "-",
+                    },
+                ]
+            })
+            .collect();
+        assert_eq!(
+            expected, rows,
+            "conformance/pid-attributes.tsv lists the table row for row"
+        );
+    }
+
+    #[test]
     fn alpha_2_is_two_capital_letters() {
         assert!(alpha_2("NL"));
         assert!(!alpha_2("nl"));

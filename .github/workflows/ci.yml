@@ -130,6 +130,12 @@ jobs:
       - name: The OpenID Foundation pass list names an issue for every failure
         if: ${{ !cancelled() }}
         run: bash scripts/oidf/lane.sh check
+      - name: The conformance badge guard refuses what it claims to
+        if: ${{ !cancelled() }}
+        run: bash scripts/checks/conformance.sh --self-test
+      - name: conformance, the README badges match the tests and claim no certification
+        if: ${{ !cancelled() }}
+        run: bash scripts/checks/conformance.sh --check
       - name: The crate-version guard refuses a dated section that has no tag
         if: ${{ !cancelled() }}
         run: bash scripts/checks/crate-version-guard.sh --self-test
