@@ -736,6 +736,22 @@ pub struct PersonClaims {
     /// `preferred_username`, under `profile`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preferred_username: Option<String>,
+    /// `given_name`, under `profile`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub given_name: Option<String>,
+    /// `family_name`, under `profile`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family_name: Option<String>,
+    /// `birthdate`, under `profile`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub birthdate: Option<String>,
+    /// `place_of_birth`, an object of `country`, `region` and `locality`,
+    /// under `profile`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place_of_birth: Option<Value>,
+    /// `nationalities`, ISO 3166-1 alpha-2 codes, under `profile`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nationalities: Option<Value>,
     /// `email`, under `email`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
@@ -754,9 +770,22 @@ impl PersonClaims {
                 .filter(|text| !text.trim().is_empty())
                 .map(str::to_owned)
         };
+        let claim = |name: &str| text(identity.claims.get(name).and_then(Value::as_str));
+        let shaped = |name: &str| {
+            identity
+                .claims
+                .get(name)
+                .filter(|value| crate::wallet::pid::shaped(name, value))
+                .cloned()
+        };
         Self {
             name: text(identity.name.as_deref()),
             preferred_username: text(identity.preferred_username.as_deref()),
+            given_name: claim("given_name"),
+            family_name: claim("family_name"),
+            birthdate: claim("birthdate"),
+            place_of_birth: shaped("place_of_birth"),
+            nationalities: shaped("nationalities"),
             email: text(identity.claims.get("email").and_then(Value::as_str)),
             email_verified: identity
                 .claims
@@ -765,9 +794,9 @@ impl PersonClaims {
         }
     }
 
-    /// Returns the claims the granted `scope` passes on: `name` and
-    /// `preferred_username` under `profile`, `email` and `email_verified`
-    /// under `email`.
+    /// Returns the claims the granted `scope` passes on: the person's names,
+    /// birth and nationalities under `profile`, `email` and
+    /// `email_verified` under `email`.
     #[must_use]
     pub fn granted(&self, scope: &str) -> Self {
         let holds = |wanted: &str| scope.split(' ').any(|held| held == wanted);
@@ -775,6 +804,11 @@ impl PersonClaims {
         Self {
             name: self.name.clone().filter(|_| profile),
             preferred_username: self.preferred_username.clone().filter(|_| profile),
+            given_name: self.given_name.clone().filter(|_| profile),
+            family_name: self.family_name.clone().filter(|_| profile),
+            birthdate: self.birthdate.clone().filter(|_| profile),
+            place_of_birth: self.place_of_birth.clone().filter(|_| profile),
+            nationalities: self.nationalities.clone().filter(|_| profile),
             email: self.email.clone().filter(|_| email),
             email_verified: self.email_verified.filter(|_| email),
         }

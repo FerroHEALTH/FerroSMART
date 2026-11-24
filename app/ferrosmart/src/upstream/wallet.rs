@@ -11,6 +11,7 @@
 //! turns a verified PID into the [`Identity`] every login yields; the
 //! protocol machinery is `crate::wallet`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,6 +22,7 @@ use url::Url;
 use super::{Identity, UPSTREAM_TIMEOUT};
 use crate::wallet::jwe::EphemeralKey;
 use crate::wallet::mdoc::{self, Handover, MsoStatus};
+use crate::wallet::pid::{self, IdentifierError, PidIdentifier};
 use crate::wallet::request::{Asks, Lane, Request, Verifier, VerifierError};
 use crate::wallet::sdjwt::{Expected, IssuerKey, Presentation};
 use crate::wallet::status::{CwtKind, CwtList, StatusToken};
@@ -111,6 +113,14 @@ pub struct WalletSection {
     /// The claim whose value is the person's identifier, which the
     /// `fhirUser` lookup reads; `personal_administrative_number` by default.
     pub identifier_claim: String,
+    /// `[ferrosmart.upstream.openid4vp.identifier_systems]`: the identifier
+    /// system of each issuing country's administrative numbers, by its
+    /// ISO 3166-1 alpha-2 code, which the patient index is asked in; none by
+    /// default.
+    pub identifier_systems: BTreeMap<String, String>,
+    /// The HL7 v2 table 0203 code of the identifier's type; `NI`, a
+    /// national unique individual identifier, by default.
+    pub identifier_type: String,
     /// Whether the login page offers the wallet through the W3C Digital
     /// Credentials API beside the redirect, as a relying party "shall"
     /// (Implementing Regulation (EU) 2024/2979 Annex II as amended by
@@ -152,6 +162,8 @@ impl Default for WalletSection {
             .map(String::from)
             .collect(),
             identifier_claim: String::from("personal_administrative_number"),
+            identifier_systems: BTreeMap::new(),
+            identifier_type: String::from("NI"),
             digital_credentials_api: true,
         }
     }
@@ -251,6 +263,10 @@ pub struct WalletUpstream {
     mdoc_claims: Vec<String>,
     /// The identifier claim.
     identifier_claim: String,
+    /// The identifier system of each issuing country's numbers.
+    identifier_systems: BTreeMap<String, String>,
+    /// The identifier's type.
+    identifier_type: String,
     /// The origin of the issuer, where the login page is served.
     origin: String,
     /// Whether the login page offers the Digital Credentials API.
@@ -298,6 +314,24 @@ impl WalletUpstream {
     pub fn asks_for(&self, format: Format) -> bool {
         self.formats.contains(&format)
     }
+
+    /// Returns the identifier the claims of a verified PID name, in its
+    /// issuing country's system, which the patient index resolves.
+    ///
+    /// # Errors
+    /// Returns [`IdentifierError`] when the PID discloses no number or
+    /// country, or no system is configured for the country.
+    pub fn identifier(
+        &self,
+        claims: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<PidIdentifier, IdentifierError> {
+        pid::identifier(
+            claims,
+            &self.identifier_claim,
+            &self.identifier_systems,
+            &self.identifier_type,
+        )
+    }
 }
 
 /// Returns the wallet entry `section` describes, answering under the
@@ -330,23 +364,7 @@ pub fn upstream(
             "`credential_formats` names each format once, at least one",
         ));
     }
-    let names_the_person = |claims: &[String]| {
-        !section.identifier_claim.is_empty()
-            && claims.contains(&section.identifier_claim)
-            && claims.iter().any(|claim| claim == ISSUING_COUNTRY)
-    };
-    if formats.contains(&Format::SdJwtVc) && !names_the_person(&section.claims) {
-        return Err(WalletConfigError::Rule(
-            "`claims` names `identifier_claim` and `issuing_country`",
-        ));
-    }
-    if formats.contains(&Format::Mdoc)
-        && (section.doctype.is_empty() || !names_the_person(&section.mdoc_claims))
-    {
-        return Err(WalletConfigError::Rule(
-            "`doctype` is set and `mdoc_claims` names `identifier_claim` and `issuing_country`",
-        ));
-    }
+    names_the_person(section)?;
     let anchor_files = section
         .issuer_anchor_files
         .iter()
@@ -407,9 +425,49 @@ pub fn upstream(
         doctype: section.doctype.clone(),
         mdoc_claims: section.mdoc_claims.clone(),
         identifier_claim: section.identifier_claim.clone(),
+        identifier_systems: section.identifier_systems.clone(),
+        identifier_type: section.identifier_type.clone(),
         origin: issuer.origin().ascii_serialization(),
         digital_credentials_api: section.digital_credentials_api,
     })
+}
+
+/// Checks that `section` asks for the identifier and the issuing country
+/// in each format, and names their systems as identifier systems: each
+/// country an alpha-2 code, each system an absolute URI (FHIR R4
+/// `Identifier.system`), the type a code.
+fn names_the_person(section: &WalletSection) -> Result<(), WalletConfigError> {
+    let formats = &section.credential_formats;
+    let asks = |claims: &[String]| {
+        !section.identifier_claim.is_empty()
+            && claims.contains(&section.identifier_claim)
+            && claims.iter().any(|claim| claim == ISSUING_COUNTRY)
+    };
+    if formats.contains(&Format::SdJwtVc) && !asks(&section.claims) {
+        return Err(WalletConfigError::Rule(
+            "`claims` names `identifier_claim` and `issuing_country`",
+        ));
+    }
+    if formats.contains(&Format::Mdoc)
+        && (section.doctype.is_empty() || !asks(&section.mdoc_claims))
+    {
+        return Err(WalletConfigError::Rule(
+            "`doctype` is set and `mdoc_claims` names `identifier_claim` and `issuing_country`",
+        ));
+    }
+    for (country, system) in &section.identifier_systems {
+        if !pid::alpha_2(country) || Url::parse(system).is_err() {
+            return Err(WalletConfigError::Rule(
+                "`identifier_systems` maps an alpha-2 country code to an absolute URI",
+            ));
+        }
+    }
+    // NOTE: FHIR R4 datatypes, code: no leading or trailing whitespace, none doubled.
+    let kind = &section.identifier_type;
+    if kind.is_empty() || kind.trim() != kind || kind.contains("  ") {
+        return Err(WalletConfigError::Rule("`identifier_type` is a code"));
+    }
+    Ok(())
 }
 
 /// Where the list of PID providers is read, and who signs it.
@@ -697,11 +755,7 @@ impl WalletLogin {
                 .map_err(|_untrusted| Refusal::StatusUnavailable)?;
             token.check(&signer, reference, now)?;
         }
-        self.identity(
-            verified.claims,
-            verified.presented_at,
-            &self.upstream.claims,
-        )
+        self.identity(verified.claims, verified.presented_at, Format::SdJwtVc)
     }
 
     /// Checks the mdoc `presentation`, a base64url `DeviceResponse`, against
@@ -752,7 +806,7 @@ impl WalletLogin {
                 MsoStatus::IdentifierList { id, uri } => list.identifier(&signer, uri, id, now)?,
             }
         }
-        self.identity(verified.claims, now, &self.upstream.mdoc_claims)
+        self.identity(verified.claims, now, Format::Mdoc)
     }
 
     /// Returns the anchors of credentials and of status lists at `now`: the
@@ -826,15 +880,20 @@ impl WalletLogin {
         Some(self.held.lock().await.clone())
     }
 
-    /// Returns the person the verified `claims`, presented at
+    /// Returns the person the verified `claims` of `format`, presented at
     /// `presented_at`, name, refusing them without the identifier or
-    /// another claim of `asked`.
+    /// another claim asked for; the claims carry the PID's attributes under
+    /// the ID Token names [`pid::person_claims`] maps them to.
     fn identity(
         &self,
-        claims: serde_json::Map<String, serde_json::Value>,
+        mut claims: serde_json::Map<String, serde_json::Value>,
         presented_at: i64,
-        asked: &[String],
+        format: Format,
     ) -> Result<Identity, Refusal> {
+        let asked = match format {
+            Format::SdJwtVc => &self.upstream.claims,
+            Format::Mdoc => &self.upstream.mdoc_claims,
+        };
         let text = |name: &str| {
             ferrohealth_smart::roles::claim_text(&claims, name)
                 .filter(|value| !value.trim().is_empty())
@@ -853,6 +912,7 @@ impl WalletLogin {
             .collect::<Vec<_>>()
             .join(" ");
         let name = Some(name).filter(|name| !name.is_empty());
+        claims.extend(pid::person_claims(&claims, format));
         Ok(Identity {
             issuer: self.upstream.issuer.clone(),
             subject: format!("{country}:{identifier}"),

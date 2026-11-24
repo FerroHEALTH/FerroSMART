@@ -420,6 +420,11 @@ pub fn openid_configuration(metadata: &ServerMetadata) -> Value {
                 "fhirUser",
                 "name",
                 "preferred_username",
+                "given_name",
+                "family_name",
+                "birthdate",
+                "place_of_birth",
+                "nationalities",
                 "email",
                 "email_verified"
             ]),

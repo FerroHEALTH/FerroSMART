@@ -63,6 +63,7 @@ pub mod encounter;
 pub mod fhir_user;
 pub mod openehr;
 mod paired;
+pub mod patient_index;
 pub mod purpose;
 pub mod shortcuts;
 

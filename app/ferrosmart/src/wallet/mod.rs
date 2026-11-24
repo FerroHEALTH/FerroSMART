@@ -7,7 +7,8 @@
 //!
 //! It holds no configuration and does no I/O: [`request`] builds the signed
 //! request object, [`jwe`] opens the encrypted response, [`sdjwt`] and
-//! [`mdoc`] check the presentation, [`x509`] the certificate paths that
+//! [`mdoc`] check the presentation, [`pid`] maps its attributes to the
+//! person, [`x509`] the certificate paths that
 //! authenticate an issuer, and [`status`] a Token Status List or an mdoc's
 //! identifier list. The provider entry
 //! (`crate::upstream::wallet`) fetches what they read and the routes
@@ -17,6 +18,7 @@ mod cose;
 pub mod jwe;
 pub mod lote;
 pub mod mdoc;
+pub mod pid;
 pub mod request;
 pub mod sdjwt;
 pub mod status;

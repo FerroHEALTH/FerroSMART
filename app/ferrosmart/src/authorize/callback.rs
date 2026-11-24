@@ -22,6 +22,7 @@ use crate::audit::exchanges::{Person, login};
 use crate::clients::Client;
 use crate::form::Params;
 use crate::pages::{self, Fault};
+use crate::picker::patient_index::IndexRefusal;
 use crate::server::AppState;
 use crate::store::{Asking, Login, Pending, Purpose};
 use crate::upstream::{Identity, LoginProvider};
@@ -155,6 +156,7 @@ pub(super) async fn complete(
     }
     let signed_in = SignedIn {
         upstream,
+        wallet: provider.wallet(),
         identity,
         auth_time,
         acr,
@@ -191,6 +193,8 @@ fn short_of(
 struct SignedIn<'a> {
     /// The provider's settings.
     upstream: &'a crate::upstream::Upstream,
+    /// The provider as an EUDI Wallet verifier, when it is one.
+    wallet: Option<&'a crate::upstream::wallet::WalletLogin>,
     /// What the provider's login states.
     identity: &'a Identity,
     /// When the person authenticated, in seconds since the epoch.
@@ -253,14 +257,19 @@ async fn again(state: &AppState, pending: &Pending, provider: &LoginProvider) ->
 }
 
 /// The person's `fhirUser`: the provider's claim, or for an authorization
-/// the identifier lookup when the provider sends none.
+/// the patient index's answer to a wallet login, or else the identifier
+/// lookup when the provider sends none.
+///
+/// # Errors
+/// Returns [`IndexRefusal`] when a wallet login's patient index finds no
+/// patient or several, or cannot be asked.
 async fn fhir_user_of(
     state: &AppState,
     pending: &Pending,
     signed_in: &SignedIn<'_>,
     subject: &str,
     from: IpAddr,
-) -> Option<String> {
+) -> Result<Option<String>, IndexRefusal> {
     let claimed = signed_in
         .upstream
         .fhir_user_claim
@@ -268,12 +277,54 @@ async fn fhir_user_of(
         .and_then(|claim| ferrohealth_smart::roles::claim_text(&signed_in.identity.claims, claim))
         .map(str::to_owned);
     match claimed {
-        Some(claimed) => Some(claimed),
+        Some(claimed) => Ok(Some(claimed)),
         None if pending.purpose == Purpose::Authorize => {
-            looked_up(state, pending, subject, &signed_in.identity.claims, from).await
+            let index = crate::picker::patient_index::configured(state, &pending.audience);
+            if let (Some(wallet), Some(index)) = (signed_in.wallet, index) {
+                let claims = &signed_in.identity.claims;
+                return indexed(state, pending, subject, (wallet, claims), index, from)
+                    .await
+                    .map(Some);
+            }
+            Ok(looked_up(state, pending, subject, &signed_in.identity.claims, from).await)
         }
-        None => None,
+        None => Ok(None),
     }
+}
+
+/// Returns the `fhirUser` the patient index `index` resolves the PID
+/// `claims` the wallet verified to, for the person `subject`, and writes
+/// the outcome as an audit line, never a value (`docs/architecture.md`
+/// §13.32).
+async fn indexed(
+    state: &AppState,
+    pending: &Pending,
+    subject: &str,
+    (wallet, claims): (
+        &crate::upstream::wallet::WalletLogin,
+        &serde_json::Map<String, serde_json::Value>,
+    ),
+    index: (&crate::config::PatientIndexSection, &str),
+    from: IpAddr,
+) -> Result<String, IndexRefusal> {
+    let asking = Pending {
+        subject: Some(subject.to_owned()),
+        ..pending.clone()
+    };
+    let resolved = match wallet.upstream().identifier(claims) {
+        Ok(identifier) => {
+            crate::picker::patient_index::resolve(state, &asking, from, index, &identifier).await
+        }
+        Err(_undisclosed) => Err(IndexRefusal::NoIdentifier),
+    };
+    tracing::info!(
+        target: "ferrosmart::audit",
+        event = "patient_index.lookup",
+        client_id = ?pending.client_id,
+        outcome = resolved.as_ref().map_or_else(|refusal| refusal.as_str(), |_| "found"),
+        "the person's patient was resolved at the patient index"
+    );
+    resolved
 }
 
 /// Goes on once the person logged in as `claims` for `pending`: to the
@@ -291,9 +342,14 @@ async fn proceed(
         identity,
         auth_time,
         acr,
+        ..
     } = *signed_in;
     let held = ferrohealth_smart::roles::from_claims(&identity.claims, &upstream.role_claims);
     let subject = crate::upstream::pairwise(&identity.issuer, &identity.subject);
+    let fhir_user = match fhir_user_of(state, pending, signed_in, &subject, from).await {
+        Ok(fhir_user) => fhir_user,
+        Err(refusal) => return unresolved(state, pending, upstream, refusal).await,
+    };
     let upstream_session = match pending.purpose {
         Purpose::Authorize => match begin_session(state, identity).await {
             Ok(session) => Some(session),
@@ -301,7 +357,6 @@ async fn proceed(
         },
         Purpose::Manage => None,
     };
-    let fhir_user = fhir_user_of(state, pending, signed_in, &subject, from).await;
     let mut login = Login {
         subject,
         fhir_user,
@@ -379,6 +434,35 @@ async fn proceed(
         offered: &offered,
     };
     onward(state, &asked, back, from).await
+}
+
+/// Refuses the launch of `pending`, whose wallet login's patient the index
+/// did not resolve, and records the login as failed: a patient is never
+/// taken from the wallet's values alone (`docs/architecture.md` §13.32).
+async fn unresolved(
+    state: &AppState,
+    pending: &Pending,
+    upstream: &crate::upstream::Upstream,
+    refusal: IndexRefusal,
+) -> Response {
+    forget(state, pending).await;
+    let description = match refusal {
+        IndexRefusal::NoIdentifier => "the PID names no identifier the patient index knows",
+        IndexRefusal::NoMatch => "the patient index knows no patient by the PID's identifier",
+        IndexRefusal::Several => "the patient index knows several patients by the PID's identifier",
+        IndexRefusal::Failed => "the patient index could not be asked",
+    };
+    if let Err(response) = record_login(state, upstream, Err(description)).await {
+        return *response;
+    }
+    // NOTE: RFC 6749 §4.1.2.1, a person the server cannot place is access_denied;
+    // an index it cannot ask is the server's error.
+    let error = if refusal == IndexRefusal::Failed {
+        "server_error"
+    } else {
+        "access_denied"
+    };
+    deny_unsigned(state, pending, Denial { error, description }).await
 }
 
 /// Returns the `fhirUser` the lookups configured for the request's server

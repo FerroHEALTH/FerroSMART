@@ -24,6 +24,11 @@ fn text(text: &str) -> Cbor {
     Cbor::Text(text.to_owned())
 }
 
+/// Returns the CBOR array of the texts `texts`.
+pub(super) fn texts(texts: &[&str]) -> Cbor {
+    Cbor::Array(texts.iter().map(|item| text(item)).collect())
+}
+
 fn int(number: i64) -> Cbor {
     Cbor::Integer(Integer::from(number))
 }
@@ -111,7 +116,7 @@ pub(super) struct Mdoc {
     /// The document type.
     doctype: String,
     /// The elements of the PID namespace.
-    elements: Vec<(String, Cbor)>,
+    pub(super) elements: Vec<(String, Cbor)>,
     /// The elements the holder leaves out.
     withheld: Vec<String>,
     /// Elements of another namespace the holder presents.
@@ -353,7 +358,7 @@ impl Wallet {
     }
 
     /// Returns the holder's mdoc presentation of `mdoc` for `begun`.
-    fn mdoc(&self, mdoc: &Mdoc, begun: &Begun) -> String {
+    pub(super) fn mdoc(&self, mdoc: &Mdoc, begun: &Begun) -> String {
         mdoc.present(
             &self.pki.issuer,
             &self.holder,
@@ -363,7 +368,11 @@ impl Wallet {
 
     /// Posts the encrypted answer carrying the mdoc `presentation` to
     /// `begun`.
-    async fn answer_mdoc(&self, begun: &Begun, presentation: &str) -> (StatusCode, Value) {
+    pub(super) async fn answer_mdoc(
+        &self,
+        begun: &Begun,
+        presentation: &str,
+    ) -> (StatusCode, Value) {
         let payload = json!({"vp_token": {MDOC: [presentation]}, "state": begun.text("state")});
         self.post(&[("response", &kit::sealed(&payload, &begun.jwk()))])
             .await

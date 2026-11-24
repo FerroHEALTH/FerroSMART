@@ -198,8 +198,10 @@ never reaches a resource server. The ID Token, signed `RS256`, carries
 `iss`, `sub`, `aud`, `exp`, `iat`, `nonce` when the app sent one,
 `auth_time`, and `fhirUser` when `fhirUser` was granted. When the client's
 ceiling lists `profile` or `email` and the app asks for them, the ID Token
-also carries `name` and `preferred_username` (`profile`) and `email` and
-`email_verified` (`email`) as the identity provider sent them, so a
+also carries `name`, `preferred_username`, `given_name`, `family_name`
+and `birthdate` (`profile`) and `email` and `email_verified` (`email`) as
+the identity provider sent them; a wallet login adds the PID's
+`place_of_birth` and `nationalities` under `profile`. That lets a
 standard OpenID Connect library can show who is signed in. The `sub`
 stays pairwise.
 

@@ -2625,7 +2625,7 @@ document (13.8).
 | `fhirUser` in the `id_token` whenever `openid` and `fhirUser` are granted; a `Patient`, `Practitioner`, `PractitionerRole`, `RelatedPerson` or `Person` URL, absolute or relative to `aud` | SHALL | same | 3 |
 | ID Tokens signed with `RS256` | SHALL | same; `discovery §3` | 2 |
 | ID Token claims `iss`, `sub`, `aud`, `exp`, `iat`, `nonce` when sent, `auth_time` when `max_age` is requested | REQUIRED | `oidc core §2`, `§3.1.2.1` | 3 |
-| `profile` and `email` request `name`, `preferred_username`, `email` and `email_verified`; FerroSMART passes the upstream ID Token's values into its own ID Token when granted, never into an access token, and leaves out what the upstream did not send (owner, 2026-11-19, #676) | MAY (an OP may decline) | `oidc core §5.1`, `§5.4` | 3 |
+| `profile` and `email` request `name`, `preferred_username`, `given_name`, `family_name`, `birthdate`, `email` and `email_verified`, and a wallet login adds `place_of_birth` and `nationalities` under `profile` (13.32); FerroSMART passes the upstream ID Token's values into its own ID Token when granted, never into an access token, and leaves out what the upstream did not send (owner, 2026-11-19, #676) | MAY (an OP may decline) | `oidc core §5.1`, `§5.4` | 3 |
 | `claims`, request objects and UserInfo | MAY | `smart scopes-and-launch-context`, Scopes for requesting identity data | not built: no UserInfo Endpoint, which `oidc core §15.2` requires only of a Dynamic OP (owner decision of 2026-11-19, #650) |
 | What every OpenID Provider implements (`oidc core §15.1`) | MUST | `oidc core §15.1` | met, 13.25 |
 
@@ -3380,6 +3380,10 @@ kind = "fhir"                                 # or "openehr"
 # resource_type = "Practitioner"              # or PractitionerRole, Patient, RelatedPerson, Person
 # claim = "staff_id"                          # the upstream ID Token claim holding the identifier's value
 # system = "urn:example:staff"                # the identifier's system
+# [ferrosmart.resource.patient_index]         # FHIR only: resolve a wallet login's identifier at FerroPIX (13.32)
+# base = "https://pix.example.org/fhir"       # the index's FHIR base
+# transaction = "pixm"                        # or "pdqm"
+# system = "urn:example:hospital"             # the identifier system of this server's patients in the index
 
 [[ferrosmart.upstream]]                       # one entry per provider people log in at, each discovered at start
 name = "idp"                                   # the provider's name, which a client's `upstreams` names
@@ -3454,6 +3458,8 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 # doctype = "eu.europa.ec.eudi.pid.1"       # the mdoc's document type and namespace
 # mdoc_claims = ["family_name", "given_name", "birth_date", "personal_administrative_number", "issuing_country"]
 # identifier_claim = "personal_administrative_number"       # the claim the fhirUser lookup reads
+# identifier_systems = { NL = "http://fhir.nl/fhir/NamingSystem/bsn" }  # each issuing country's identifier system, for a patient_index
+# identifier_type = "NI"                       # its HL7 v2 table 0203 type
 # digital_credentials_api = true            # the page offers the W3C Digital Credentials API beside the link
 # [ferrosmart.upstream.openid4vp.pid_providers_list]   # the Commission's list of PID providers (13.32)
 # url = "https://…"                         # where the Commission publishes it; or `file`
@@ -5267,15 +5273,60 @@ person. The FerroSMART `sub` is pairwise (13.6 item 9) over the entry's
 first credential type and `{issuing_country}:{identifier}`, which
 `ferrosmart subject <entry> NL:999990019` prints. The identifier claim is
 `personal_administrative_number` by default (2977 Annex, Table 8), or a
-domestic claim a jurisdiction configures, and the `fhirUser` lookup reads
-it through `[[ferrosmart.resource.fhir_user_lookup]]` with the jurisdiction's
-identifier system (13.6 item 9). A PID without it is refused as
+domestic claim a jurisdiction configures. A PID without it is refused as
 `no_administrative_number`, and no demographic matching is attempted. The
 login's `acr` is `http://eidas.europa.eu/LoA/high`, the level the wallet is
 provided at (Regulation (EU) 2024/1183 Art 5a(11); 2977 Art 3(7)), so a
 wallet entry takes no `assurance.levels`, only a `minimum`. Its
 `auth_time` is the Key Binding JWT's `iat`, or for an mdoc the time it
 was verified.
+
+**The PID as the SMART person.** No specification says how a PID becomes
+the claims of an ID Token or a SMART patient context: the mapping is our
+own design (#857), over the attribute names of the PID Rulebook 1.6. Of
+the mandatory attributes (Rulebook §2.2) and the administrative number
+(§2.3), `app/ferrosmart/src/wallet/pid.rs` maps each by its name in the
+format presented (§3.1.2, §4.1.1):
+
+| Attribute | SD-JWT VC | mdoc | Where it goes |
+|---|---|---|---|
+| `family_name` | `family_name` | `family_name` | `family_name`, under `profile` (`oidc core §5.1`) |
+| `given_name` | `given_name` | `given_name` | `given_name`, under `profile` |
+| `birth_date` | `birthdate` | `birth_date` | `birthdate`, under `profile` |
+| `birth_place` | `place_of_birth` | `place_of_birth` | `place_of_birth`, under `profile`, the name the Rulebook takes from OpenID Connect for Identity Assurance |
+| `nationality` | `nationalities` | `nationality` | `nationalities`, under `profile`, likewise |
+| `portrait` | `picture` | `portrait` | not mapped: no part of the person a token names |
+| `personal_administrative_number` | the same | the same | the identifier the patient index resolves |
+
+A value of another shape than the Rulebook gives it maps to nothing. The
+identifier is the number in the system
+`[ferrosmart.upstream.openid4vp.identifier_systems]` names for its
+`issuing_country`, typed by `identifier_type` (HL7 v2 table 0203, `NI` by
+default) and assigned by that Member State (`urn:iso:std:iso:3166`), the
+FHIR R4 `Identifier` the index is asked for.
+
+**The patient.** At a FHIR base with `[ferrosmart.resource.patient_index]`
+the `fhirUser`, and with it the `patient` of the launch, comes from the
+patient index, never from the wallet's values alone. FerroSMART asks the
+index as itself, a token whose `sub` and `client_id` are its issuer with
+the one scope `system/Patient.rs` (FerroPIX's scope for a PIXm or PDQm
+Consumer), for the person's identifier in the index's `system`, the
+domain of the FHIR server's own patients: by ITI-83,
+`Patient/$ihe-pix?sourceIdentifier={system}|{number}&targetSystem={system}`
+(PIXm 3.1.0 §2:3.83.4.1.2), or with `transaction = "pdqm"` by ITI-78,
+`Patient?identifier={system}|{number}`, the one patient's identifier in
+that domain (PDQm 3.2.0 §2:3.78.4.1.2.1). It then searches the FHIR server
+for `Patient?identifier={domain}|{value}` as the person, as the `fhirUser`
+lookup does (13.6 item 9). Exactly one patient at each step is the
+`fhirUser`. An index's `404` (PIXm 3.1.0 §2:3.83.4.2.2.2) or an empty
+answer is no match, a `409` or two values several; either refuses the
+launch with `access_denied`, a failed request with `server_error` (`rfc6749
+§4.1.2.1`), a country with no system with `access_denied` before the index
+is asked, and the refusal is a failed `110122` Login record. Each request
+writes its access record, and an audit line `patient_index.lookup` names
+the outcome, never a value. At a base with no `patient_index` the
+`fhirUser` lookup of `[[ferrosmart.resource.fhir_user_lookup]]` reads the
+identifier claim with the jurisdiction's identifier system (13.6 item 9).
 
 **The configuration.** `access_certificate_file` (the access certificate
 and its path), `access_key_file` (its PKCS#8 P-256 key), and
@@ -5286,7 +5337,8 @@ the certificate and the certificate refused when self-signed.
 (dotted for a nested claim, the identifier claim and `issuing_country`
 among them when the SD-JWT VC is asked for), `doctype`, `mdoc_claims` (the
 identifier and `issuing_country` among them when the mdoc is asked for),
-`identifier_claim` and `digital_credentials_api` have the defaults above.
+`identifier_claim`, `identifier_systems` (none), `identifier_type` and
+`digital_credentials_api` have the defaults above.
 `ferrosmart upstream registration <entry>` prints
 the request URI, the response URI, the redirect URI, the formats, and per
 format the types and the attributes the registrar records (Implementing Regulation (EU) 2025/848

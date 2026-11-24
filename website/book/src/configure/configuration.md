@@ -98,6 +98,7 @@ of the tokens issued for it. At least one is required, and no base twice.
 | `fhir_base` | openEHR only: the base of the same platform's FHIR server, one of the FHIR bases configured here. The patient picker then searches that server for the patient and looks their EHR up, so the app gets both `patient` and `ehrId`. Needs `subject_namespace` and `subject_system` |
 | `subject_system` | With `fhir_base`: the `system` of the `Patient.identifier` whose value is the subject id of the patient's EHR in `subject_namespace` |
 | `fhir_user_lookup` | FHIR only, a list of tables: how to find a person's `fhirUser` when the identity provider sends none (below) |
+| `patient_index` | FHIR only, a table: the patient index a wallet login's administrative number is resolved at, with its FHIR `base`, its `transaction` (`pixm`, the default, for ITI-83, or `pdqm` for ITI-78) and the `system` of this server's own patients in it. FerroSMART asks the index as itself with `system/Patient.rs`, then searches this server for the person's identifier in that system. One patient is the `fhirUser`; none or several refuse the launch. Unset, a wallet login takes `fhir_user_lookup` |
 | `purpose` | openEHR only, a list of tables: the purposes of use the server accepts, one of which a professional chooses on the patient picker (below). Empty, a lookup declares none |
 | `purpose_header` | openEHR only, with `purpose`: the header a picker lookup declares the purpose in. Default `x-purpose-of-use`, FerroEHR's default `[audit] purpose_header` |
 | `assigned` | FHIR only: the search the patient picker lists a professional's assigned patients by, `care_team` (their active care teams) or `encounter` (their encounters in progress), each by the FHIR R4 `participant` search parameter and the person's `fhirUser`, for a `fhirUser` that names a `Practitioner` or `PractitionerRole`. Unset, the picker lists none |
@@ -273,6 +274,8 @@ only a `minimum`.
 | `doctype` | The document type accepted as an mdoc, which is also the namespace of its elements; `eu.europa.ec.eudi.pid.1` by default |
 | `mdoc_claims` | The data elements asked for of an mdoc, with `identifier_claim` and `issuing_country` among them; the PID's names, `birth_date` and the administrative number by default |
 | `identifier_claim` | The claim or element whose value names the person and that a [`fhirUser` lookup](#ferrosmartresource) reads; `personal_administrative_number` by default |
+| `identifier_systems` | A table from each issuing country's ISO 3166-1 alpha-2 code to the identifier system of its administrative numbers, which a `patient_index` is asked in; empty by default. A country it leaves out refuses a launch that needs the index |
+| `identifier_type` | The HL7 v2 table 0203 code of that identifier's type; `NI` by default |
 | `digital_credentials_api` | Whether the wallet page offers the W3C Digital Credentials API beside its link; `true` by default. With `false` the browser goes straight to `wallet_endpoint` |
 
 `[ferrosmart.upstream.openid4vp.pid_providers_list]` is the list of PID

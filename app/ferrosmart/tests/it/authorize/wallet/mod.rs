@@ -10,6 +10,7 @@ mod api;
 pub(crate) mod kit;
 mod list;
 mod mdoc;
+mod patient_index;
 mod refusals;
 
 use base64::Engine as _;
@@ -45,6 +46,8 @@ struct Wallet {
     status: MockServer,
     /// The FHIR server.
     fhir: MockServer,
+    /// The patient index, when the case configures one.
+    pix: Option<MockServer>,
 }
 
 /// A request the wallet fetched.
@@ -120,6 +123,15 @@ impl Wallet {
     /// table ends with what `table` writes for the case's certificates in its
     /// folder.
     async fn start_built(table: impl FnOnce(&Pki, &std::path::Path) -> String) -> Self {
+        Self::start_at(table, "").await
+    }
+
+    /// Starts FerroSMART as [`Wallet::start_built`] does, the FHIR server's
+    /// `[[ferrosmart.resource]]` table ending with `resource_extra`.
+    async fn start_at(
+        table: impl FnOnce(&Pki, &std::path::Path) -> String,
+        resource_extra: &str,
+    ) -> Self {
         let pki = Pki::new();
         let provider = Provider::start().await;
         let status = MockServer::start().await;
@@ -144,7 +156,7 @@ impl Wallet {
         let resource = format!(
             "[[ferrosmart.resource]]\nbase = {base:?}\n\
              [[ferrosmart.resource.fhir_user_lookup]]\nresource_type = \"Patient\"\n\
-             claim = \"personal_administrative_number\"\nsystem = {BSN:?}\n"
+             claim = \"personal_administrative_number\"\nsystem = {BSN:?}\n{resource_extra}"
         );
         let text = format!(
             "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {database:?}\n\
@@ -187,6 +199,7 @@ impl Wallet {
             holder: Holder::new(),
             status,
             fhir,
+            pix: None,
         }
     }
 
