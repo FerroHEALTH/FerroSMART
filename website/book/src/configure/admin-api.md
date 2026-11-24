@@ -226,6 +226,7 @@ secrets stay in the file and are never answered.
   ]
 }
 ```
+
 ## A person's access
 
 An administrator finds a person and ends their access through the API,
@@ -252,3 +253,12 @@ the admin client and the person.
   the person's grants were issued in, with the `online_access` grants in
   them, as a logout at the provider would. `offline_access` grants stay.
   The answer counts them: `{"sessions": 1, "grants": 1}`.
+
+## A client's new secret
+
+`POST /admin/clients/{client_id}/secret` issues a confidential symmetric
+client a new secret, the same job as `ferrosmart client secret`. The
+answer is the client with `client_secret`, once, and
+`client_secret_expires_at` 0 (RFC 7591 §3.2.1); the old secret no longer
+authenticates, and the record of the change never holds the secret. A
+public or `private_key_jwt` client answers `400` with `invalid_request`.
