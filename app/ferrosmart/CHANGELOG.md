@@ -12,6 +12,229 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-24
+
+FerroSMART 0.4.0 registers clients by RFC 7591 and RFC 7592, with the client
+document as RFC 7591 metadata, and adds pushed authorization requests,
+sender-constrained tokens, the eIDAS level of assurance as `acr`, the EUDI
+Wallet login by OpenID4VP and the Digital Credentials API, and the token
+exchange of a patient's own token for an openEHR server. It runs on PostgreSQL
+19 only, and its schema ships as one baseline per area, so a database of an
+earlier release is created fresh. Several entries are breaking for a
+deployment, and each says what its configuration changes.
+
+### Added
+
+- The patient picker offers, before a search, the patients the person
+  chose at that server within `[ferrosmart.picker] recent_retention` (30
+  days by default, `0s` keeps none), each read again as the person first,
+  and at a FHIR server whose `[[ferrosmart.resource]]` names `assigned`
+  (`care_team` or `encounter`) the patients of the professional's active
+  care teams or encounters in progress, searched by `participant` as the
+  person. The person forgets their recent patients on the management
+  page, recorded as `recent-patients-forgotten` (#685).
+- A person can log in with the person identification data (PID) in their
+  EUDI Wallet: an `[[ferrosmart.upstream]]` entry with an
+  `[ferrosmart.upstream.openid4vp]` table makes FerroSMART an OpenID4VP 1.0
+  verifier under HAIP 1.0 and the EU wallet profile (Implementing
+  Regulation (EU) 2024/2979 Annex II as amended by 2026/1731). It sends a
+  request signed under its access certificate, takes the encrypted
+  answer at `{issuer}/wallet/response` and completes the login in the
+  browser that began it. The PID is checked against the configured
+  anchors, its key binding, the request's nonce, its expiry and, when it
+  carries one, its Token Status List. Its administrative number names the
+  person and feeds the `fhirUser` lookup. Each refusal is a `400` and a
+  login record that names its reason (#689).
+- A client the app registered itself (RFC 7591), answered with
+  `registered_by` `self`, is held to its own guards: it is never first
+  party, the person always sees the consent page for it with a notice that
+  it registered itself and no remember box, the page shows only its links on
+  the redirect URI's scheme and host (RFC 7591 §5), and an error before the
+  person's login was accepted is a page, never a redirect to it (RFC 9700
+  §4.11.2) (#736).
+- Breaking: every token issued on a person's login carries its eIDAS level
+  of assurance as `acr` (`http://eidas.europa.eu/LoA/low`, `/substantial`
+  or `/high`) beside `auth_time`, in the ID Token, the access token, every
+  refresh and the introspection answer (RFC 9068 §2.2.1, RFC 9470 §6). Each
+  `[[ferrosmart.upstream]]` entry maps its provider's values, an OpenID
+  Connect `acr` or a SAML `AuthnContextClassRef`, to levels in
+  `[ferrosmart.upstream.assurance] levels`, with an optional `minimum`.
+  `[ferrosmart] assurance_minimum` is the deployment's floor, `substantial`
+  by default after Implementing Regulation (EU) 2026/2099 Articles 4(2) and
+  6(3), configurable to `high`, or `none` outside the eIDAS area; a
+  provider whose values reach no floor is refused at load, so every
+  deployment with an upstream maps its provider's values or sets
+  `assurance_minimum`. A login below the floor or the provider's minimum is
+  refused with `access_denied` and recorded. A client's
+  `default_acr_values` and an app's `acr_values` naming an eIDAS URI are
+  asked of the provider and refuse a lower login with
+  `unmet_authentication_requirements` (RFC 9470 §5). Both discovery
+  documents name `acr_values_supported` (#784).
+- The token endpoint grants RFC 8693 token exchange
+  (`urn:ietf:params:oauth:grant-type:token-exchange`) for one case: a
+  confidential client whose `grant_types` lists the token exchange grant and
+  whose `resources` lists a FHIR base and its paired openEHR base exchanges
+  a patient's own access token at that FHIR base for a token at the openEHR
+  base. The issued token keeps the patient's `sub`, `fhirUser`, `patient`,
+  `acr` and `auth_time`, adds the `ehrId` looked up as the patient, names
+  the exchanging client as `client_id` with no `act`, carries at most
+  `patient/composition-*.r` and `patient/aql-*.s`, lives at most five
+  minutes and never past the subject token, and is revoked with the
+  subject's grant. A professional's, a machine's, an expired or a revoked
+  subject token, an actor token, a wider scope and another target are
+  refused (#785).
+- The EUDI Wallet verifier reads the list of PID providers the Commission
+  publishes under Implementing Regulation (EU) 2024/2980 Art 5, as ETSI TS
+  119 602 V1.1.1 Annex D describes it: the JSON form under a compact JAdES
+  signature. `[ferrosmart.upstream.openid4vp.pid_providers_list]` names the
+  list's https `url` (or a `file`), the `signing_certificate_files` that
+  verify it, and how often it is read again (`refresh`, `1h` by default).
+  The providers it lists are trusted beside `issuer_anchor_files`. A list
+  whose signature fails, or whose next update has passed, refuses every
+  wallet login as `trusted_list_unavailable`. A read that fails keeps the
+  last list that verified until that list's next update. `GET
+  /admin/upstreams` shows each replica's last read (#794).
+- Clients are registered and managed through RFC 7591 and RFC 7592:
+  `POST {issuer}/register`, named `registration_endpoint` in the metadata,
+  with an administrator's token as the initial access token, and `GET`,
+  `PUT` and `DELETE {issuer}/register/{client_id}`. With
+  `[ferrosmart.registration] open = true` an app registers itself, held to
+  that section's `scope`, and manages itself with the registration access
+  token its registration answered. Breaking: `POST /admin/clients`, `GET`
+  and `PUT /admin/clients/{client_id}` are gone; `/admin/clients` keeps the
+  list, disable and enable. A registration that omits
+  `token_endpoint_auth_method` is `client_secret_basic`, and one that omits
+  `grant_types` is `authorization_code` (RFC 7591 §2) (#802).
+- Pushed authorization requests (RFC 9126): `POST {issuer}/par` takes an
+  authenticated client's authorization request and answers a one-time
+  `request_uri` that `/authorize` takes in its place. The metadata names
+  `pushed_authorization_request_endpoint` and
+  `require_pushed_authorization_requests`, which `[ferrosmart]
+  require_pushed_authorization_requests` sets, and a client's own
+  `require_pushed_authorization_requests` holds it to PAR (#806).
+- Sender-constrained tokens at issuance: a token request with a `DPoP` proof
+  gets a `DPoP` token whose `cnf.jkt` names the proof's key (RFC 9449), and a
+  client registered with `tls_client_certificate_bound_access_tokens` gets a
+  token whose `cnf` carries its client certificate's `x5t#S256` (RFC 8705).
+  A public client's refresh token is bound to its `DPoP` key, a client
+  registered with `dpop_bound_access_tokens` must send a proof, introspection
+  answers the token's `cnf`, and the metadata names
+  `dpop_signing_alg_values_supported` and
+  `tls_client_certificate_bound_access_tokens` (#807).
+- `GET {issuer}/admin/openapi.json` answers the OpenAPI 3.1 document of the
+  registration endpoint, the admin API and the audit records, without a
+  token and with the deployment's issuer as its server. A test holds the
+  document to the router's operations and each answer to its schema (#824).
+- `GET {issuer}/admin/upstreams` answers the state of each upstream
+  provider behind the `system/admin` guard: the clients that name it, its
+  OpenID Connect discovery document and key set read at once, or its SAML
+  metadata as the replica last read it, each with its outcome, its error
+  and its signing certificates' expiry (#830).
+- The admin API finds a person and ends their access, as the person can on
+  the management page: `GET {issuer}/admin/subjects?upstream=&sub=`
+  answers their subject, `GET .../subjects/{sub}/grants` their live grants
+  and remembered consents, and `DELETE .../grants/{grant_id}`,
+  `.../consents/{client_id}` and `.../sessions` revoke one grant, withdraw
+  one app's consent with its grants, or end their upstream sessions with
+  the `online_access` grants in them, each with its audit record naming the
+  admin client (#831).
+- `GET {issuer}/audit` takes `client`, `event` and `outcome` beside
+  `subject`, `since` and `until`, and pages: the searchset Bundle carries a
+  `self` link and, while more records match, a `next` link to the next
+  page. `POST {issuer}/admin/clients/{client_id}/secret` issues a
+  confidential symmetric client a new secret, answered once with its audit
+  record, through the same code as `ferrosmart client secret` (#832).
+- The EUDI Wallet login offers the W3C Digital Credentials API beside the
+  redirect, as Implementing Regulation (EU) 2024/2979 Annex II, amended by
+  2026/1731, requires of a relying party. The browser first shows a page
+  at `{issuer}/wallet`. Its "Open your wallet" link invokes the wallet by
+  redirect. Where the browser has the API, the page's module asks for the
+  PID with a request signed for the page's origin (`openid4vp-v1-signed`,
+  `dc_api.jwt`) and posts the answer to `{issuer}/wallet/dc`. The answer
+  is checked as in the redirect lane, bound to the page's origin.
+  `[ferrosmart.upstream.openid4vp] digital_credentials_api = false` sends
+  the browser straight to the wallet (#840).
+
+### Changed
+
+- Breaking: the token signing keys rotate on a schedule the replicas share
+  through the database. `[ferrosmart.keys]` takes `private_key_files`, the
+  key files in the order they take over, and `rotation_period` (`90d` by
+  default) in place of `private_key_file`, `kid`,
+  `next_private_key_file`, `previous_private_key_file` and
+  `previous_key_overlap`. The next key is published for at least the JWK
+  Set's cache lifetime before it signs, the previous key stays published
+  until every token it signed has expired, and every key is published
+  under its RFC 7638 thumbprint. `GET /admin/keys` no longer carries
+  `published`, since every key it lists is published (#684).
+- FerroSMART moves to `ferrohealth-server` 0.12: `[server] request_decompression`, off by default, decodes a request body sent in gzip or Brotli under the body limit (FerroHEALTH/FerroSYS#408, #760).
+- FerroSMART runs on PostgreSQL 19 and refuses to start against an older
+  server, naming the `server_version_num` it found and the 190000 it needs.
+  The quickstart and the CI store run `postgres:19.0`. PostgreSQL 18 is no
+  longer supported and there is no upgrade path: a quickstart volume holding
+  an 18 cluster is removed and created again (#762).
+- Breaking: the database schema ships as one baseline migration per area,
+  which later releases change in place. The schema it creates is the same
+  as before, but sqlx refuses a database migrated by an earlier release,
+  because the files' checksums changed, so such a database is created fresh (#795).
+- A client lives only in FerroSMART's database. `[[ferrosmart.client]]` is
+  gone, and a configuration that holds it is refused as an unknown key; the
+  start no longer seeds or removes clients. `ferrosmart client apply
+  <file>...` writes each file's JSON client document, the admin API's, as
+  the API does, creating the client or replacing the one with its
+  `client_id`, each change with an `AuditEvent` that names the command as
+  the requester. The admin API answers `registered_by` (`admin` or `self`)
+  in place of `source`, and the document carries `jwks` by value. The
+  quickstart, the examples and the test lanes apply their clients this way
+  (#799).
+- Breaking: the client document is RFC 7591 client metadata, which the admin
+  API, `ferrosmart client apply` and the store share. `kind` becomes
+  `token_endpoint_auth_method` (`none`, `client_secret_basic`,
+  `client_secret_post`, `private_key_jwt`), and a client authenticates only
+  by the method it registered; `name` becomes `client_name`; `scopes`
+  becomes the space-separated `scope`; the `token_exchange` grant is
+  `urn:ietf:params:oauth:grant-type:token-exchange`; a client's
+  `assurance_minimum` becomes `default_acr_values`, which a request without
+  `acr_values` asks for. FerroSMART issues a symmetric client's secret,
+  answers it once as `client_secret` with `client_secret_expires_at` 0 and
+  keeps only its Argon2id hash: `secret_hash` and `ferrosmart client
+  hash-secret` are gone, and `ferrosmart client secret <client_id>` issues
+  a new secret. The `client` columns follow in the clients baseline (#800).
+- Breaking: whether a person sees the consent page follows from the type of
+  their `fhirUser` and how the client was registered. A `Practitioner` or
+  `PractitionerRole` sees no page for an app an administrator registered,
+  the registration being the organisation's consent (OpenID Connect Core
+  1.0 §3.1.2.4); a `Patient`, `RelatedPerson` or `Person` sees none only
+  for an app marked `first_party`; a person of no stated type, and every
+  app that registered itself, see the page. `organisation_approval` is gone
+  with its columns, `DELETE /admin/clients/{client_id}/organisation_approval`
+  and the `organisation-approval-withdrawn` record; `first_party` is a
+  member of the client document only an administrator sets, and clearing it
+  revokes the grants issued on it. Each code and grant records its basis,
+  `page`, `remembered`, `administrative` or `first-party`, and the records
+  of a skipped page are `consent-administrative` and `consent-first-party` (#801).
+- The patient picker lists assigned patients for a professional alone, a
+  `fhirUser` that names a `Practitioner` or `PractitionerRole`, as the
+  consent page reads it (#801).
+- Breaking: the deployment's name is one key, `[ferrosmart] name`, which
+  every page carries and which the User Access Brand takes as its
+  `Organization.name` when `[ferrosmart.brand]` names none.
+  `[ferrosmart.branding] name` is gone; a configuration that sets it is
+  refused as an unknown key (#803).
+- The token exchange of a patient's own token may also issue
+  `patient/aql-*.s`, running a query on the person's EHR (SMART on openEHR,
+  Resource Scopes), beside `patient/composition-*.r`; a request naming no
+  scope gets those of the two the client's ceiling admits (#809).
+
+### Security
+
+Shipped with functional changes because: the `url` fix is a lockfile move on `main`, where the server's releases are cut and the unreleased changes above already sit, so a security-only patch has no tree of its own to come from.
+
+- The server takes `url` 2.5.9 in place of 2.5.8 (RUSTSEC-2026-0592,
+  GHSA-hrj5-67jp-wqp9): every earlier `url` lets `Url::origin()` recurse
+  without a bound on a nested `blob:` URL, so a crafted URL overflows the
+  stack (#770).
+
 ## [0.3.0] - 2026-11-21
 
 ### Added
@@ -665,7 +888,8 @@ and this project adheres to
   read its token response (SMART App Launch 2.2.0, Considerations for CORS
   support). Every other origin gets no CORS header (#560).
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.3.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.4.0...HEAD
+[0.4.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.3.0...ferrosmart-v0.4.0
 [0.3.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.2.0...ferrosmart-v0.3.0
 [0.2.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.1.0...ferrosmart-v0.2.0
 [0.1.0]: https://github.com/FerroHEALTH/FerroSMART/releases/tag/ferrosmart-v0.1.0
