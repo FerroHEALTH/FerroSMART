@@ -32,12 +32,58 @@ pub struct AuditRow {
 pub struct AuditQuery {
     /// Only the records naming this person.
     pub subject: Option<String>,
+    /// Only the records naming this client.
+    pub client: Option<String>,
+    /// Only the records of this event, such as `token` or `grant-revoked`.
+    pub event: Option<String>,
+    /// Only the records with this `AuditEvent.outcome` code.
+    pub outcome: Option<String>,
+    /// Only the records after this one in the order read, for the next
+    /// page.
+    pub after: Option<AuditCursor>,
     /// Only the records from this instant on, as RFC 3339.
     pub since: Option<String>,
     /// Only the records before this instant, as RFC 3339.
     pub until: Option<String>,
     /// The most records returned.
     pub limit: i64,
+}
+
+/// Where a page of records ends: the last record's time, in microseconds
+/// since the epoch, and its sequence number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuditCursor {
+    /// The record's time, in microseconds since the epoch.
+    pub micros: i64,
+    /// The record's sequence number.
+    pub seq: i64,
+}
+
+impl std::fmt::Display for AuditCursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.micros, self.seq)
+    }
+}
+
+impl std::str::FromStr for AuditCursor {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let (micros, seq) = text.split_once('.').unwrap_or((text, ""));
+        Ok(Self {
+            micros: micros.parse()?,
+            seq: seq.parse()?,
+        })
+    }
+}
+
+/// One page of records, newest first, with where the next page starts.
+#[derive(Debug, Clone)]
+pub struct AuditPage {
+    /// The records, each an `AuditEvent`.
+    pub records: Vec<Value>,
+    /// Where the next page starts, when more records match.
+    pub next: Option<AuditCursor>,
 }
 
 impl Store {
@@ -58,25 +104,57 @@ impl Store {
     /// # Errors
     /// Returns [`StoreError::Database`] when the statement fails.
     pub async fn audit_records(&self, query: &AuditQuery) -> Result<Vec<Value>, StoreError> {
+        Ok(self.audit_page(query).await?.records)
+    }
+
+    /// Returns the page of records `query` asks for, newest first, and
+    /// where the next page starts.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Database`] when the statement fails.
+    pub async fn audit_page(&self, query: &AuditQuery) -> Result<AuditPage, StoreError> {
         let rows = sqlx::query(
-            "SELECT document FROM audit_record \
+            "SELECT document, seq, (extract(epoch FROM recorded_at) * 1000000)::bigint AS micros \
+             FROM audit_record \
              WHERE ($1::text IS NULL OR subject = $1) \
                AND ($2::timestamptz IS NULL OR recorded_at >= $2::timestamptz) \
                AND ($3::timestamptz IS NULL OR recorded_at < $3::timestamptz) \
-             ORDER BY recorded_at DESC, seq DESC LIMIT $4",
+               AND ($4::text IS NULL OR client_id = $4) \
+               AND ($5::text IS NULL OR kind = $5) \
+               AND ($6::text IS NULL OR outcome = $6) \
+               AND ($7::bigint IS NULL OR (recorded_at, seq) < \
+                 ('epoch'::timestamptz + $7::bigint * interval '1 microsecond', $8::bigint)) \
+             ORDER BY recorded_at DESC, seq DESC LIMIT $9",
         )
         .bind(query.subject.as_deref())
         .bind(query.since.as_deref())
         .bind(query.until.as_deref())
-        .bind(query.limit)
+        .bind(query.client.as_deref())
+        .bind(query.event.as_deref())
+        .bind(query.outcome.as_deref())
+        .bind(query.after.map(|cursor| cursor.micros))
+        .bind(query.after.map(|cursor| cursor.seq))
+        .bind(query.limit.saturating_add(1))
         .fetch_all(&self.pool)
         .await?;
-        rows.iter()
-            .map(|row| {
-                row.try_get::<Value, _>("document")
-                    .map_err(StoreError::from)
-            })
-            .collect()
+        let mut records = Vec::with_capacity(rows.len());
+        let mut last = None;
+        let mut more = false;
+        for (index, row) in rows.iter().enumerate() {
+            if i64::try_from(index).is_ok_and(|index| index >= query.limit) {
+                more = true;
+                break;
+            }
+            records.push(row.try_get::<Value, _>("document")?);
+            last = Some(AuditCursor {
+                micros: row.try_get("micros")?,
+                seq: row.try_get("seq")?,
+            });
+        }
+        Ok(AuditPage {
+            records,
+            next: last.filter(|_| more),
+        })
     }
 
     /// Returns the oldest record the feed has not delivered nor seen

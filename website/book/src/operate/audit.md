@@ -63,10 +63,16 @@ Backend Services client whose ceiling lists that scope, asking with
 | Parameter | What it selects |
 |---|---|
 | `subject` | The records of one person, by their FerroSMART `sub` |
+| `client` | The records of one client, by its `client_id`; for an administrator's change, the admin client |
+| `event` | The records of one event, such as `token`, `login` or `grant-revoked` |
+| `outcome` | The records of one `AuditEvent.outcome` code: `0`, `4`, `8` or `12` |
 | `since`, `until` | An RFC 3339 instant each, bounding the time |
-| `_count` | How many records, from 1 to 1000; 100 by default |
+| `_count` | How many records a page holds, from 1 to 1000; 100 by default |
+| `cursor` | Where a page starts, as the `next` link names it |
 
-Each parameter may appear once, and any other is refused. Regulation (EU)
+Each parameter may appear once, and any other is refused. The Bundle's
+`self` link names the page read, and while more records match, its `next`
+link reads the next page with the same parameters (FHIR R4 Bundle.link). Regulation (EU)
 2025/327 Art 9 gives a person access to who accessed their data; the
 endpoint lets an operator answer that without a database client.
 
