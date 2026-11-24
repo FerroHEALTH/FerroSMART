@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: Cadasto B.V.
+# SPDX-License-Identifier: BUSL-1.1
+# FerroSMART as the EUDI Wallet verifier the OpenID Foundation conformance
+# suite tests as a wallet (#817, scripts/oidf/lane.sh verifier and certify).
+# The lane gives the issuer, the certificates and keys it makes for the run,
+# the suite's authorization endpoint and the database with `--set`. The
+# browser goes straight to the wallet, since the suite tests the redirect
+# profile. No specification governs the lane: our own design.
+
+[server]
+listen = "127.0.0.1:9443"
+
+[ferrosmart]
+issuer = "https://localhost.emobix.co.uk:9443"
+
+[ferrosmart.database]
+max_connections = 4
+
+[[ferrosmart.resource]]
+base = "https://localhost.emobix.co.uk:9443/fhir"
+kind = "fhir"
+
+[[ferrosmart.upstream]]
+name = "wallet"
+label = "EUDI Wallet"
+
+[ferrosmart.upstream.openid4vp]
+access_certificate_file = "/run/secrets/wallet_access_certificate"
+access_key_file = "/run/secrets/wallet_access_key"
+registration_certificate_file = "/run/secrets/wallet_registration_certificate"
+issuer_anchor_files = ["/run/secrets/pid_provider_anchor"]
+wallet_endpoint = "https://localhost.emobix.co.uk:8443/test/a/ferrosmart-verifier/authorize"
+digital_credentials_api = false
+# For the conformance run alone: the suite's sample PID carries no personal_administrative_number.
+identifier_claim = "family_name"
+claims = ["family_name", "given_name", "birthdate", "issuing_country"]

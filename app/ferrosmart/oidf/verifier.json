@@ -1,0 +1,33 @@
+{
+  "alias": "set by the lane",
+  "description": "FerroSMART as the OpenID4VP verifier of the EUDI Wallet",
+  "client": {
+    "request_object_trust_anchor_pem": "set by the lane: the root of FerroSMART's access certificate"
+  },
+  "credential": {
+    "signing_jwk": "set by the lane: the PID provider's key, its certificate as x5c"
+  },
+  "waitTimeoutSeconds": 20,
+  "browser": [
+    {
+      "comment": "the suite serves a stand-in for the verifier's verification-result screenshot; this fills the placeholder with it",
+      "match": "https://*/test/a/*/verification-evidence",
+      "tasks": [
+        {
+          "task": "Capture verification evidence",
+          "match": "https://*/test/a/*/verification-evidence",
+          "commands": [
+            [
+              "wait",
+              "xpath",
+              "//*",
+              10,
+              ".*Deferred verification evidence.*",
+              "update-image-placeholder"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -20,6 +20,7 @@
 **Quality and security**<br>
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/FerroHEALTH/FerroSMART/badge)](https://scorecard.dev/viewer/?uri=github.com/FerroHEALTH/FerroSMART)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/FerroHEALTH/FerroSMART/codeql.yml?branch=main&logo=github&label=CodeQL)](https://github.com/FerroHEALTH/FerroSMART/actions/workflows/codeql.yml)
+[![OpenID4VP verifier conformance (OpenID Foundation test suite)](https://github.com/FerroHEALTH/FerroSMART/actions/workflows/oidf-verifier.yml/badge.svg?branch=main&event=push)](https://github.com/FerroHEALTH/FerroSMART/actions/workflows/oidf-verifier.yml?query=branch%3Amain)
 [![Signed releases](https://img.shields.io/badge/releases-signed-brightgreen?logo=github)](docs/release.md)
 [![SLSA Build L3](https://slsa.dev/images/gh-badge-level3.svg)](docs/release.md)
 

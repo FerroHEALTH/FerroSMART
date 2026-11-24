@@ -13,8 +13,16 @@
 #                                failure and every login of FerroSMART
 #                                that a module does not ask for names its
 #                                issue
-#   scripts/oidf/lane.sh run     start everything, run the four plans and
-#                                compare each module with expected.tsv
+#   scripts/oidf/lane.sh run     start everything, run the four OpenID Connect
+#                                plans and compare each module with
+#                                expected.tsv
+#   scripts/oidf/lane.sh verifier run the OpenID4VP HAIP verifier plan (#817)
+#                                against FerroSMART's EUDI Wallet verifier the
+#                                same way, scripts/oidf/verifier-client.sh
+#                                starting each presentation
+#   scripts/oidf/lane.sh certify  the verifier plan at the OpenID Foundation's
+#                                hosted suite, with CONFORMANCE_TOKEN, and
+#                                FerroSMART reached at TUNNEL_URL
 #
 # `run` expects, as the `nextest (core and axum)` job of ci.yml provides
 # them: a built `target/debug/ferrosmart`; PostgreSQL at LANE_PG (a
@@ -42,6 +50,7 @@ plans=(
   "oidcc-client-basic-certification-test-plan[request_type=plain_http_request][client_registration=static_client] rp"
   "oidcc-config-certification-test-plan op"
   "oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client] op"
+  "oid4vp-1final-verifier-haip-test-plan[credential_format=sd_jwt_vc][response_mode=direct_post.jwt] verifier"
 )
 
 fail() {
@@ -80,6 +89,12 @@ wanted_login() {
     oidcc-client-test-discovery-issuer-mismatch) echo no-start ;;
     oidcc-client-test-discovery-openid-config) echo started ;;
     oidcc-client-test-discovery-webfinger-*) echo any ;;
+    oid4vp-1final-verifier-happy-flow | oid4vp-1final-verifier-minimal-cnf-jwk | \
+      oid4vp-1final-verifier-request-uri-method-post | oid4vp-1final-verifier-request-uri-fetched-twice | \
+      oid4vp-1final-verifier-present-credential-without-status)
+      echo accepted
+      ;;
+    oid4vp-1final-verifier-*) echo refused ;;
     *) echo accepted ;;
   esac
 }
@@ -144,7 +159,16 @@ check() {
   echo "oidf-lane: expected.tsv names an issue for every failure and every login the module does not ask for"
 }
 
-get() { curl -sS --cacert "$LANE_DIR/ca.crt" "$@"; }
+# A request of the lane; one to the suite carries its token, when there is one,
+# and no other does.
+get() {
+  local -a auth=()
+  local arg
+  for arg in "$@"; do
+    case "$arg" in "$suite"/*) [ -z "${CONFORMANCE_TOKEN:-}" ] || auth=(-H "Authorization: Bearer $CONFORMANCE_TOKEN") ;; esac
+  done
+  curl -sS --cacert "$LANE_DIR/trust.pem" "${auth[@]}" "$@"
+}
 
 wait_for() {
   local what=$1 url=$2
@@ -277,7 +301,7 @@ run_plan() {
       result=$(jq -r 'if (.result // "UNKNOWN") == "UNKNOWN" then .status else .result end' <<< "$info")
     fi
     login=-
-    if [ "$config" = rp ]; then
+    if [ "$config" != op ]; then
       login=$(awk -F'\t' -v module="$module" '$1 == module { print $2 }' "$LANE_DIR/logins-$plan.tsv" 2> /dev/null | tail -1)
     fi
     printf '%s\t%s\t%s\t%s\n' "$plan" "$module" "$result" "${login:-none}" >> "$LANE_DIR/actual.tsv"
@@ -302,7 +326,7 @@ compare() {
         "$([ -z "$issue" ] || [ "$issue" = - ] || printf '#%s' "${issue//,/, #}")" "$reason"
     done < "$LANE_DIR/actual.tsv"
   } >> "$summary"
-  rows | cut -f1-4 > "$LANE_DIR/expected.tsv"
+  rows | cut -f1-4 | awk -F'\t' 'NR == FNR { ran[$1] = 1; next } $1 in ran' "$LANE_DIR/actual.tsv" - > "$LANE_DIR/expected.tsv"
   if ! actual=$(diff "$LANE_DIR/expected.tsv" "$LANE_DIR/actual.tsv"); then
     echo "oidf-lane: the suite's results differ from app/ferrosmart/oidf/expected.tsv (<) in this run (>):" >&2
     echo "$actual" >&2
@@ -340,11 +364,153 @@ run() {
   compare
 }
 
+# The base64url of the hex bytes on standard input.
+b64url_hex() { xxd -r -p | openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+# The `count` bytes of the hex scalar `hex`, zero-padded on the left.
+fixed_hex() { local hex=$1 count=$2; hex=$(printf '%0*d%s' "$count" 0 "$hex"); printf '%s' "${hex: -$count}"; }
+
+# A P-256 key at DIR/NAME.key and its certificate DIR/NAME.crt for SUBJECT,
+# signed by the authority DIR/SIGNER (self-signed when none), a certificate
+# authority when CA is `ca`.
+certificate() {
+  local dir=$1 name=$2 subject=$3 signer=${4:-} ca=${5:-}
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$dir/$name.key" 2> /dev/null
+  if [ "$ca" = ca ]; then
+    printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n' > "$dir/$name.ext"
+  else
+    printf 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nsubjectKeyIdentifier=hash\n' > "$dir/$name.ext"
+  fi
+  if [ -z "$signer" ]; then
+    openssl req -x509 -new -key "$dir/$name.key" -days 1 -subj "$subject" -extensions v3 \
+      -config <(printf '[req]\ndistinguished_name=dn\n[dn]\n[v3]\n'; cat "$dir/$name.ext") -out "$dir/$name.crt" 2> /dev/null
+  else
+    printf 'authorityKeyIdentifier=keyid\n' >> "$dir/$name.ext"
+    openssl req -new -key "$dir/$name.key" -subj "$subject" -out "$dir/$name.csr" 2> /dev/null
+    openssl x509 -req -in "$dir/$name.csr" -CA "$dir/$signer.crt" -CAkey "$dir/$signer.key" -CAcreateserial \
+      -days 1 -extfile "$dir/$name.ext" -out "$dir/$name.crt" 2> /dev/null
+  fi
+}
+
+# The verifier's certificates and the suite's credential issuer, made for
+# this run: FerroSMART's access certificate under a root the suite trusts,
+# and the PID provider's certificate under the anchor FerroSMART trusts,
+# whose key, with its certificate as `x5c`, the suite signs credentials with.
+make_verifier_keys() {
+  local dir=$1 text priv pub
+  certificate "$dir" rp-root '/CN=FerroSMART OIDF lane verifier root' '' ca
+  certificate "$dir" access '/CN=FerroSMART OIDF lane verifier' rp-root
+  certificate "$dir" pid-root '/CN=FerroSMART OIDF lane PID provider root' '' ca
+  certificate "$dir" pid-issuer '/CN=OIDF conformance suite PID provider' pid-root
+  openssl pkcs8 -topk8 -nocrypt -in "$dir/access.key" -out "$dir/access-pkcs8.pem"
+  printf 'eyJhbGciOiJub25lIn0.eyJsYW5lIjoib2lkZiJ9.\n' > "$dir/registration.jwt"
+  text=$(openssl ec -in "$dir/pid-issuer.key" -noout -text 2> /dev/null)
+  priv=$(awk '/^priv:/ { f = 1; next } /^pub:/ { f = 0 } f' <<< "$text" | tr -d ' :\n')
+  pub=$(awk '/^pub:/ { f = 1; next } /^ASN1 OID/ { f = 0 } f' <<< "$text" | tr -d ' :\n')
+  jq -n --arg x "$(b64url_hex <<< "${pub:2:64}")" --arg y "$(b64url_hex <<< "${pub:66:64}")" \
+    --arg d "$(fixed_hex "$priv" 64 | b64url_hex)" \
+    --arg c "$(openssl x509 -in "$dir/pid-issuer.crt" -outform der | openssl base64 -A)" \
+    '{kty: "EC", crv: "P-256", alg: "ES256", use: "sig", kid: "oidf-lane-pid", x: $x, y: $y, d: $d, x5c: [$c]}' \
+    > "$dir/pid-issuer.jwk"
+}
+
+# The suite's configuration of the verifier plan at the alias ALIAS.
+verifier_config() {
+  local dir=$1 alias=$2
+  jq --arg alias "$alias" --rawfile anchor "$dir/rp-root.crt" --slurpfile jwk "$dir/pid-issuer.jwk" \
+    '.alias = $alias | .client.request_object_trust_anchor_pem = $anchor | .credential.signing_jwk = $jwk[0]' \
+    "$lane/verifier.json" > "$dir/verifier.json"
+}
+
+# FerroSMART as the verifier at ISSUER, its wallet the suite's alias ALIAS at
+# SUITE; served with the lane's certificate unless ISSUER is a tunnel's.
+start_verifier() {
+  local issuer=$1 suite_base=$2 alias=$3 tls=${4:-tls}
+  local -a sets=(--set "ferrosmart.issuer=$issuer"
+    --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+    --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_verifier"
+    --set "ferrosmart.upstream.0.openid4vp.access_certificate_file=$LANE_DIR/access.crt"
+    --set "ferrosmart.upstream.0.openid4vp.access_key_file=$LANE_DIR/access-pkcs8.pem"
+    --set "ferrosmart.upstream.0.openid4vp.registration_certificate_file=$LANE_DIR/registration.jwt"
+    --set "ferrosmart.upstream.0.openid4vp.issuer_anchor_files=$LANE_DIR/pid-root.crt"
+    --set "ferrosmart.upstream.0.openid4vp.wallet_endpoint=${suite_base}test/a/$alias/authorize"
+    --set "ferrosmart.resource.0.base=$issuer/fhir")
+  if [ "$tls" = tls ]; then
+    sets+=(--set "server.tls.certificate_file=$LANE_DIR/host.crt" --set "server.tls.key_file=$LANE_DIR/host.key")
+  fi
+  local smart_cmd=("$root/target/debug/ferrosmart" --config "$lane/ferrosmart-verifier.toml" "${sets[@]}")
+  jq --arg issuer "$issuer" '.redirect_uris = [$issuer + "/app-callback"] | .resources = [$issuer + "/fhir"]' \
+    "$lane/verifier-app.json" > "$LANE_DIR/verifier-app.json"
+  "${smart_cmd[@]}" client apply "$LANE_DIR/verifier-app.json" > /dev/null
+  SSL_CERT_FILE="$LANE_DIR/trust.pem" "${smart_cmd[@]}" serve > "$LANE_DIR/ferrosmart-verifier.log" 2>&1 &
+  smart=$!
+}
+
+# The verifier plan against the lane's own suite.
+verifier() {
+  : "${LANE_PG:?the PostgreSQL URL}" "${LANE_DIR:?the lane directory}" "${OIDF_PYTHON:?the Python of the runner}"
+  local plan
+  export LANE_PG LANE_DIR OIDF_SUITE=$suite OIDF_ISSUER=$issuer
+  export CONFORMANCE_SERVER="$suite/" CONFORMANCE_SERVER_MTLS="https://$host:8444/" CONFORMANCE_DEV_MODE=1
+  export CONFORMANCE_MAX_CONSECUTIVE_FAILURES=1000
+  mkdir -p "$LANE_DIR"
+  check
+  trap stop EXIT
+  make_keys "$LANE_DIR"
+  make_verifier_keys "$LANE_DIR"
+  verifier_driver "$LANE_DIR"
+  verifier_config "$LANE_DIR" ferrosmart-verifier
+  grep -qF "$host" /etc/hosts || echo "127.0.0.1 $host" | sudo tee -a /etc/hosts > /dev/null
+  psql "$LANE_PG/postgres" -qc 'CREATE DATABASE ferrosmart_oidf_verifier'
+  : > "$LANE_DIR/actual.tsv"
+  start_suite
+  start_verifier "$issuer" "$suite/" ferrosmart-verifier
+  wait_for FerroSMART "$issuer/.well-known/smart-configuration"
+  for plan in "${plans[@]}"; do
+    if [ "${plan##* }" = verifier ]; then run_plan "${plan%% *}" verifier; fi
+  done
+  compare
+}
+
+# The runner calls the verifier's driver, not the relying party's.
+verifier_driver() {
+  jq -n --arg client "$root/scripts/oidf/verifier-client.sh" '{private: true, scripts: {client: $client}}' \
+    > "$1/sample-openid-client-nodejs/package.json"
+}
+
+# The verifier plan against the OpenID Foundation's hosted suite, which
+# reaches FerroSMART at TUNNEL_URL; the token stays in the environment.
+certify() {
+  : "${LANE_PG:?the PostgreSQL URL}" "${LANE_DIR:?the lane directory}" "${OIDF_PYTHON:?the Python of the runner}"
+  : "${CONFORMANCE_TOKEN:?the token of the hosted suite}" "${TUNNEL_URL:?the public URL of FerroSMART}"
+  local hosted=https://www.certification.openid.net plan
+  suite=$hosted
+  export LANE_PG LANE_DIR OIDF_SUITE=$hosted OIDF_ISSUER=$TUNNEL_URL CONFORMANCE_SERVER="$hosted/"
+  export CONFORMANCE_SERVER_MTLS="$hosted/" CONFORMANCE_MAX_CONSECUTIVE_FAILURES=1000
+  mkdir -p "$LANE_DIR"
+  check
+  trap stop EXIT
+  make_keys "$LANE_DIR"
+  make_verifier_keys "$LANE_DIR"
+  verifier_driver "$LANE_DIR"
+  verifier_config "$LANE_DIR" ferrosmart-verifier-certification
+  psql "$LANE_PG/postgres" -qc 'CREATE DATABASE ferrosmart_oidf_verifier'
+  : > "$LANE_DIR/actual.tsv"
+  start_verifier "$TUNNEL_URL" "$hosted/" ferrosmart-verifier-certification plain
+  wait_for FerroSMART "$TUNNEL_URL/.well-known/smart-configuration"
+  for plan in "${plans[@]}"; do
+    if [ "${plan##* }" = verifier ]; then run_plan "${plan%% *}" verifier; fi
+  done
+  compare
+}
+
 case "${1:-}" in
   check) check ;;
   run) run ;;
+  verifier) verifier ;;
+  certify) certify ;;
   *)
-    echo "usage: scripts/oidf/lane.sh check|run" >&2
+    echo "usage: scripts/oidf/lane.sh check|run|verifier|certify" >&2
     exit 2
     ;;
 esac
