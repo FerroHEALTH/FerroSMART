@@ -9,6 +9,7 @@
 
 - [What FerroSMART is](evaluate/what-ferrosmart-is.md)
 - [Capabilities and conformance](evaluate/conformance.md)
+- [Xt-EHR system authorization](evaluate/xt-ehr-authorization.md)
 - [Licensing](evaluate/licensing.md)
 
 # Install
