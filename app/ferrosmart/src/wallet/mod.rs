@@ -2,18 +2,21 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 //! The EUDI Wallet verifier: the OpenID4VP 1.0 machinery of the HAIP 1.0
-//! profile for a PID presented as an SD-JWT VC (`docs/architecture.md`
-//! §13.32).
+//! profile for a PID presented as an SD-JWT VC or an ISO mdoc
+//! (`docs/architecture.md` §13.32).
 //!
 //! It holds no configuration and does no I/O: [`request`] builds the signed
-//! request object, [`jwe`] opens the encrypted response, [`sdjwt`] checks the
-//! presentation, [`x509`] the certificate paths that authenticate an issuer,
-//! and [`status`] a Token Status List. The provider entry
+//! request object, [`jwe`] opens the encrypted response, [`sdjwt`] and
+//! [`mdoc`] check the presentation, [`x509`] the certificate paths that
+//! authenticate an issuer, and [`status`] a Token Status List or an mdoc's
+//! identifier list. The provider entry
 //! (`crate::upstream::wallet`) fetches what they read and the routes
 //! (`crate::authorize::wallet`) answer the wallet.
 
+mod cose;
 pub mod jwe;
 pub mod lote;
+pub mod mdoc;
 pub mod request;
 pub mod sdjwt;
 pub mod status;
@@ -23,6 +26,34 @@ use base64::Engine as _;
 
 /// The credential format of an SD-JWT VC (HAIP 1.0 §5.3.2).
 pub const SD_JWT_VC: &str = "dc+sd-jwt";
+
+/// The credential format of an ISO mdoc (HAIP 1.0 §5.3.1; OpenID4VP 1.0
+/// Appendix B.2).
+pub const MSO_MDOC: &str = "mso_mdoc";
+
+/// A credential format the verifier asks for.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Deserialize, serde::Serialize,
+)]
+pub enum Format {
+    /// An SD-JWT VC.
+    #[serde(rename = "dc+sd-jwt")]
+    SdJwtVc,
+    /// An ISO mdoc.
+    #[serde(rename = "mso_mdoc")]
+    Mdoc,
+}
+
+impl Format {
+    /// Returns the format's identifier.
+    #[must_use]
+    pub const fn identifier(self) -> &'static str {
+        match self {
+            Self::SdJwtVc => SD_JWT_VC,
+            Self::Mdoc => MSO_MDOC,
+        }
+    }
+}
 
 /// The one signature algorithm the verifier accepts and signs with (HAIP 1.0
 /// §7).
@@ -40,20 +71,21 @@ pub enum Refusal {
     /// not a VP Token for the request.
     #[error("malformed_response")]
     MalformedResponse,
-    /// The credential is not an SD-JWT VC, or its signature or disclosures
-    /// do not verify (RFC 9901 §7.1).
+    /// The credential does not read, or its signature, disclosures or
+    /// digests do not verify (RFC 9901 §7.1; OpenID4VP 1.0 Appendix B.2).
     #[error("invalid_credential")]
     InvalidCredential,
     /// The issuer's certificate path does not end at a configured anchor
     /// (HAIP 1.0 §6.1.1).
     #[error("untrusted_issuer")]
     UntrustedIssuer,
-    /// The credential's `vct` is not one the request asked for (OpenID4VP
-    /// 1.0 §8.6, Appendix B.3.5).
+    /// The credential's `vct` or `docType`, or an element it discloses, is
+    /// not one the request asked for (OpenID4VP 1.0 §8.6, Appendix B.2.3,
+    /// B.3.5).
     #[error("unrequested_credential")]
     UnrequestedCredential,
-    /// The credential is past its `exp` or before its `nbf` (RFC 7519
-    /// §4.1.4, §4.1.5).
+    /// The credential is past its `exp` or `validUntil`, or before its
+    /// `nbf` or `validFrom` (RFC 7519 §4.1.4, §4.1.5).
     #[error("expired")]
     Expired,
     /// The Token Status List names the credential other than valid.
@@ -64,7 +96,9 @@ pub enum Refusal {
     #[error("status_unavailable")]
     StatusUnavailable,
     /// The Key Binding JWT is missing, or its key, signature, `aud`,
-    /// `nonce`, `sd_hash` or `iat` does not hold (RFC 9901 §7.3).
+    /// `nonce`, `sd_hash` or `iat` does not hold (RFC 9901 §7.3); or the
+    /// mdoc's device signature over the session transcript does not
+    /// verify (OpenID4VP 1.0 Appendix B.2.6).
     #[error("bad_holder_binding")]
     BadHolderBinding,
     /// The request's nonce was already answered (OpenID4VP 1.0 §14.1.2).

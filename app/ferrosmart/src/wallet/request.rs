@@ -15,7 +15,7 @@ use url::Url;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
 use super::jwe::{ENC_VALUES, EphemeralKey};
-use super::{ES256, SD_JWT_VC, encode, sha256};
+use super::{ES256, Format, encode, sha256};
 
 /// The `aud` of a request object sent to a wallet the verifier cannot name
 /// in advance (OpenID4VP 1.0 §5.8).
@@ -24,8 +24,16 @@ const AUDIENCE: &str = "https://self-issued.me/v2";
 /// The media type of a request object (RFC 9101 §10.2).
 pub const MEDIA_TYPE: &str = "application/oauth-authz-req+jwt";
 
-/// The `id` of the one credential query.
+/// The `id` of the credential query for the PID as an SD-JWT VC.
 pub const CREDENTIAL_ID: &str = "pid";
+
+/// The `id` of the credential query for the PID as an mdoc.
+pub const MDOC_CREDENTIAL_ID: &str = "pid_mdoc";
+
+/// The COSE algorithms of the issuer's and the device's signatures on an
+/// mdoc: ES256 and ESP256 (OpenID4VP 1.0 Appendix B.2.2; HAIP 1.0 §7; RFC
+/// 9864 §2.1).
+const MDOC_ALGORITHMS: [i64; 2] = [-7, -9];
 
 /// Why the verifier's own keys and certificates cannot be used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -67,6 +75,8 @@ pub struct Verifier {
     response_uri: String,
     /// The DCQL query.
     query: Value,
+    /// The `vp_formats_supported` of the client metadata.
+    formats: Value,
 }
 
 impl std::fmt::Debug for Verifier {
@@ -80,10 +90,18 @@ impl std::fmt::Debug for Verifier {
 /// What a verifier asks of every wallet.
 #[derive(Debug, Clone)]
 pub struct Asks<'a> {
-    /// The credential types accepted.
+    /// The credential formats asked for, of which the wallet presents one.
+    pub formats: &'a [Format],
+    /// The credential types accepted as an SD-JWT VC.
     pub vct_values: &'a [String],
-    /// The claim paths requested, each a list of names (OpenID4VP 1.0 §7.1).
+    /// The claim paths requested of an SD-JWT VC, each a list of names
+    /// (OpenID4VP 1.0 §7.1).
     pub claims: &'a [Vec<String>],
+    /// The document type accepted as an mdoc, also the namespace of its
+    /// elements.
+    pub doctype: &'a str,
+    /// The data elements requested of an mdoc.
+    pub elements: &'a [String],
     /// The base64url key identifiers of the trusted issuers' anchors.
     pub key_identifiers: &'a [String],
 }
@@ -127,7 +145,14 @@ impl Verifier {
             registration: encode(registration.trim_ascii()),
             response_uri: response_uri.to_string(),
             query: dcql(asks),
+            formats: formats_supported(asks.formats),
         })
+    }
+
+    /// Returns the URI the wallet posts its response to.
+    #[must_use]
+    pub fn response_uri(&self) -> &str {
+        &self.response_uri
     }
 
     /// Returns the verifier's client identifier, `x509_hash:` and the hash
@@ -169,9 +194,7 @@ impl Verifier {
             "client_metadata": {
                 "jwks": {"keys": [jwk]},
                 "encrypted_response_enc_values_supported": ENC_VALUES,
-                "vp_formats_supported": {
-                    SD_JWT_VC: {"sd-jwt_alg_values": [ES256], "kb-jwt_alg_values": [ES256]},
-                },
+                "vp_formats_supported": self.formats,
             },
             "verifier_info": [{"format": "registration_cert", "data": self.registration}],
             "iat": request.issued_at,
@@ -242,30 +265,71 @@ pub enum Lane<'a> {
     },
 }
 
-/// Returns the DCQL query of `asks`: one SD-JWT VC of the accepted types
-/// from an issuer under the trusted anchors, with the claims asked for
-/// (OpenID4VP 1.0 §6, Appendix B.3.5; HAIP 1.0 §5).
-fn dcql(asks: &Asks<'_>) -> Value {
-    let claims: Vec<Value> = asks
-        .claims
-        .iter()
-        .map(|path| json!({"path": path}))
-        .collect();
-    let mut credential = json!({
-        "id": CREDENTIAL_ID,
-        "format": SD_JWT_VC,
-        "meta": {"vct_values": asks.vct_values},
-        "claims": claims,
-    });
-    if !asks.key_identifiers.is_empty()
-        && let Some(object) = credential.as_object_mut()
-    {
-        object.insert(
-            String::from("trusted_authorities"),
-            json!([{"type": "aki", "values": asks.key_identifiers}]),
-        );
+/// Returns the `vp_formats_supported` of `formats`: ES256 for an SD-JWT
+/// VC and its Key Binding JWT, ES256 and ESP256 for an mdoc's issuer and
+/// device signatures (OpenID4VP 1.0 Appendix B.2.2, B.3.4; HAIP 1.0 §7).
+fn formats_supported(formats: &[Format]) -> Value {
+    let mut supported = serde_json::Map::new();
+    for format in formats {
+        let algorithms = match format {
+            Format::SdJwtVc => json!({"sd-jwt_alg_values": [ES256], "kb-jwt_alg_values": [ES256]}),
+            Format::Mdoc => json!({
+                "issuerauth_alg_values": MDOC_ALGORITHMS,
+                "deviceauth_alg_values": MDOC_ALGORITHMS,
+            }),
+        };
+        supported.insert(format.identifier().to_owned(), algorithms);
     }
-    json!({"credentials": [credential]})
+    Value::Object(supported)
+}
+
+/// Returns the DCQL query of `asks`: the PID in each format asked for,
+/// from an issuer under the trusted anchors, with the claims asked for,
+/// and with more than one format a credential set of which the wallet
+/// presents one (OpenID4VP 1.0 §6, §6.2, Appendix B.2.3, B.3.5; HAIP 1.0
+/// §5).
+fn dcql(asks: &Asks<'_>) -> Value {
+    let credentials: Vec<Value> = asks
+        .formats
+        .iter()
+        .map(|format| {
+            let mut credential = match format {
+                Format::SdJwtVc => json!({
+                    "id": CREDENTIAL_ID,
+                    "format": format.identifier(),
+                    "meta": {"vct_values": asks.vct_values},
+                    "claims": asks.claims.iter().map(|path| json!({"path": path})).collect::<Vec<_>>(),
+                }),
+                Format::Mdoc => json!({
+                    "id": MDOC_CREDENTIAL_ID,
+                    "format": format.identifier(),
+                    "meta": {"doctype_value": asks.doctype},
+                    "claims": asks
+                        .elements
+                        .iter()
+                        .map(|element| json!({"path": [asks.doctype, element]}))
+                        .collect::<Vec<_>>(),
+                }),
+            };
+            if !asks.key_identifiers.is_empty()
+                && let Some(object) = credential.as_object_mut()
+            {
+                object.insert(
+                    String::from("trusted_authorities"),
+                    json!([{"type": "aki", "values": asks.key_identifiers}]),
+                );
+            }
+            credential
+        })
+        .collect();
+    if credentials.len() < 2 {
+        return json!({"credentials": credentials});
+    }
+    let options: Vec<Value> = credentials
+        .iter()
+        .map(|credential| json!([credential["id"]]))
+        .collect();
+    json!({"credentials": credentials, "credential_sets": [{"options": options}]})
 }
 
 /// Returns the DER contents of the one `PRIVATE KEY` block of `pem`.
@@ -288,10 +352,14 @@ mod tests {
         ];
         let anchors = [String::from("s9tIpPmhxdiuNkHMEWNpYim8S8Y")];
         let query = dcql(&Asks {
+            formats: &[Format::SdJwtVc],
             vct_values: &vct,
             claims: &claims,
+            doctype: "eu.europa.ec.eudi.pid.1",
+            elements: &[],
             key_identifiers: &anchors,
         });
+        assert!(query.get("credential_sets").is_none(), "one format, no set");
         let credential = &query["credentials"][0];
         assert_eq!(credential["format"], "dc+sd-jwt");
         assert_eq!(credential["meta"]["vct_values"][0], "urn:eudi:pid:1");
@@ -300,5 +368,38 @@ mod tests {
             json!(["address", "country"])
         );
         assert_eq!(credential["trusted_authorities"][0]["type"], "aki");
+    }
+
+    #[test]
+    fn the_query_offers_the_pid_in_both_formats_as_one_choice() {
+        let vct = [String::from("urn:eudi:pid:1")];
+        let claims = [vec![String::from("family_name")]];
+        let elements = [String::from("family_name"), String::from("birth_date")];
+        let query = dcql(&Asks {
+            formats: &[Format::SdJwtVc, Format::Mdoc],
+            vct_values: &vct,
+            claims: &claims,
+            doctype: "eu.europa.ec.eudi.pid.1",
+            elements: &elements,
+            key_identifiers: &[],
+        });
+        let mdoc = &query["credentials"][1];
+        assert_eq!("mso_mdoc", mdoc["format"]);
+        assert_eq!("pid_mdoc", mdoc["id"]);
+        assert_eq!("eu.europa.ec.eudi.pid.1", mdoc["meta"]["doctype_value"]);
+        assert_eq!(
+            json!(["eu.europa.ec.eudi.pid.1", "birth_date"]),
+            mdoc["claims"][1]["path"]
+        );
+        // NOTE: OpenID4VP 1.0 §6.2, one set whose options are each a format: the wallet presents one.
+        assert_eq!(
+            json!([{"options": [["pid"], ["pid_mdoc"]]}]),
+            query["credential_sets"]
+        );
+        let supported = formats_supported(&[Format::SdJwtVc, Format::Mdoc]);
+        assert_eq!(
+            json!([-7, -9]),
+            supported["mso_mdoc"]["deviceauth_alg_values"]
+        );
     }
 }

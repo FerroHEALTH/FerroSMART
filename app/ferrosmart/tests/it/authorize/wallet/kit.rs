@@ -113,7 +113,7 @@ impl Pki {
 /// The holder's key, which the PID binds.
 pub(crate) struct Holder {
     /// The key.
-    key: KeyPair,
+    pub(crate) key: KeyPair,
 }
 
 impl Holder {
@@ -122,6 +122,11 @@ impl Holder {
         Self {
             key: KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("a key"),
         }
+    }
+
+    /// Returns the uncompressed public point.
+    pub(crate) fn point(&self) -> Vec<u8> {
+        self.key.public_key_raw().to_vec()
     }
 
     /// Returns the public JWK.

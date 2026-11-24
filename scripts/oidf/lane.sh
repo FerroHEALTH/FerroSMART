@@ -18,10 +18,12 @@
 #                                expected.tsv
 #   scripts/oidf/lane.sh verifier run the OpenID4VP HAIP verifier plan (#817)
 #                                against FerroSMART's EUDI Wallet verifier the
-#                                same way, scripts/oidf/verifier-client.sh
-#                                starting each presentation and uploading the
-#                                screenshot of FerroSMART's page each accepted
-#                                one asks for (#851)
+#                                same way, once with the PID as an SD-JWT VC
+#                                and once as an mdoc (#793),
+#                                scripts/oidf/verifier-client.sh starting each
+#                                presentation and uploading the screenshot of
+#                                FerroSMART's page each accepted one asks for
+#                                (#851)
 #   scripts/oidf/lane.sh certify  the verifier plan at the OpenID Foundation's
 #                                hosted suite, with CONFORMANCE_TOKEN, and
 #                                FerroSMART reached at TUNNEL_URL
@@ -55,6 +57,7 @@ plans=(
   "oidcc-config-certification-test-plan op"
   "oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client] op"
   "oid4vp-1final-verifier-haip-test-plan[credential_format=sd_jwt_vc][response_mode=direct_post.jwt] verifier"
+  "oid4vp-1final-verifier-haip-test-plan[credential_format=iso_mdl][response_mode=direct_post.jwt] verifier"
 )
 
 fail() {
@@ -76,6 +79,14 @@ pinned_image() {
 
 # The rows of expected.tsv, without its comments.
 rows() { grep -vE '^(#|$)' "$lane/expected.tsv"; }
+
+# The name expected.tsv gives the plan SPEC: the plan's own, and for the
+# verifier plan's mdoc variant, `.iso_mdl` after it.
+plan_key() {
+  local spec=$1 key=${1%%\[*}
+  case "$spec" in *credential_format=iso_mdl*) key="$key.iso_mdl" ;; esac
+  printf '%s\n' "$key"
+}
 
 # What a relying party module asks of FerroSMART's login, from the
 # module's own summary in the suite: a refusal of the ID Token or the
@@ -153,9 +164,9 @@ check() {
     failures=$((failures + 1))
   fi
   for plan in "${plans[@]}"; do
-    plan=${plan%% *}
-    rows | cut -f1 | grep -qxF "${plan%%\[*}" || {
-      echo "oidf-lane: expected.tsv has no row of ${plan%%\[*}" >&2
+    plan=$(plan_key "${plan%% *}")
+    rows | cut -f1 | grep -qxF "$plan" || {
+      echo "oidf-lane: expected.tsv has no row of $plan" >&2
       failures=$((failures + 1))
     }
   done
@@ -284,7 +295,8 @@ start_provider() {
 # module's result, with FerroSMART's login where it is the relying party,
 # to actual.tsv.
 run_plan() {
-  local spec=$1 config=$2 plan=${1%%\[*} id module instance info result login
+  local spec=$1 config=$2 plan id module instance info result login
+  plan=$(plan_key "$spec")
   export OIDF_PLAN=$plan
   [ "$config" = op ] || spec="$spec{sample-openid-client-nodejs}_"
   # NOTE: run-test-plan.py's own verdict wants the suite's expected-failures file, a row
@@ -447,16 +459,25 @@ verifier_config() {
 }
 
 # FerroSMART as the verifier at ISSUER, its wallet the suite's alias ALIAS at
-# SUITE; served with the lane's certificate unless ISSUER is a tunnel's.
+# SUITE, asking for the PID in the credential format of the plan SPEC;
+# served with the lane's certificate unless ISSUER is a tunnel's. In an mdoc
+# test the suite signs with its own IACA root, which this run alone trusts.
 start_verifier() {
-  local issuer=$1 suite_base=$2 alias=$3 tls=${4:-tls}
+  local issuer=$1 suite_base=$2 alias=$3 spec=$4 tls=${5:-tls} format=dc+sd-jwt anchor=$LANE_DIR/pid-root.crt
+  case "$spec" in
+    *credential_format=iso_mdl*)
+      format=mso_mdoc anchor=$LANE_DIR/mdoc-iaca-root.pem
+      get -f -o "$anchor" "${suite_base}mdoc-iaca-root.pem" || fail "the suite served no mdoc IACA root"
+      ;;
+  esac
   local -a sets=(--set "ferrosmart.issuer=$issuer"
     --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
     --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_verifier"
     --set "ferrosmart.upstream.0.openid4vp.access_certificate_file=$LANE_DIR/access.crt"
     --set "ferrosmart.upstream.0.openid4vp.access_key_file=$LANE_DIR/access-pkcs8.pem"
     --set "ferrosmart.upstream.0.openid4vp.registration_certificate_file=$LANE_DIR/registration.jwt"
-    --set "ferrosmart.upstream.0.openid4vp.issuer_anchor_files=$LANE_DIR/pid-root.crt"
+    --set "ferrosmart.upstream.0.openid4vp.issuer_anchor_files=$anchor"
+    --set "ferrosmart.upstream.0.openid4vp.credential_formats=$format"
     --set "ferrosmart.upstream.0.openid4vp.wallet_endpoint=${suite_base}test/a/$alias/authorize"
     --set "ferrosmart.resource.0.base=$issuer/fhir")
   if [ "$tls" = tls ]; then
@@ -466,8 +487,22 @@ start_verifier() {
   jq --arg issuer "$issuer" '.redirect_uris = [$issuer + "/app-callback"] | .resources = [$issuer + "/fhir"]' \
     "$lane/verifier-app.json" > "$LANE_DIR/verifier-app.json"
   "${smart_cmd[@]}" client apply "$LANE_DIR/verifier-app.json" > /dev/null
-  SSL_CERT_FILE="$LANE_DIR/trust.pem" "${smart_cmd[@]}" serve > "$LANE_DIR/ferrosmart-verifier.log" 2>&1 &
+  SSL_CERT_FILE="$LANE_DIR/trust.pem" "${smart_cmd[@]}" serve >> "$LANE_DIR/ferrosmart-verifier.log" 2>&1 &
   smart=$!
+}
+
+# Each verifier plan with FerroSMART at ISSUER, its wallet the suite's alias
+# ALIAS at SUITE, started afresh for the plan's credential format.
+verifier_plans() {
+  local issuer=$1 suite_base=$2 alias=$3 tls=${4:-tls} plan
+  for plan in "${plans[@]}"; do
+    [ "${plan##* }" = verifier ] || continue
+    start_verifier "$issuer" "$suite_base" "$alias" "${plan%% *}" "$tls"
+    wait_for FerroSMART "$issuer/.well-known/smart-configuration"
+    run_plan "${plan%% *}" verifier
+    kill "$smart" 2> /dev/null || true
+    wait "$smart" 2> /dev/null || true
+  done
 }
 
 # The verifier plan against the lane's own suite.
@@ -489,14 +524,10 @@ verifier() {
   psql "$LANE_PG/postgres" -qc 'CREATE DATABASE ferrosmart_oidf_verifier'
   : > "$LANE_DIR/actual.tsv"
   start_suite
-  start_verifier "$issuer" "$suite/" ferrosmart-verifier
-  wait_for FerroSMART "$issuer/.well-known/smart-configuration"
-  for plan in "${plans[@]}"; do
-    if [ "${plan##* }" = verifier ]; then run_plan "${plan%% *}" verifier; fi
-  done
+  verifier_plans "$issuer" "$suite/" ferrosmart-verifier
   compare
   for plan in "${plans[@]}"; do
-    if [ "${plan##* }" = verifier ]; then plan=${plan%% *} && screenshots "${plan%%\[*}"; fi
+    if [ "${plan##* }" = verifier ]; then screenshots "$(plan_key "${plan%% *}")"; fi
   done
 }
 
@@ -526,14 +557,10 @@ certify() {
   verifier_config "$LANE_DIR" ferrosmart-verifier-certification
   psql "$LANE_PG/postgres" -qc 'CREATE DATABASE ferrosmart_oidf_verifier'
   : > "$LANE_DIR/actual.tsv"
-  start_verifier "$TUNNEL_URL" "$hosted/" ferrosmart-verifier-certification plain
-  wait_for FerroSMART "$TUNNEL_URL/.well-known/smart-configuration"
-  for plan in "${plans[@]}"; do
-    if [ "${plan##* }" = verifier ]; then run_plan "${plan%% *}" verifier; fi
-  done
+  verifier_plans "$TUNNEL_URL" "$hosted/" ferrosmart-verifier-certification plain
   compare
   for plan in "${plans[@]}"; do
-    if [ "${plan##* }" = verifier ]; then plan=${plan%% *} && screenshots "${plan%%\[*}"; fi
+    if [ "${plan##* }" = verifier ]; then screenshots "$(plan_key "${plan%% *}")"; fi
   done
 }
 

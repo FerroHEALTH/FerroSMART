@@ -15,7 +15,7 @@ async fn refused_as(wallet: &Wallet, begun: &Begun, presentation: &str, reason: 
 }
 
 /// Checks the answer `status` and `body` refuse as `reason`.
-async fn assert_refused(
+pub(super) async fn assert_refused(
     wallet: &Wallet,
     begun: &Begun,
     status: StatusCode,

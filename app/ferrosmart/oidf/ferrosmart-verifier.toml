@@ -32,5 +32,7 @@ issuer_anchor_files = ["/run/secrets/pid_provider_anchor"]
 wallet_endpoint = "https://localhost.emobix.co.uk:8443/test/a/ferrosmart-verifier/authorize"
 digital_credentials_api = false
 # For the conformance run alone: the suite's sample PID carries no personal_administrative_number.
+# The lane sets credential_formats to the plan's one format and its anchor.
 identifier_claim = "family_name"
 claims = ["family_name", "given_name", "birthdate", "issuing_country"]
+mdoc_claims = ["family_name", "given_name", "birth_date", "issuing_country"]

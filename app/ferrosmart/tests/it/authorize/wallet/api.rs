@@ -176,6 +176,44 @@ async fn a_pid_through_the_api_logs_the_person_in() {
     wallet.stop().await;
 }
 
+/// Returns the answer `data` the API hands the page for the PID as an
+/// mdoc, its device signature over the handover of `origin`.
+fn answered_mdoc(wallet: &Wallet, offered: &Offered, origin: &str) -> Value {
+    use ferrosmart::wallet::mdoc::{Handover, session_transcript};
+    let thumbprint = mdoc::thumbprint(&offered.jwk());
+    let transcript = session_transcript(&Handover::DigitalCredentials {
+        origin,
+        nonce: &offered.text("nonce"),
+        thumbprint: &thumbprint,
+    });
+    let presentation = mdoc::Mdoc::pid().present(&wallet.pki.issuer, &wallet.holder, &transcript);
+    let payload = json!({"vp_token": {mdoc::MDOC: [presentation]}});
+    json!({"response": kit::sealed(&payload, &offered.jwk())})
+}
+
+#[tokio::test]
+async fn a_pid_mdoc_through_the_api_logs_the_person_in_under_the_page_s_origin() {
+    let wallet = Wallet::start().await;
+    let first = offered(&wallet).await;
+    // NOTE: OpenID4VP 1.0 Appendix B.2.6.2, the handover names the origin with no prefix.
+    let data = answered_mdoc(&wallet, &first, ORIGIN);
+    let (status, headers, page) = post_data(&wallet, &first, &data).await;
+    assert_eq!(StatusCode::SEE_OTHER, status, "{page}");
+    assert_eq!("/consent", location(&headers).path());
+    let other = offered(&wallet).await;
+    let data = answered_mdoc(&wallet, &other, &format!("origin:{ORIGIN}"));
+    let (status, headers, page) = post_data(&wallet, &other, &data).await;
+    assert_eq!(StatusCode::SEE_OTHER, status, "{page}");
+    assert_eq!(
+        Some("access_denied".to_owned()),
+        param(&location(&headers), "error")
+    );
+    let recorded = logins(&wallet.smart.store).await;
+    let login = recorded.last().expect("recorded");
+    assert!(login.contains("bad_holder_binding"), "{login}");
+    wallet.stop().await;
+}
+
 #[tokio::test]
 async fn a_presentation_bound_to_the_client_id_is_refused_over_the_api() {
     let wallet = Wallet::start().await;

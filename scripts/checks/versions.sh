@@ -282,7 +282,8 @@ done
 for tree in "okta:Okta OpenID Connect and OAuth 2.0 API" \
   "microsoft-graph:Microsoft Graph documentation" \
   "sogis-acm:SOG-IS Agreed Cryptographic Mechanisms" \
-  "etsi-eudi:ETSI EUDI wallet specifications"; do
+  "etsi-eudi:ETSI EUDI wallet specifications" \
+  "mdoc-references:mdoc reference sources"; do
   dir="docs/specs/${tree%%:*}"
   item="${tree#*:}"
   if [ -f "$dir/PROVENANCE.md" ]; then

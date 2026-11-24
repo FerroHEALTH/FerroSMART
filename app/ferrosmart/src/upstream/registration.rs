@@ -271,15 +271,32 @@ fn saml_lines(
 /// wallet-relying parties records, and what the access certificate names
 /// (Implementing Regulation (EU) 2025/848 Art 5, Annex I).
 fn wallet_lines(wallet: &WalletSection, endpoints: &Endpoints<'_>) -> Vec<(&'static str, String)> {
+    use crate::wallet::Format;
     let at = |route: &str| endpoints.at(route);
-    vec![
+    let formats = &wallet.credential_formats;
+    let mut lines = vec![
         (
             "request URI",
             format!("{}/{{state}}", at("/wallet/request")),
         ),
         ("response URI", at(crate::upstream::wallet::RESPONSE_ROUTE)),
         ("redirect URI", at(crate::upstream::wallet::COMPLETE_ROUTE)),
-        ("credential types", wallet.vct_values.join(", ")),
-        ("attributes", wallet.claims.join(", ")),
-    ]
+        (
+            "credential formats",
+            formats
+                .iter()
+                .map(|format| format.identifier())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    ];
+    if formats.contains(&Format::SdJwtVc) {
+        lines.push(("credential types", wallet.vct_values.join(", ")));
+        lines.push(("attributes", wallet.claims.join(", ")));
+    }
+    if formats.contains(&Format::Mdoc) {
+        lines.push(("document type", wallet.doctype.clone()));
+        lines.push(("mdoc attributes", wallet.mdoc_claims.join(", ")));
+    }
+    lines
 }

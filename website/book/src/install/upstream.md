@@ -371,8 +371,13 @@ wallet-relying parties:
 
 `ferrosmart upstream registration <name>` prints what the registrar
 records: the request URI, the response URI `{issuer}/wallet/response`, the
-redirect URI `{issuer}/wallet/complete`, the credential types and the
-attributes.
+redirect URI `{issuer}/wallet/complete`, the credential formats, and for
+each format the credential or document type and the attributes.
+
+The request asks for the PID as an SD-JWT VC or as an ISO mdoc, and the
+wallet presents the one it holds. Both name the same person, so the login
+is the same either way. Set `credential_formats` to ask for one format
+only.
 
 The browser first shows a page with an "Open your wallet" link. Where the
 browser has the W3C Digital Credentials API, a press asks the browser for

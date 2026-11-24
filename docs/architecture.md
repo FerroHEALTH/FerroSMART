@@ -3436,8 +3436,11 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 # registration_certificate_file = "/run/secrets/wrp-registration.jwt"   # as the registrar issued it
 # issuer_anchor_files = ["/run/secrets/pid-providers.pem"]  # the PID providers' trust anchors, joining the list below
 # wallet_endpoint = "eu-eaap://"
+# credential_formats = ["dc+sd-jwt", "mso_mdoc"]   # the wallet presents one of them
 # vct_values = ["urn:eudi:pid:1"]
 # claims = ["family_name", "given_name", "birthdate", "personal_administrative_number", "issuing_country"]
+# doctype = "eu.europa.ec.eudi.pid.1"       # the mdoc's document type and namespace
+# mdoc_claims = ["family_name", "given_name", "birth_date", "personal_administrative_number", "issuing_country"]
 # identifier_claim = "personal_administrative_number"       # the claim the fhirUser lookup reads
 # digital_credentials_api = true            # the page offers the W3C Digital Credentials API beside the link
 # [ferrosmart.upstream.openid4vp.pid_providers_list]   # the Commission's list of PID providers (13.32)
@@ -4536,8 +4539,11 @@ target.
 **The verifier plan.** `.github/workflows/oidf-verifier.yml` runs the
 suite's `oid4vp-1final-verifier-haip-test-plan` (OpenID4VP 1.0 Final with
 HAIP 1.0, `x509_hash`, a signed `request_uri`) against the EUDI Wallet
-verifier of 13.32, with `credential_format=sd_jwt_vc` and
-`response_mode=direct_post.jwt` (#817). `scripts/oidf/lane.sh verifier`
+verifier of 13.32, with `response_mode=direct_post.jwt`, once with
+`credential_format=sd_jwt_vc` (#817) and once with `iso_mdl`, the suite's
+name for the mdoc (#793), FerroSMART started afresh asking for that one
+format. In the mdoc run the suite signs with its own IACA root, served at
+`/mdoc-iaca-root.pem`, which that run alone takes as its anchor. `scripts/oidf/lane.sh verifier`
 runs it on the pinned suite image for a pull request that reaches the
 verifier and on every push to `main`. The suite acts as the wallet: its
 credential key carries a certificate under the anchor the lane gives
@@ -5060,9 +5066,12 @@ Presentations 1.0 (Final), `haip` the OpenID4VC High Assurance
 Interoperability Profile 1.0 (Final), `sd-jwt-vc` draft-ietf-oauth-sd-jwt-vc-13,
 `tsl` draft-ietf-oauth-status-list-20 (the revision Implementing Regulation
 (EU) 2026/1731 names; `haip` pins -14, which agrees on every rule read
-here), all under `docs/specs/openid4vc/`; `rfc9901` is SD-JWT; `etsi 472-2`
-is ETSI TS 119 472-2 V1.2.1, recorded by sha256 under
-`docs/specs/etsi-eudi/`; the EU acts are under `docs/specs/eu-law/`.
+here), all under `docs/specs/openid4vc/`; `rfc9901` is SD-JWT, `rfc8949`
+CBOR, `rfc9052` and `rfc9053` COSE, `rfc9360` its `x5chain` and `rfc8392`
+CWT; `etsi 472-2` is ETSI TS 119 472-2 V1.2.1, recorded by sha256 under
+`docs/specs/etsi-eudi/`; the EU acts are under `docs/specs/eu-law/`; the
+PID Rulebook and the mdoc reference implementations are recorded by URL,
+commit and sha256 under `docs/specs/mdoc-references/`.
 
 **The protocol.** Implementing Regulation (EU) 2024/2979 Annex II, as
 amended by 2026/1731 (Annex XII), applies `etsi 472-2` clauses 4.1, 4.2, 5
@@ -5073,8 +5082,9 @@ clause 6.4, which the OpenID Foundation's verifier plan tests, and the
 API of clause 6.5 (FerroHEALTH/FerroSMART#840). The ISO/IEC 18013-7 Annex C mdoc API is
 an RP "should" (ISO/IEC 18013-SUPPORT-04) and is not built. The PID is
 accepted as an SD-JWT VC (`dc+sd-jwt`, `haip §5.3.2`) of type
-`urn:eudi:pid:1` (Implementing Regulation (EU) 2024/2977 Annex as amended,
-§4.2); the mdoc PID is FerroHEALTH/FerroSMART#793.
+`urn:eudi:pid:1` and as an ISO mdoc (`mso_mdoc`, `haip §5.3.1`) of type
+`eu.europa.ec.eudi.pid.1`, the two formats it is issued in (Implementing
+Regulation (EU) 2024/2977 Annex as amended, §4; PID Rulebook §3.1.1).
 
 **The request.** The browser is sent to the wallet endpoint, `eu-eaap://`
 by default (`etsi 472-2` OIDFVP-HAIP-REDIRECTS-03), with the `client_id`,
@@ -5095,16 +5105,23 @@ certificate and its path, the anchor left out) and `iat`
 the `state`, `A128GCM` and `A256GCM`, and ES256 for the SD-JWT and the Key
 Binding JWT (`haip §5`, `§7`; `openid4vp §8.3`, Appendix B.3.4),
 `verifier_info` with the registration certificate as `registration_cert`
-(OIDFVP-HAIP-COMMON-REQ-RO-13 to -16), and one DCQL credential query `pid`
-naming the accepted types, the claims asked for and an `aki` trusted
-authorities query over the configured anchors (`openid4vp §6`, `§6.1.1.1`;
-`haip §5`). The `etsi_tl` query of RO-17 waits on the trusted lists of
+(OIDFVP-HAIP-COMMON-REQ-RO-13 to -16), and a DCQL credential query per
+format in `credential_formats`, each with an `aki` trusted authorities
+query over the configured anchors (`openid4vp §6`, `§6.1.1.1`; `haip §5`):
+`pid` for the SD-JWT VC, naming the accepted types and the claims asked
+for, and `pid_mdoc` for the mdoc, naming the `doctype_value` and each
+element as `[doctype, element]` (`openid4vp` Appendix B.2.3, B.2.4). With
+both, one `credential_sets` entry offers them as alternatives, and the
+wallet presents one (`openid4vp §6.2`). `vp_formats_supported` names ES256
+for the SD-JWT VC and COSE ES256 and ESP256 (-7, -9) for the mdoc's issuer
+and device signatures (`openid4vp` Appendix B.2.2; `haip §7`; RFC 9864). The `etsi_tl` query of RO-17 waits on the trusted lists of
 FerroHEALTH/FerroSMART#794.
 
 **The answer.** The wallet posts `response`, a JWE under ECDH-ES to the
 request's key (`openid4vp §8.3.1`), to `POST {issuer}/wallet/response`.
 FerroSMART finds the request by the JWE's `kid`, opens it, checks its
-`state`, and reads one presentation for `pid`. A wallet's error, sealed or
+`state`, and reads the one presentation of the VP Token, for `pid` or
+`pid_mdoc`; an answer in both, or for a query not asked, is malformed. A wallet's error, sealed or
 in the clear, sends the browser back with `error` and the request's
 `state`, which must name the cookie's request, and the app gets
 `access_denied` (`openid4vp §8.5`; `rfc6749 §4.1.2.1`). An error takes no
@@ -5128,6 +5145,42 @@ refusal:
 | `replayed_nonce` | the request's nonce was not answered before (`openid4vp §14.1.2`) |
 | `no_administrative_number` | the identifier claim is disclosed |
 | `missing_claim` | every other claim asked for is disclosed (`openid4vp §8.6`) |
+
+**The mdoc.** For `pid_mdoc` the presentation is a base64url
+`DeviceResponse` of one document (`openid4vp` Appendix B.2.5; `haip
+§5.3.1`). ISO/IEC 18013-5 defines its structures, and its text was not
+available: FerroSMART reads them as `openid4vp` Appendix B.2, `rfc8949`,
+`rfc9052` and `tsl §6.3` describe them, and checked each structure only the
+ISO text defines against the EU's iOS reference libraries and multipaz, the
+mdoc library the EU's Kotlin wallet pins. The checks, with the same reasons
+in the same order: `invalid_credential` when the response is not version 1,
+status 0, one document, when the `issuerAuth` `COSE_Sign1` does not verify
+under ES256 or ESP256 with `alg` protected (`rfc9052 §4.4`), when the MSO
+does not read, uses a digest algorithm other than SHA-256 (`haip §8`) or
+names another `docType` than the document, or when an
+`IssuerSignedItemBytes` does not hash to its `valueDigests` entry;
+`untrusted_issuer` for the `x5chain` (`rfc9360 §2`) as for `x5c`;
+`unrequested_credential` for a `docType` other than `doctype`, an element
+of another namespace or not in `mdoc_claims`, or a device-signed element;
+`expired` before `validFrom` or `signed` less 60 seconds, or at or after
+`validUntil`; `bad_holder_binding` when the `deviceSignature` over
+`DeviceAuthenticationBytes` with the request's `SessionTranscript` does not
+verify under the MSO's `deviceKey`, or a `deviceMac` comes instead (`haip
+§7` names the signature). The transcript is the `OpenID4VPHandover` over
+the `client_id`, the `nonce`, the JWK Thumbprint of the request's
+encryption key and the `response_uri`, or over the Digital Credentials
+API the `OpenID4VPDCAPIHandover` over the origin, the `nonce` and the
+thumbprint (`openid4vp` Appendix B.2.6). When the MSO carries `status`, its
+`status_list` names an index in a Token Status List in CWT format (`tsl
+§5.2`, `§6.3`, fetched as `application/statuslist+cwt`), and its
+`identifier_list` an identifier in an identifier list in CWT format
+(`application/identifierlist+cwt`, the claim 65530 holding `identifiers`;
+this rests on multipaz and the OpenID Foundation suite alone); either is a
+tagged `COSE_Sign1` of its type, under an `x5chain` to the anchors, naming
+the `uri` as `sub`, with an `iat` and an unexpired `exp`, and a status
+that is unreadable or of another mechanism is `status_unavailable`. The
+identifier and the other elements are then checked as for the SD-JWT VC,
+and the login's `auth_time` is when the presentation was verified.
 
 The status list is read only when the credential carries `status`
 (`sd-jwt-vc §3.4`); a credential without one is accepted, as a credential
@@ -5210,17 +5263,20 @@ identifier system (13.6 item 9). A PID without it is refused as
 login's `acr` is `http://eidas.europa.eu/LoA/high`, the level the wallet is
 provided at (Regulation (EU) 2024/1183 Art 5a(11); 2977 Art 3(7)), so a
 wallet entry takes no `assurance.levels`, only a `minimum`. Its
-`auth_time` is the Key Binding JWT's `iat`.
+`auth_time` is the Key Binding JWT's `iat`, or for an mdoc the time it
+was verified.
 
 **The configuration.** `access_certificate_file` (the access certificate
 and its path), `access_key_file` (its PKCS#8 P-256 key), and
 `registration_certificate_file` are read at start, the key checked against
 the certificate and the certificate refused when self-signed.
 `issuer_anchor_files` hold the PID providers' anchors as PEM certificates.
-`wallet_endpoint`, `vct_values`, `claims` (dotted for a nested claim, the
-identifier claim and `issuing_country` among them), `identifier_claim` and
-`digital_credentials_api` have the defaults above.
+`wallet_endpoint`, `credential_formats` (each once), `vct_values`, `claims`
+(dotted for a nested claim, the identifier claim and `issuing_country`
+among them when the SD-JWT VC is asked for), `doctype`, `mdoc_claims` (the
+identifier and `issuing_country` among them when the mdoc is asked for),
+`identifier_claim` and `digital_credentials_api` have the defaults above.
 `ferrosmart upstream registration <entry>` prints
-the request URI, the response URI, the redirect URI, the types and the
-attributes the registrar records (Implementing Regulation (EU) 2025/848
+the request URI, the response URI, the redirect URI, the formats, and per
+format the types and the attributes the registrar records (Implementing Regulation (EU) 2025/848
 Art 5, Annex I).

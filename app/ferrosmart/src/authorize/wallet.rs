@@ -34,9 +34,10 @@ use crate::upstream::wallet::{
     RESPONSE_ROUTE, WalletLogin,
 };
 use crate::upstream::{Identity, LoginProvider};
-use crate::wallet::Refusal;
 use crate::wallet::jwe::{self, EphemeralKey};
-use crate::wallet::request::{CREDENTIAL_ID, Lane, MEDIA_TYPE};
+use crate::wallet::mdoc::Handover;
+use crate::wallet::request::{CREDENTIAL_ID, Lane, MDOC_CREDENTIAL_ID, MEDIA_TYPE};
+use crate::wallet::{Format, Refusal};
 
 use super::{COOKIE, Denial, cookie, deny_unsigned, forget, found, now, random, sha256};
 
@@ -210,25 +211,56 @@ async fn answered(
 }
 
 /// Checks the one presentation of the VP Token in `payload` for `pending`
-/// in `lane` and returns the person it names (OpenID4VP 1.0 §8.1, §8.6).
+/// in `lane`, in the one format of the request's credential set it
+/// answers, and returns the person it names (OpenID4VP 1.0 §6.2, §8.1,
+/// §8.6).
 async fn presented(
     login: &WalletLogin,
     pending: &Pending,
     payload: &Value,
     lane: &Lane<'_>,
 ) -> Result<Identity, Refusal> {
-    let Some([Value::String(presentation)]) = payload
+    let token = payload
         .get("vp_token")
-        .and_then(|token| token.get(CREDENTIAL_ID))
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-    else {
+        .and_then(Value::as_object)
+        .ok_or(Refusal::MalformedResponse)?;
+    let mut answered = token.iter();
+    let (Some((id, presentations)), None) = (answered.next(), answered.next()) else {
         return Err(Refusal::MalformedResponse);
     };
-    let audience = login.upstream().audience(lane);
-    login
-        .verify(presentation, &pending.upstream_nonce, &audience, now())
-        .await
+    let Some([Value::String(presentation)]) = presentations.as_array().map(Vec::as_slice) else {
+        return Err(Refusal::MalformedResponse);
+    };
+    let upstream = login.upstream();
+    let nonce = &pending.upstream_nonce;
+    match id.as_str() {
+        CREDENTIAL_ID if upstream.asks_for(Format::SdJwtVc) => {
+            let audience = upstream.audience(lane);
+            login
+                .verify_sd_jwt(presentation, nonce, &audience, now())
+                .await
+        }
+        MDOC_CREDENTIAL_ID if upstream.asks_for(Format::Mdoc) => {
+            let thumbprint = EphemeralKey::from_stored(&pending.upstream_verifier)
+                .and_then(|key| key.thumbprint())
+                .map_err(|_unread| Refusal::MalformedResponse)?;
+            let handover = match lane {
+                Lane::Redirect { .. } => Handover::Redirect {
+                    client_id: upstream.client_id(),
+                    nonce,
+                    thumbprint: &thumbprint,
+                    response_uri: upstream.response_uri(),
+                },
+                Lane::DigitalCredentials { origin } => Handover::DigitalCredentials {
+                    origin,
+                    nonce,
+                    thumbprint: &thumbprint,
+                },
+            };
+            login.verify_mdoc(presentation, &handover, now()).await
+        }
+        _ => Err(Refusal::MalformedResponse),
+    }
 }
 
 /// Keeps the person `identity` for `pending` under a fresh response code

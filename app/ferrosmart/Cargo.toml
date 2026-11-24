@@ -50,6 +50,8 @@ roxmltree.workspace = true
 # The EUDI Wallet verifier checks each certificate path with the crypto
 # provider jsonwebtoken already links.
 x509-parser = { workspace = true, features = ["verify-aws"] }
+# The CBOR of an mdoc PID presentation and of its COSE signatures (#793).
+ciborium.workspace = true
 flate2.workspace = true
 ferrohealth-telemetry.workspace = true
 http.workspace = true

@@ -22,6 +22,10 @@ authors = ["Ruben Talstra"]
 [workspace.dependencies]
 # The JSON Schema check of FerroSMART's answers against its OpenAPI document.
 jsonschema = { version = "0.61.1", default-features = false }
+# The CBOR of an mdoc presentation and its COSE structures (RFC 8949, RFC
+# 9052), in FerroSMART's EUDI Wallet verifier. Verified against crates.io
+# on 2026-11-24.
+ciborium = { version = "0.2.2", default-features = false, features = ["std"] }
 jsonwebtoken = { version = "11.1.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "http2"] }
 argon2 = { version = "0.6.0", default-features = false, features = ["password-hash", "alloc"] }
