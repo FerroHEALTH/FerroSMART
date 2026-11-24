@@ -214,7 +214,7 @@ impl Config {
             fhir_user_lookups: fhir_user_lookups(&section.resource)?,
             assigned: assigned(&section.resource)?,
             recent_retention: section.picker.recent_retention.get(),
-            upstreams: upstreams(&section.upstream, &keys, section.assurance_minimum)?,
+            upstreams: upstreams(&section.upstream, &keys, section.assurance_minimum, &issuer)?,
             saml: service_provider(section)?,
             roles: roles(&section.role)?,
             require_pushed_authorization_requests: section.require_pushed_authorization_requests,
@@ -688,10 +688,11 @@ fn upstreams(
     sections: &[UpstreamSection],
     keys: &SigningKeys,
     floor: crate::assurance::Floor,
+    issuer: &Url,
 ) -> Result<Vec<Upstream>, Error> {
     let mut resolved: Vec<Upstream> = Vec::with_capacity(sections.len());
     for section in sections {
-        let upstream = upstream(section, keys, floor)?;
+        let upstream = upstream(section, keys, floor, issuer)?;
         if resolved.iter().any(|other| other.name == upstream.name) {
             return Err(Error::Upstream {
                 rule: "each entry has a name of its own",
@@ -710,11 +711,12 @@ fn upstreams(
     Ok(resolved)
 }
 
-/// Returns the provider `section` names.
+/// Returns the provider `section` names, a wallet answering under `issuer`.
 fn upstream(
     section: &UpstreamSection,
     keys: &SigningKeys,
     floor: crate::assurance::Floor,
+    issuer: &Url,
 ) -> Result<Upstream, Error> {
     let named = !section.name.is_empty()
         && section
@@ -726,10 +728,15 @@ fn upstream(
             rule: "`name` is set, of letters, digits and `-`",
         });
     }
+    let levels = wallet_assurance(section)?;
     // NOTE: no specification governs the entry: our own design, the table present
     // names the protocol and a preset fills only an OpenID Connect table (#733).
-    let (protocol, fhir_user_claim, role_claims) = match (&section.oidc, &section.saml) {
-        (Some(oidc), None) => {
+    let (protocol, fhir_user_claim, role_claims) = match (
+        &section.oidc,
+        &section.saml,
+        &section.openid4vp,
+    ) {
+        (Some(oidc), None, None) => {
             let effective = oidc.effective(&section.defaults()?);
             let resolved = oidc_upstream(oidc, &effective, keys)?;
             (
@@ -738,28 +745,31 @@ fn upstream(
                 effective.role_claims,
             )
         }
-        (None, Some(_)) if section.preset.is_some() => {
+        (None, _, _) if section.preset.is_some() => {
             return Err(Error::Upstream {
-                rule: "a `preset` fills an `[ferrosmart.upstream.oidc]` table, never a SAML one",
+                rule: "a `preset` fills an `[ferrosmart.upstream.oidc]` table, never a SAML or wallet one",
             });
         }
-        (None, Some(saml)) => {
+        (None, Some(saml), None) => {
             let (resolved, fhir_user_claim, role_claims) = crate::upstream::saml::upstream(saml)?;
             (Protocol::Saml(resolved), fhir_user_claim, role_claims)
         }
+        (None, None, Some(wallet)) => {
+            let resolved = crate::upstream::wallet::upstream(wallet, issuer)?;
+            (Protocol::Wallet(resolved), String::new(), Vec::new())
+        }
         _ => {
             return Err(Error::Upstream {
-                rule: "one of `[ferrosmart.upstream.oidc]` and `[ferrosmart.upstream.saml]` is set, never both",
+                rule: "one of `[ferrosmart.upstream.oidc]`, `[ferrosmart.upstream.saml]` and `[ferrosmart.upstream.openid4vp]` is set",
             });
         }
     };
-    let assurance =
-        crate::assurance::Assurance::resolve(&section.assurance, floor).map_err(|source| {
-            Error::Assurance {
-                name: section.name.clone(),
-                source,
-            }
-        })?;
+    let assurance = crate::assurance::Assurance::resolve(&levels, floor).map_err(|source| {
+        Error::Assurance {
+            name: section.name.clone(),
+            source,
+        }
+    })?;
     let named = |claim: &String| !claim.is_empty();
     Ok(Upstream {
         name: section.name.clone(),
@@ -772,6 +782,29 @@ fn upstream(
         role_claims: role_claims.into_iter().filter(named).collect(),
         assurance,
         protocol,
+    })
+}
+
+/// Returns the assurance of the entry `section`: its own table, or for a
+/// wallet the one level of a PID (Regulation (EU) 2024/1183 Art 5a(11)),
+/// whose table may set only a minimum.
+fn wallet_assurance(
+    section: &UpstreamSection,
+) -> Result<crate::assurance::AssuranceSection, Error> {
+    if section.openid4vp.is_none() {
+        return Ok(section.assurance.clone());
+    }
+    if !section.assurance.levels.is_empty() {
+        return Err(Error::Upstream {
+            rule: "a wallet entry sets no `assurance.levels`: a PID login is at level high",
+        });
+    }
+    Ok(crate::assurance::AssuranceSection {
+        levels: BTreeMap::from([(
+            String::from(crate::upstream::wallet::ACR),
+            ferrohealth_smart::assurance::AssuranceLevel::High,
+        )]),
+        minimum: section.assurance.minimum,
     })
 }
 

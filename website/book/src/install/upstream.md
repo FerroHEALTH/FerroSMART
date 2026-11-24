@@ -10,7 +10,8 @@ Connect provider that publishes a discovery document works, and any SAML
 2.0 provider of the Web Browser SSO profile; no code in FerroSMART knows a
 vendor or a country. Four OpenID Connect providers have a tested setup,
 and each section below says what to configure at the provider and in
-`[[ferrosmart.upstream]]`. [SAML 2.0](#saml-20) closes the page.
+`[[ferrosmart.upstream]]`. [SAML 2.0](#saml-20) and [the EUDI Wallet](#the-eudi-wallet)
+close the page.
 
 ## What every provider needs
 
@@ -348,3 +349,56 @@ FerroSMART a TLS client identity in `[ferrosmart.saml.tls]`: it resolves
 the artifact at the provider's artifact resolution service over mutual
 TLS. Single Logout is not taken: a SAML login's grants end with their own
 lifetimes.
+
+## The EUDI Wallet
+
+A person can log in by presenting the person identification data (PID) in
+their European Digital Identity Wallet. FerroSMART is the verifier, under
+the OpenID4VC High Assurance Interoperability Profile and the EU wallet
+profile: it sends the browser to the wallet with a signed request, the
+wallet posts the person's PID back encrypted, and the browser that began
+the login brings the answer back. The entry has an
+`[ferrosmart.upstream.openid4vp]` table
+([the keys](../configure/configuration.md#ferrosmartupstream)).
+
+Before the first login you need, from your Member State's registrar of
+wallet-relying parties:
+
+- a wallet-relying party access certificate with its P-256 key, which signs
+  every request;
+- a registration certificate naming the attributes you may ask for;
+- the trust anchors of the PID providers you accept.
+
+`ferrosmart upstream registration <name>` prints what the registrar
+records: the request URI, the response URI `{issuer}/wallet/response`, the
+redirect URI `{issuer}/wallet/complete`, the credential types and the
+attributes.
+
+```toml
+[[ferrosmart.upstream]]
+name = "wallet"
+label = "EUDI Wallet"
+
+[ferrosmart.upstream.openid4vp]
+access_certificate_file = "/run/secrets/wrp-access.pem"
+access_key_file = "/run/secrets/wrp-access-key.pem"
+registration_certificate_file = "/run/secrets/wrp-registration.jwt"
+issuer_anchor_files = ["/run/secrets/pid-providers.pem"]
+
+[[ferrosmart.resource]]
+base = "https://ehr.example.org/fhir"
+
+[[ferrosmart.resource.fhir_user_lookup]]
+resource_type = "Patient"
+claim = "personal_administrative_number"
+system = "http://fhir.nl/fhir/NamingSystem/bsn"
+```
+
+The PID's administrative number names the person, and the `fhirUser`
+lookup finds their record by it. A PID without one is refused, since
+FerroSMART does not match people by name and birth date. FerroSMART
+refuses a presentation whose issuer does not chain to an anchor, whose
+type was not asked for, that has expired or been revoked, whose key
+binding does not hold, whose nonce was answered before, or that leaves out
+a claim asked for. Each refusal is a login record in the
+[audit](../operate/audit.md) that names the reason.

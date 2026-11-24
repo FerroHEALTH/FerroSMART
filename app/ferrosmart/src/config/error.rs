@@ -73,6 +73,10 @@ pub enum Error {
     /// used.
     #[error(transparent)]
     Saml(#[from] crate::upstream::saml::SamlConfigError),
+    /// A wallet table breaks a rule, or names a key, certificate or file
+    /// that cannot be used.
+    #[error(transparent)]
+    Wallet(#[from] crate::upstream::wallet::WalletConfigError),
     /// `ferrosmart.branding.smart_style_url` is no https URL.
     #[error("`ferrosmart.branding.smart_style_url` is no https URL")]
     StyleUrl,

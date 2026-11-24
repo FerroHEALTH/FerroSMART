@@ -1611,12 +1611,13 @@
             "type": "string",
             "enum": [
               "oidc",
-              "saml"
+              "saml",
+              "openid4vp"
             ]
           },
           "issuer": {
             "type": "string",
-            "description": "The issuer identifier or the SAML entity ID."
+            "description": "The issuer identifier, the SAML entity ID, or the wallet's first credential type."
           },
           "clients": {
             "type": "array",

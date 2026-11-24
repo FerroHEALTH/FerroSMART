@@ -15,6 +15,7 @@ use crate::config::FerroSmartSection;
 use crate::config::error::Error;
 use crate::upstream::preset::Defaults;
 use crate::upstream::saml::SamlSection;
+use crate::upstream::wallet::WalletSection;
 use crate::upstream::{OidcSection, UpstreamSection, pairwise};
 
 /// Returns the `[[ferrosmart.upstream]]` entry `name` of `section`.
@@ -82,15 +83,16 @@ impl Registration {
         }
         let upstream = entry(section, name)?;
         let at = Endpoints(section.issuer.trim_end_matches('/'));
-        let (protocol, mut lines) = match (&upstream.oidc, &upstream.saml) {
-            (Some(oidc), None) => (
+        let (protocol, mut lines) = match (&upstream.oidc, &upstream.saml, &upstream.openid4vp) {
+            (Some(oidc), None, None) => (
                 "OpenID Connect",
                 oidc_lines(oidc, &upstream.defaults()?, &at)?,
             ),
-            (None, Some(saml)) => ("SAML 2.0", saml_lines(section, saml, &at)),
+            (None, Some(saml), None) => ("SAML 2.0", saml_lines(section, saml, &at)),
+            (None, None, Some(wallet)) => ("OpenID4VP, the EUDI Wallet", wallet_lines(wallet, &at)),
             _ => {
                 return Err(Error::Upstream {
-                    rule: "one of `[ferrosmart.upstream.oidc]` and `[ferrosmart.upstream.saml]` is set, never both",
+                    rule: "one of `[ferrosmart.upstream.oidc]`, `[ferrosmart.upstream.saml]` and `[ferrosmart.upstream.openid4vp]` is set",
                 });
             }
         };
@@ -263,4 +265,21 @@ fn saml_lines(
         }
     }
     lines
+}
+
+/// The settings of the wallet entry `wallet`: what the registrar of
+/// wallet-relying parties records, and what the access certificate names
+/// (Implementing Regulation (EU) 2025/848 Art 5, Annex I).
+fn wallet_lines(wallet: &WalletSection, endpoints: &Endpoints<'_>) -> Vec<(&'static str, String)> {
+    let at = |route: &str| endpoints.at(route);
+    vec![
+        (
+            "request URI",
+            format!("{}/{{state}}", at("/wallet/request")),
+        ),
+        ("response URI", at(crate::upstream::wallet::RESPONSE_ROUTE)),
+        ("redirect URI", at(crate::upstream::wallet::COMPLETE_ROUTE)),
+        ("credential types", wallet.vct_values.join(", ")),
+        ("attributes", wallet.claims.join(", ")),
+    ]
 }

@@ -47,7 +47,9 @@ ferrohealth-smart = { workspace = true, features = ["axum", "fetch", "oidc", "se
 # The upstream SAML 2.0 login (docs/architecture.md 13.24): the XML tree the
 # shared reader parses, the certificates of the keys, the redirect DEFLATE.
 roxmltree.workspace = true
-x509-parser.workspace = true
+# The EUDI Wallet verifier checks each certificate path with the crypto
+# provider jsonwebtoken already links.
+x509-parser = { workspace = true, features = ["verify-aws"] }
 flate2.workspace = true
 ferrohealth-telemetry.workspace = true
 http.workspace = true
