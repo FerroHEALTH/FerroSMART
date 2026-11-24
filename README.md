@@ -167,9 +167,9 @@ exactly, as every FerroHEALTH product does:
 
 ```toml
 [dependencies]
-ferrohealth-smart = { version = "=0.33.1", features = ["axum", "openehr"] }
+ferrohealth-smart = { version = "=0.34.0", features = ["axum", "openehr"] }
 ferrohealth-authz = { version = "=0.27.0", features = ["cedar"] }
-ferrohealth-session = { version = "=0.28.1", features = ["axum"] }
+ferrohealth-session = { version = "=0.29.0", features = ["axum"] }
 ```
 
 The release plan of each crate refuses a tag while this page or the crate's
