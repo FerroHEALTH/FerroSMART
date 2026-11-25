@@ -17,6 +17,11 @@
 #   smart-app-launch.json  app/ferrosmart/inferno/smart_stu2_2_expected.json:
 #                          the Inferno tests that pass, of all run and not
 #                          omitted, as Inferno scores them
+#   post-quantum.json      conformance/post-quantum.tsv, through the shared
+#                          helper's badge_post_quantum: the post-quantum
+#                          safe uses of all (#890); the same rows are the
+#                          table of docs/post-quantum.md, and each file a
+#                          row's location names exists
 #
 # Each label names the exact version it was tested against, and no label
 # claims more than a self-test: "certified", "compliant" and "conformant"
@@ -73,7 +78,43 @@ handled() {
   echo "$count"
 }
 
-# Writes the three badges of the tree $1 into the directory $2.
+# Prints the markdown table of the post-quantum inventory $1.
+pq_table() {
+  printf '| Use | Algorithm | Safe | Post-quantum standard | Location |\n|---|---|---|---|---|\n'
+  rows "$1" | tail -n +2 | awk -F'\t' '{ printf "| %s | %s | %s | %s | `%s` |\n", $1, $2, $3, $4, $5 }'
+}
+
+# Prints the docs/post-quantum.md of the tree $1 with its table rewritten
+# from the inventory, between the two table markers.
+pq_page() {
+  local tree="$1" table
+  table="$(pq_table "$tree/conformance/post-quantum.tsv")"
+  PQ_TABLE="$table" awk '
+    /^<!-- post-quantum table -->$/ { print; print ENVIRON["PQ_TABLE"]; skip = 1; next }
+    /^<!-- end of the post-quantum table -->$/ { skip = 0 }
+    !skip { print }
+  ' "$tree/docs/post-quantum.md"
+}
+
+# Fails for each file a row of the post-quantum inventory of the tree $1
+# names in its location that the tree does not hold.
+pq_locations() {
+  local tree="$1" failures=0 location item path items
+  while IFS=$'\t' read -r _ _ _ _ location; do
+    IFS=',' read -ra items <<< "$location"
+    for item in "${items[@]}"; do
+      path="$(awk '{ print $1 }' <<< "$item")"
+      [[ "$path" == */* ]] || continue
+      if [[ ! -e "$tree/$path" ]]; then
+        echo "conformance: the post-quantum inventory names $path, which the tree does not hold" >&2
+        failures=$((failures + 1))
+      fi
+    done
+  done < <(rows "$tree/conformance/post-quantum.tsv" | tail -n +2)
+  [[ "$failures" -eq 0 ]]
+}
+
+# Writes the badges of the tree $1 into the directory $2.
 render() {
   local tree="$1" out="$2" mapped listed refused negative passed tests version
   mapped=$(handled "$tree")
@@ -92,6 +133,9 @@ render() {
   version=$(smart_version "$tree")
   [[ -n "$version" ]] || { echo "conformance: docs/VERSIONS.md pins no SMART App Launch version" >&2; return 2; }
   badge "SMART App Launch $version" "$passed" "$tests" "Inferno tests" key > "$out/smart-app-launch.json"
+  if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
+    badge_post_quantum "$tree/conformance/post-quantum.tsv" > "$out/post-quantum.json"
+  fi
 }
 
 # Fails when a badge under $1/conformance/badges, or the README's badge
@@ -105,7 +149,7 @@ labels() {
       echo "conformance: $(basename "$file") claims more than a self-test: $label" >&2
       failures=$((failures + 1))
     fi
-    if ! grep -qE '[0-9]+\.[0-9]+' <<< "$label"; then
+    if [[ "$label" != post-quantum ]] && ! grep -qE '[0-9]+\.[0-9]+' <<< "$label"; then
       echo "conformance: $(basename "$file") names no version: $label" >&2
       failures=$((failures + 1))
     fi
@@ -118,6 +162,9 @@ labels() {
   badge_logo_readme "$tree/README.md" || failures=$((failures + 1))
   badge_caption_check "$tree/README.md" || failures=$((failures + 1))
   badge_color_check "$tree"/conformance/badges/*.json || failures=$((failures + 1))
+  if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
+    pq_locations "$tree" || failures=$((failures + 1))
+  fi
   [[ "$failures" -eq 0 ]]
 }
 
@@ -126,18 +173,29 @@ run() {
   local tree="$1" mode="$2" fresh drift=0
   fresh="$(mktemp -d)"
   render "$tree" "$fresh"
+  if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
+    pq_page "$tree" > "$fresh/post-quantum.md"
+  fi
   if [[ "$mode" == check ]]; then
-    if ! diff -r "$fresh" "$tree/conformance/badges" > /dev/null 2>&1; then
+    if [[ -f "$fresh/post-quantum.md" ]] && ! diff "$fresh/post-quantum.md" "$tree/docs/post-quantum.md" > /dev/null; then
+      echo "conformance: the table of docs/post-quantum.md differs from conformance/post-quantum.tsv;" >&2
+      echo "run scripts/checks/conformance.sh and commit the page." >&2
+      drift=1
+    fi
+    if ! diff -r "$fresh" "$tree/conformance/badges" -x post-quantum.md > /dev/null 2>&1; then
       echo "conformance: conformance/badges/ differs from what the tests count:" >&2
-      diff -r "$fresh" "$tree/conformance/badges" >&2 || true
+      diff -r "$fresh" "$tree/conformance/badges" -x post-quantum.md >&2 || true
       echo "run scripts/checks/conformance.sh and commit the badges." >&2
       drift=1
     fi
   else
     mkdir -p "$tree/conformance/badges"
     cp "$fresh"/*.json "$tree/conformance/badges/"
+    if [[ -f "$fresh/post-quantum.md" ]]; then
+      cp "$fresh/post-quantum.md" "$tree/docs/post-quantum.md"
+    fi
   fi
-  rm -f "$fresh"/*.json
+  rm -f "$fresh"/*.json "$fresh/post-quantum.md"
   rmdir "$fresh"
   [[ "$drift" -eq 0 ]] || return 1
   labels "$tree"
@@ -149,7 +207,7 @@ clean() {
   local work="$1" tree="$1/repo"
   rm -f "$work/badge" "$tree"/conformance/badges/*.json "$tree/conformance/pid-attributes.tsv" "$tree/app/ferrosmart/pid.rs" \
     "$tree/app/ferrosmart/oidf/expected.tsv" "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json" \
-    "$tree/docs/VERSIONS.md" "$tree/README.md"
+    "$tree/docs/VERSIONS.md" "$tree/README.md" "$tree/conformance/post-quantum.tsv" "$tree/docs/post-quantum.md"
   rmdir "$tree/conformance/badges" "$tree/conformance" "$tree/app/ferrosmart/oidf" \
     "$tree/app/ferrosmart/inferno" "$tree/app/ferrosmart" "$tree/app" "$tree/docs" "$tree" "$work"
 }
@@ -239,6 +297,19 @@ self_test() {
   cp "$work/badge" "$tree/README.md"
   printf '[![SMART certified](https://img.shields.io/endpoint?url=conformance/badges/x.json)](x)\n' >> "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a README badge text claiming certification passes"; fi
+  cp "$work/badge" "$tree/README.md"
+  printf '%s\n' "$badge_post_quantum_header" \
+    $'tls\tX25519MLKEM768\tyes\tRFC 10024\tapp/ferrosmart/pid.rs' \
+    $'tokens\tRS256\tno\tRFC 9964\tapp/ferrosmart/pid.rs, ferrohealth-smart jws' > "$tree/conformance/post-quantum.tsv"
+  printf '# x\n<!-- post-quantum table -->\n<!-- end of the post-quantum table -->\n' > "$tree/docs/post-quantum.md"
+  run "$tree" update > /dev/null || fail "a tree with an inventory is refused"
+  [[ "$(jq -r .message "$tree/conformance/badges/post-quantum.json")" == "1/2" ]] ||
+    fail "the post-quantum count"
+  grep -q '^| tokens | RS256 | no |' "$tree/docs/post-quantum.md" || fail "the inventory table is not written"
+  printf '%s\n' $'saml\tRSA\tno\tno standard yet\tapp/ferrosmart/gone.rs' >> "$tree/conformance/post-quantum.tsv"
+  if run "$tree" check > /dev/null 2>&1; then fail "a stale inventory table passes"; fi
+  run "$tree" update > /dev/null 2>&1 || true
+  if labels "$tree" 2> /dev/null; then fail "a location the tree does not hold passes"; fi
   clean "$work"
   badge_post_quantum_self_test || exit 1
   echo "conformance: self-test OK"

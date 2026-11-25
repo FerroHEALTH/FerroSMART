@@ -24,6 +24,7 @@ mod introspection;
 mod launch;
 mod ml_dsa;
 mod openapi;
+mod post_quantum;
 mod refresh;
 mod registration;
 mod replicas;
