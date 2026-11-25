@@ -50,12 +50,9 @@ private_key_file = "/run/secrets/upstream-assertion.pem"
 
 # FerroSMART's own SMART Backend Services client (docs/architecture.md
 # §13.33): it reads a patient's own record for them during a standalone
-# launch with a client credentials token, `system/Patient.rs`, and keeps
-# its own registration. Its assertion key is a P-384 key of its own, never
-# a token key (RFC 8725 §3.12).
-[ferrosmart.backend]
-client_id = "ferrosmart"
-
+# launch with a client credentials token, `system/Patient.rs`, as a client
+# registered under its own issuer identifier. Its assertion key is a P-384
+# key of its own, never a token key (RFC 8725 §3.12).
 [ferrosmart.backend.keys]
 private_key_file = "/run/secrets/backend-assertion.pem"
 

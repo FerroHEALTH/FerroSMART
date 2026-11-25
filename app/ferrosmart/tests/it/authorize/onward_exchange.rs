@@ -28,6 +28,8 @@ enum Route {
     },
     /// The exchange was refused.
     Refused,
+    /// The token is no caller the `ferrosmart` preset admits.
+    Unadmitted,
 }
 
 /// The resource server: FerroSMART's router to exchange tokens at once it
@@ -36,6 +38,8 @@ enum Route {
 struct Bridge {
     /// FerroSMART, set once it started.
     smart: Arc<OnceLock<Router>>,
+    /// The FHIR base, its audience.
+    base: String,
     /// The route each request took.
     routes: Arc<std::sync::Mutex<Vec<Route>>>,
 }
@@ -44,19 +48,21 @@ impl Bridge {
     /// Starts the resource server on a port of its own and returns it with
     /// its FHIR base.
     async fn start() -> (Self, String) {
-        let bridge = Self {
-            smart: Arc::new(OnceLock::new()),
-            routes: Arc::new(std::sync::Mutex::new(Vec::new())),
-        };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("a port");
         let port = listener.local_addr().expect("an address").port();
+        let bridge = Self {
+            smart: Arc::new(OnceLock::new()),
+            base: format!("http://127.0.0.1:{port}/fhir"),
+            routes: Arc::new(std::sync::Mutex::new(Vec::new())),
+        };
         let app = Router::new().fallback(answer).with_state(bridge.clone());
         drop(tokio::spawn(async move {
             axum::serve(listener, app).await.expect("the server runs");
         }));
-        (bridge, format!("http://127.0.0.1:{port}/fhir"))
+        let base = bridge.base.clone();
+        (bridge, base)
     }
 
     /// Returns the routes the requests took.
@@ -89,12 +95,14 @@ async fn answer(
         .is_some_and(|scope| scope.split(' ').all(|scope| scope.starts_with("system/")))
         && claims.get("sub").is_some()
         && claims.get("sub") == claims.get("client_id");
-    let route = if system {
+    let route = if !admitted(&bridge, &token).await {
+        Route::Unadmitted
+    } else if system {
         Route::Own
     } else {
         exchanged(&bridge, &token).await
     };
-    let refused = route == Route::Refused;
+    let refused = matches!(route, Route::Refused | Route::Unadmitted);
     bridge.routes.lock().expect("held").push(route);
     if refused {
         return StatusCode::FORBIDDEN.into_response();
@@ -110,6 +118,36 @@ async fn answer(
         json!({ "resourceType": "Bundle", "type": "searchset", "entry": [{ "resource": patient }] })
     };
     axum::Json(body).into_response()
+}
+
+/// Returns whether the resource server's guard admits `token` under the
+/// `ferrosmart` preset, as FerroBRIDGE's does (`docs/architecture.md` §3.13).
+async fn admitted(bridge: &Bridge, token: &str) -> bool {
+    let smart = bridge.smart.get().expect("FerroSMART runs").clone();
+    let request = Request::get("/jwks")
+        .body(Body::empty())
+        .expect("a request");
+    let response = smart
+        .oneshot(from_client(request))
+        .await
+        .expect("an answer");
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("the body")
+        .to_bytes();
+    let jwks: Value = serde_json::from_slice(&bytes).expect("a JWK Set");
+    crate::support::read_at_resource_server(
+        &jwks,
+        ISSUER,
+        &bridge.base,
+        ferrohealth_smart::kind::IssuerKind::Smart,
+        &ferrohealth_smart::profile::ProfileKeys::default(),
+        token,
+    )
+    .await
+    .is_ok()
 }
 
 /// Exchanges `token` at FerroSMART as the resource server's client.

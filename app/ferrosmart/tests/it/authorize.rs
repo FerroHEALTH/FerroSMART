@@ -2095,7 +2095,7 @@ async fn backend_reads_recorded(smart: &Smart, reads: usize, person: &Value) {
     let acquired = records
         .iter()
         .filter(|record| iua_71(record).is_ok())
-        .filter(|record| record.pointer("/agent/0/who/display") == Some(&json!("ferrosmart")))
+        .filter(|record| record.pointer("/agent/0/who/display") == Some(&json!(ISSUER)))
         .filter(|record| record.get("agent").and_then(Value::as_array).map(Vec::len) == Some(2))
         .count();
     assert_eq!(reads, acquired, "one token request per read, no user agent");
@@ -2105,7 +2105,7 @@ async fn backend_reads_recorded(smart: &Smart, reads: usize, person: &Value) {
         .store
         .audit_records(&ferrosmart::store::audit::AuditQuery {
             subject: person.as_str().map(str::to_owned),
-            client: Some(String::from("ferrosmart")),
+            client: Some(String::from(ISSUER)),
             limit: 100,
             ..ferrosmart::store::audit::AuditQuery::default()
         })
@@ -2209,8 +2209,8 @@ async fn a_patient_gets_their_own_record_in_context_with_no_picker_and_no_role()
     assert!(!reads.is_empty(), "the record is read");
     for claims in &reads {
         assert_eq!(json!("system/Patient.rs"), claims["scope"], "{claims}");
-        assert_eq!(json!("ferrosmart"), claims["sub"], "{claims}");
-        assert_eq!(json!("ferrosmart"), claims["client_id"], "{claims}");
+        assert_eq!(json!(ISSUER), claims["sub"], "{claims}");
+        assert_eq!(json!(ISSUER), claims["client_id"], "{claims}");
         assert!(claims.get("fhirUser").is_none(), "{claims}");
     }
     backend_reads_recorded(&smart, reads.len(), &person).await;

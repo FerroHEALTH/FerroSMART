@@ -3371,8 +3371,7 @@ private_key_files = [                         # in the order they take over; eac
 ]
 rotation_period = "90d"                       # how long a key signs before the next takes over
 
-[ferrosmart.backend]                          # FerroSMART's own Backend Services client; needed with a login at a FHIR base (13.33)
-client_id = "ferrosmart"                      # the client it registers itself as; its tokens' sub
+[ferrosmart.backend]                          # FerroSMART's own Backend Services client, its client_id the issuer; needed with a login at a FHIR base (13.33)
 algorithm = "ES384"                           # or "RS384"
 [ferrosmart.backend.keys]                     # its assertion ring, sharing no key with [ferrosmart.keys]
 private_key_file = "/run/secrets/backend-assertion.pem"
@@ -5394,8 +5393,10 @@ sequenceDiagram
     S-->>B: on to the consent
 ```
 
-- **The client.** `[ferrosmart.backend]` names its `client_id`
-  (`ferrosmart` by default), the assertion algorithm (`ES384` or `RS384`,
+- **The client.** Its `client_id` is FerroSMART's issuer identifier, the
+  client a resource server's `ferrosmart` preset reads as the authorization
+  server itself (`issuer_client_is_person`, 3.13). `[ferrosmart.backend]`
+  names the assertion algorithm (`ES384` or `RS384`,
   the two `smart client-authentication-asymmetric` has a server validate)
   and the `[ferrosmart.backend.keys]` ring, which shares no key with
   `[ferrosmart.keys]` (RFC 8725 §3.12). A deployment that logs people in

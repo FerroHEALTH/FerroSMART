@@ -507,12 +507,11 @@ impl Default for KeysSection {
 }
 
 /// `[ferrosmart.backend]`: FerroSMART as a SMART Backend Services client of
-/// its own token endpoint (`docs/architecture.md` §13.33).
+/// its own token endpoint, registered under its issuer identifier
+/// (`docs/architecture.md` §13.33).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BackendSection {
-    /// The `client_id` FerroSMART registers itself under.
-    pub client_id: String,
     /// The JWS algorithm of its client assertions: `ES384` or `RS384`, the
     /// two SMART App Launch 2.2.0's asymmetric client profile names.
     pub algorithm: String,
@@ -524,7 +523,6 @@ pub struct BackendSection {
 impl Default for BackendSection {
     fn default() -> Self {
         Self {
-            client_id: String::from("ferrosmart"),
             algorithm: String::from("ES384"),
             keys: KeysSection::default(),
         }

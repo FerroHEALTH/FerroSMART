@@ -104,7 +104,9 @@ pub struct Settings {
 /// `[ferrosmart.backend]`.
 #[derive(Debug, Clone)]
 pub struct Backend {
-    /// The `client_id` it is registered under.
+    /// The `client_id` it is registered under: FerroSMART's issuer
+    /// identifier, which a resource server's `ferrosmart` preset reads as the
+    /// authorization server itself (`issuer_client_is_person`).
     pub client_id: String,
     /// The ring that signs its client assertions.
     pub keys: Arc<KeyRing>,
@@ -318,9 +320,6 @@ fn backend(
             Ok(None)
         };
     };
-    if backend.client_id.trim().is_empty() {
-        return Err(rule("`client_id` is set"));
-    }
     // NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric, the server
     // validates RS384 and ES384.
     let algorithm = match backend.algorithm.as_str() {
@@ -335,7 +334,7 @@ fn backend(
         ));
     }
     Ok(Some(Backend {
-        client_id: backend.client_id.clone(),
+        client_id: section.issuer.clone(),
         keys: Arc::new(ring),
     }))
 }

@@ -802,7 +802,15 @@ fn a_login_at_a_fhir_base_needs_the_backend_client() {
         .resolve()
         .expect("resolves");
     let resolved = settings.backend.expect("the backend client");
-    assert_eq!("ferrosmart", resolved.client_id);
+    // NOTE: IHE IUA §3.71.4.2.2.1, the client is FerroSMART under its issuer
+    // identifier, so no `client_id` is configured.
+    assert_eq!("https://smart.example.org", resolved.client_id);
+    let named = format!("{text}[ferrosmart.backend]\nclient_id = \"ferrosmart\"\n{backend}");
+    assert!(
+        ferrosmart::config::Config::from_sources(Some(&named), &backend_environment("fhir"))
+            .is_err(),
+        "client_id is an unknown key"
+    );
 }
 
 // NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric, the server
@@ -828,10 +836,6 @@ fn a_backend_client_outside_the_asymmetric_profile_is_refused() {
                 "algorithm = \"ES256\"\n[ferrosmart.backend.keys]\nprivate_key_file = {ec:?}\n"
             ),
             Some("`algorithm` is `ES384` or `RS384`"),
-        ),
-        (
-            format!("client_id = \" \"\n[ferrosmart.backend.keys]\nprivate_key_file = {ec:?}\n"),
-            Some("`client_id` is set"),
         ),
         (
             format!(

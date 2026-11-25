@@ -90,15 +90,13 @@ in turn ([keys and rotation](../operate/keys.md)).
 FerroSMART's own SMART Backend Services client. During a standalone launch
 it reads a patient's own record, the patient of a paired EHR lookup, a
 wallet login's patient and the patient index with a client credentials
-token of this client (`system/Patient.rs`, `sub` its `client_id`), which a
-resource server that exchanges user tokens onward reads with its own
-credential. FerroSMART registers the client itself before its first
-request. A deployment that logs people in at a FHIR server needs this
-table.
+token of this client (`system/Patient.rs`, `sub` and `client_id` the
+issuer), which a resource server that exchanges user tokens onward reads
+with its own credential. FerroSMART keeps the client's registration
+itself. A deployment that logs people in at a FHIR server needs this table.
 
 | Key | Default | What it is |
 |---|---|---|
-| `client_id` | `ferrosmart` | The client FerroSMART registers itself as |
 | `algorithm` | `ES384` | The JWS algorithm of its client assertions: `ES384` or `RS384` |
 | `[ferrosmart.backend.keys]` | required | The assertion ring: `private_key_file` (a P-384 key for `ES384`, an RSA key for `RS384`), `kid`, `next_private_key_file`, `previous_private_key_file` and `previous_key_overlap`, as the upstream assertion ring has them. It may share no key with the token keys |
 
