@@ -11,7 +11,43 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.35.0] - Unreleased
+## [0.35.0] - 2026-11-25
+
+ML-DSA signatures (RFC 9964) and one JWS module in place of `jsonwebtoken`.
+`ferrohealth-authz` 0.28.0 and `ferrohealth-session` 0.30.0 follow it.
+
+### Added
+
+- `jws`, the one module that signs and verifies every JWS (RFC 7515) over
+  `aws-lc-rs`: RS256 to PS512, ES256, ES384, `EdDSA` (RFC 8037) and
+  ML-DSA-44, ML-DSA-65 and ML-DSA-87 (RFC 9964), with the `AKP` JSON Web
+  Key, the JWK thumbprint of every key type and the registered claim
+  checks. A key verifies only the algorithm its type, curve or parameter
+  set and its `alg`, `use` and `key_ops` admit (RFC 8725 §3.1). The
+  resource server, the OpenID relying party and the `DPoP` proof check
+  verify an ML-DSA token when the configured algorithms name it, and an
+  assertion key read from an RFC 9881 ML-DSA private key signs with its
+  parameter set and publishes its `AKP` key (#886).
+
+### Changed
+
+- Breaking: every signature algorithm is
+  `jws::algorithm::Algorithm` (`Rs256` to `MlDsa87`) in place of
+  `jsonwebtoken::Algorithm`, in `Settings::algorithms`, the `[auth]`
+  tables, `ProofSettings`, `RelyingParty::with_algorithms`,
+  `AssertionKey` and `DpopKey`; `DpopKey::public_jwk` returns a
+  `jws::jwk::Jwk`, and the errors that carried a `jsonwebtoken` error
+  carry the `jws` one. A symmetric algorithm or `none` has no value, so a
+  configuration that names one fails to parse. The crate no longer
+  depends on `jsonwebtoken`. A product moves its `Algorithm` imports to
+  `ferrohealth_smart::jws::algorithm::Algorithm` (#886).
+
+### Removed
+
+- Breaking: `ResourceError::SymmetricAlgorithm`,
+  `ProofSettingsError::SymmetricAlgorithm`, `AssertionError::Public` and
+  `client::assertion::thumbprint`; the JWK's own `Jwk::thumbprint` takes
+  the place of the last (#886).
 
 ## [0.34.0] - 2026-11-24
 
@@ -2625,7 +2661,8 @@ it issues no token and holds no key that signs one.
   `TODO(#N)` guards, the issue and pull request templates, the labels, the
   rulesets and the `crates-io` environment.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.34.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.35.0...HEAD
+[0.35.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.34.0...ferrohealth-smart-v0.35.0
 [0.34.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.1...ferrohealth-smart-v0.34.0
 [0.33.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.0...ferrohealth-smart-v0.33.1
 [0.33.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.32.0...ferrohealth-smart-v0.33.0
