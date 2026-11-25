@@ -17,7 +17,8 @@
 #
 # Each label names the exact version it was tested against, and no label
 # claims more than a self-test: "certified", "compliant" and "conformant"
-# are refused, in a badge and in the README's badge text.
+# are refused, in a badge and in the README's badge text. Every badge, and
+# every static badge in the README, carries a logo from badge-logos/.
 #
 #   scripts/checks/conformance.sh             rewrite the badges
 #   scripts/checks/conformance.sh --check     fail when a badge or a label
@@ -31,6 +32,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly root
+# shellcheck source=scripts/checks/badge-logos/logo.sh
+source "$root/scripts/checks/badge-logos/logo.sh"
 readonly REFUSED='certified|compliant|conformant'
 
 # The rows of a table, without its comments.
@@ -38,12 +41,13 @@ rows() {
   grep -vE '^(#|$)' "$1"
 }
 
-# Prints the endpoint JSON of label $1 with the message $2/$3 $4.
+# Prints the endpoint JSON of label $1 with the message $2/$3 $4 and logo $5.
 badge() {
-  local color=brightgreen
+  local color=brightgreen logo
   [[ "$2" -eq "$3" ]] || color=yellow
-  jq -cn --arg label "$1" --arg message "$2/$3 $4" --arg color "$color" \
-    '{schemaVersion: 1, label: $label, message: $message, color: $color}'
+  logo="$(badge_logo_fields "$5")"
+  jq -cn --arg label "$1" --arg message "$2/$3 $4" --arg color "$color" --argjson logo "$logo" \
+    '{schemaVersion: 1, label: $label, message: $message, color: $color} + $logo'
 }
 
 # The SMART App Launch version docs/VERSIONS.md pins.
@@ -57,22 +61,23 @@ render() {
   local tree="$1" out="$2" mapped listed refused negative passed tests version
   mapped=$(rows "$tree/conformance/pid-attributes.tsv" | awk -F'\t' '$5 != "-"' | wc -l | tr -d ' ')
   listed=$(rows "$tree/conformance/pid-attributes.tsv" | wc -l | tr -d ' ')
-  badge "EUDI PID Rulebook 1.6" "$mapped" "$listed" "attributes mapped" > "$out/pid-rulebook.json"
+  badge "EUDI PID Rulebook 1.6" "$mapped" "$listed" "attributes mapped" eu > "$out/pid-rulebook.json"
   negative=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
     awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused"' | wc -l | tr -d ' ')
   refused=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
     awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused" && $3 == "PASSED"' | wc -l | tr -d ' ')
-  badge "OpenID4VP 1.0" "$refused" "$negative" "negative tests" > "$out/openid4vp.json"
+  badge "OpenID4VP 1.0" "$refused" "$negative" "negative tests" openid > "$out/openid4vp.json"
   local results="$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
   tests=$(jq '[.[] | select(.test_id)] | length' "$results")
   passed=$(jq '[.[] | select(.test_id and .result == "pass")] | length' "$results")
   version=$(smart_version "$tree")
   [[ -n "$version" ]] || { echo "conformance: docs/VERSIONS.md pins no SMART App Launch version" >&2; return 2; }
-  badge "SMART App Launch $version" "$passed" "$tests" "Inferno tests" > "$out/smart-app-launch.json"
+  badge "SMART App Launch $version" "$passed" "$tests" "Inferno tests" key > "$out/smart-app-launch.json"
 }
 
 # Fails when a badge under $1/conformance/badges, or the README's badge
-# text, uses a refused word or a badge label names no version.
+# text, uses a refused word, a badge label names no version, or a badge
+# carries no logo.
 labels() {
   local tree="$1" failures=0 file label
   for file in "$tree"/conformance/badges/*.json; do
@@ -90,6 +95,8 @@ labels() {
     echo "conformance: a README badge claims more than a self-test" >&2
     failures=$((failures + 1))
   fi
+  badge_logo_check "$tree"/conformance/badges/*.json || failures=$((failures + 1))
+  badge_logo_readme "$tree/README.md" || failures=$((failures + 1))
   [[ "$failures" -eq 0 ]]
 }
 
@@ -167,6 +174,21 @@ self_test() {
   cp "$work/badge" "$tree/conformance/badges/extra.json"
   if labels "$tree" 2> /dev/null; then fail "a label with no version passes"; fi
   rm "$tree/conformance/badges/extra.json"
+  [[ "$(jq -r .namedLogo "$tree/conformance/badges/pid-rulebook.json")" == europeanunion ]] ||
+    fail "the PID badge's EU emblem"
+  [[ "$(jq -r .logoSvg "$tree/conformance/badges/smart-app-launch.json")" == "<svg "* ]] ||
+    fail "the SMART badge's pictogram"
+  jq -c 'del(.namedLogo)' "$tree/conformance/badges/openid4vp.json" > "$work/badge"
+  cp "$work/badge" "$tree/conformance/badges/extra.json"
+  if labels "$tree" 2> /dev/null; then fail "a badge without a logo passes"; fi
+  jq -c 'del(.labelColor)' "$tree/conformance/badges/pid-rulebook.json" > "$work/badge"
+  cp "$work/badge" "$tree/conformance/badges/extra.json"
+  if labels "$tree" 2> /dev/null; then fail "an EU emblem without the EU blue label passes"; fi
+  rm "$tree/conformance/badges/extra.json"
+  cp "$tree/README.md" "$work/badge"
+  printf '[![x](https://img.shields.io/badge/x-y-blue)](x)\n' >> "$tree/README.md"
+  if labels "$tree" 2> /dev/null; then fail "a static badge without a logo passes"; fi
+  cp "$work/badge" "$tree/README.md"
   printf '[![SMART certified](https://img.shields.io/endpoint?url=conformance/badges/x.json)](x)\n' >> "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a README badge text claiming certification passes"; fi
   clean "$work"
