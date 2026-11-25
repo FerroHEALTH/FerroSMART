@@ -219,6 +219,7 @@ make_keys() {
   rm -f "$dir/ca.key"
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/signing.pem" 2> /dev/null
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/assertion.pem" 2> /dev/null
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out "$dir/backend.pem" 2> /dev/null
   chmod 0644 "$dir/host.key" "$dir"/*.pem
   cat /etc/ssl/certs/ca-certificates.crt "$dir/ca.crt" > "$dir/trust.pem"
   # The suite's configurations: the relying party's registers the assertion
@@ -275,6 +276,7 @@ start_provider() {
     --set "server.tls.certificate_file=$LANE_DIR/host.crt"
     --set "server.tls.key_file=$LANE_DIR/host.key"
     --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+    --set "ferrosmart.backend.keys.private_key_file=$LANE_DIR/backend.pem"
     --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem"
     --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_op")
   "${op[@]}" client apply "$lane"/op-clients/*.json > "$LANE_DIR/apply.log"
@@ -472,6 +474,7 @@ start_verifier() {
   esac
   local -a sets=(--set "ferrosmart.issuer=$issuer"
     --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+    --set "ferrosmart.backend.keys.private_key_file=$LANE_DIR/backend.pem"
     --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_verifier"
     --set "ferrosmart.upstream.0.openid4vp.access_certificate_file=$LANE_DIR/access.crt"
     --set "ferrosmart.upstream.0.openid4vp.access_key_file=$LANE_DIR/access-pkcs8.pem"

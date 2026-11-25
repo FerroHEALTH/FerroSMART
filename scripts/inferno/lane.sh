@@ -154,6 +154,7 @@ make_keys() {
   rm -f "$dir/ca.key"
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/signing.pem" 2> /dev/null
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/assertion.pem" 2> /dev/null
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out "$dir/backend.pem" 2> /dev/null
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/lane-client.pem" 2> /dev/null
   modulus=$(openssl rsa -in "$dir/lane-client.pem" -noout -modulus | cut -d= -f2 | xxd -r -p |
     openssl base64 -A | tr '+/' '-_' | tr -d '=')
@@ -235,6 +236,7 @@ run() {
     --set "server.tls.certificate_file=$LANE_DIR/smart.crt"
     --set "server.tls.key_file=$LANE_DIR/smart.key"
     --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+    --set "ferrosmart.backend.keys.private_key_file=$LANE_DIR/backend.pem"
     --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem"
     --set "ferrosmart.database.url=$LANE_PG/ferrosmart")
   mkdir -p "$LANE_DIR/clients"

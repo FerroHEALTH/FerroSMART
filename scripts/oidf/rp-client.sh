@@ -77,6 +77,7 @@ start() {
     --set "server.tls.certificate_file=$LANE_DIR/host.crt"
     --set "server.tls.key_file=$LANE_DIR/host.key"
     --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+    --set "ferrosmart.backend.keys.private_key_file=$LANE_DIR/backend.pem"
     "${sets[@]}"
     --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_rp")
   "${rp[@]}" client apply "$root"/app/ferrosmart/oidf/rp-clients/*.json > /dev/null
