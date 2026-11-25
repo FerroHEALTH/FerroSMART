@@ -12,6 +12,34 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-25
+
+FerroSMART 0.7.0 reads a launch patient for whom no grant exists yet as a
+SMART Backend Services client of its own token endpoint, so a resource
+server that exchanges user tokens onward, such as FerroBRIDGE, serves a
+standalone patient launch. Every other read the picker makes runs under a
+grant of the signed-in person. `[ferrosmart.backend]` is new and required
+when people log in at a FHIR base. The EUDI Wallet login no longer asks
+for, keeps or forwards the PID portrait.
+
+### Changed
+
+- FerroSMART reads a patient's own record during a standalone launch as a SMART Backend Services client (SMART App Launch 2.2.0, Backend Services): its own confidential client, registered under its issuer identifier from the new `[ferrosmart.backend]` table, obtains a `system/Patient.rs` client credentials token with a `private_key_jwt` assertion through its own token endpoint, so the token's `sub` is its `client_id` (IHE IUA §3.71.4.2.2.1) and the acquisition is the endpoint's `IHE.IUA.71` record. The same client reads the Patient of the paired-EHR lookup and of the token exchange, a wallet login's identifier search and the PIXm or PDQm patient index. A resource server that exchanges every user token onward reads these with its own credential. Each read is narrowed to the one matched `Patient`, one token per read, revoked once answered, and its access record is filed under the patient on whose behalf FerroSMART read; both are our own design (GDPR Art 5(1)(c), Art 25; Regulation (EU) 2025/327 Annex II 3.2(b) is silent on system access) (#873).
+- `[ferrosmart.backend]` (`algorithm` `ES384` or `RS384`, and the `[ferrosmart.backend.keys]` ring, which shares no key with `[ferrosmart.keys]`) is required when people log in at a FHIR base. A configuration without it is refused at start (#873).
+- The picker's searches and reads, a professional's EHR lookups and the `fhirUser` lookup run under a grant of the signed-in person to FerroSMART's own client, revoked with its token once the request is answered, so a resource server that exchanges the token onward finds the person's own grant (#873).
+- The token exchange takes a professional's own token too (`user/` scopes alone, a `fhirUser` that names no `Patient`) and issues a token for the paired openEHR base with `user/composition-*.r` and `user/aql-*.s` at most, naming the professional and no patient (#873).
+- The EUDI Wallet login never asks for, keeps or forwards the PID portrait,
+  since FerroSMART identifies the person without it (Implementing Regulation
+  (EU) 2024/2977 Art 3a(3); Regulation (EU) 2016/679 Art 5(1)(c)). A
+  `[ferrosmart.upstream.openid4vp]` `claims` or `mdoc_claims` naming
+  `picture` or `portrait` is refused at start, an mdoc carrying the portrait
+  is `unrequested_credential`, and an SD-JWT VC that discloses it unasked has
+  it dropped before the login reads its claims (#879).
+
+### Removed
+
+- The token FerroSMART issued itself for the signed-in person outside any grant (`user/Patient.rs` or `user/composition-*.r`), and the self-signed "system" token the patient index was asked with, are gone with no replacement setting (#873).
+
 ## [0.6.0] - 2026-11-25
 
 FerroSMART 0.6.0 resolves the patient of an EUDI Wallet login at a patient
@@ -930,7 +958,8 @@ Shipped with functional changes because: the `url` fix is a lockfile move on `ma
   read its token response (SMART App Launch 2.2.0, Considerations for CORS
   support). Every other origin gets no CORS header (#560).
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.6.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.7.0...HEAD
+[0.7.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.6.0...ferrosmart-v0.7.0
 [0.6.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.5.0...ferrosmart-v0.6.0
 [0.5.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.4.0...ferrosmart-v0.5.0
 [0.4.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.3.0...ferrosmart-v0.4.0
