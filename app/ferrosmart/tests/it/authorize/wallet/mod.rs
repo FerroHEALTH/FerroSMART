@@ -616,3 +616,110 @@ async fn a_wallet_entry_takes_no_assurance_levels_and_asks_for_its_identifier() 
     let refused = config(&levels, &keys).resolve().expect_err("refused");
     assert!(refused.to_string().contains("level high"), "{refused}");
 }
+
+/// A JPEG portrait as the PID Rulebook 1.6 §4.1.1 encodes it.
+const PORTRAIT: &str = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
+
+// NOTE: Implementing Regulation (EU) 2024/2977 Art 3a(3); Regulation (EU) 2016/679 Art 5(1)(c).
+#[tokio::test]
+async fn a_wallet_entry_never_asks_for_the_portrait() {
+    let keys = Keys::new();
+    let entry = |extra: &str| {
+        format!(
+            "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
+             [[ferrosmart.upstream]]\nname = \"wallet\"\n[ferrosmart.upstream.openid4vp]\n{extra}",
+            crate::support::UNREACHED_DATABASE
+        )
+    };
+    for table in [
+        "claims = [\"picture\", \"personal_administrative_number\", \"issuing_country\"]\n",
+        "mdoc_claims = [\"portrait\", \"personal_administrative_number\", \"issuing_country\"]\n",
+    ] {
+        let refused = config(&entry(table), &keys).resolve().expect_err("refused");
+        let message = refused.to_string();
+        assert!(
+            message.contains("portrait") && message.contains("2024/2977 Art 3a(3)"),
+            "{table}: {message}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_portrait_is_never_asked_for_kept_or_forwarded() {
+    let wallet = Wallet::start().await;
+    let begun = wallet.begin().await;
+    let query = begun.object["dcql_query"].to_string();
+    assert!(
+        !query.contains("picture") && !query.contains("portrait"),
+        "never asked for: {query}"
+    );
+    let mut credential = Credential::pid();
+    credential
+        .claims
+        .push((String::from("picture"), json!(PORTRAIT)));
+    let presentation = wallet.presentation(&credential, &begun);
+    let (status, body) = wallet.answer(&begun, &presentation).await;
+    assert_eq!(StatusCode::OK, status, "{body}");
+    let (status, headers, page) = wallet.come_back(&body, Some(&begun.cookie)).await;
+    assert_eq!(StatusCode::SEE_OTHER, status, "{page}");
+    assert_eq!("/consent", location(&headers).path());
+    let pending = wallet
+        .smart
+        .store
+        .pending(&begun.cookie)
+        .await
+        .expect("reads")
+        .expect("the request");
+    let kept = serde_json::to_string(&pending.person_claims).expect("JSON");
+    assert!(kept.contains("Jansen"), "the names are kept: {kept}");
+    assert!(
+        !kept.contains("picture") && !kept.contains(PORTRAIT),
+        "never kept: {kept}"
+    );
+    let recorded = serde_json::to_string(&records(&wallet.smart.store).await).expect("JSON");
+    assert!(!recorded.contains(PORTRAIT), "never recorded: {recorded}");
+
+    let (status, _, page) = wallet.smart.get("/consent", Some(&begun.cookie)).await;
+    assert_eq!(StatusCode::OK, status, "{page}");
+    assert!(!page.contains(PORTRAIT), "never drawn: {page}");
+    let token = page
+        .split("name=\"form_token\" value=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("a form token")
+        .to_owned();
+    let (status, headers, _) = wallet
+        .smart
+        .post(
+            "/consent",
+            &[
+                ("form_token", &token),
+                ("decision", "approve"),
+                ("scope", "openid"),
+                ("scope", "fhirUser"),
+            ],
+            Some(&begun.cookie),
+        )
+        .await;
+    assert_eq!(StatusCode::SEE_OTHER, status);
+    let code = param(&location(&headers), "code").expect("a code");
+    let exchange = [
+        ("grant_type", "authorization_code"),
+        ("code", code.as_str()),
+        ("redirect_uri", REDIRECT),
+        ("code_verifier", VERIFIER),
+        ("client_id", "app"),
+    ];
+    let (status, _, body) = wallet.smart.post("/token", &exchange, None).await;
+    assert_eq!(StatusCode::OK, status, "{body}");
+    let tokens: Value = serde_json::from_str(&body).expect("JSON");
+    for name in ["id_token", "access_token"] {
+        let token = tokens[name].as_str().expect("a token");
+        let claims: Value = jsonwebtoken::dangerous::insecure_decode_claims(token).expect("claims");
+        assert!(
+            claims.get("picture").is_none() && !claims.to_string().contains(PORTRAIT),
+            "never forwarded in the {name}: {claims}"
+        );
+    }
+    wallet.stop().await;
+}

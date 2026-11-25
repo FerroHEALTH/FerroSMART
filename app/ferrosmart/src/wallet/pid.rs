@@ -23,8 +23,11 @@ pub enum Target {
     Claim(&'static str),
     /// The identifier the patient index resolves to the patient.
     Identifier,
-    /// Nowhere: the attribute names no part of the person a token carries.
-    NotMapped,
+    /// Never asked for, and dropped on receipt: FerroSMART identifies the
+    /// person without it, so it does not retain it (Implementing Regulation
+    /// (EU) 2024/2977 Art 3a(3), inserted by 2026/1731; Regulation (EU)
+    /// 2016/679 Art 5(1)(c)).
+    NotRetained,
 }
 
 /// One attribute of the PID Rulebook.
@@ -98,7 +101,7 @@ pub const ATTRIBUTES: [Attribute; 7] = [
         mandatory: true,
         sd_jwt_vc: "picture",
         mdoc: "portrait",
-        target: Target::NotMapped,
+        target: Target::NotRetained,
     },
     Attribute {
         data_identifier: "personal_administrative_number",
@@ -108,6 +111,27 @@ pub const ATTRIBUTES: [Attribute; 7] = [
         target: Target::Identifier,
     },
 ];
+
+/// Whether `name`, in either format, names an attribute that is
+/// [`Target::NotRetained`].
+#[must_use]
+pub fn not_retained(name: &str) -> bool {
+    ATTRIBUTES.iter().any(|attribute| {
+        attribute.target == Target::NotRetained
+            && (attribute.sd_jwt_vc == name || attribute.mdoc == name)
+    })
+}
+
+/// Returns the verified `claims` of `format` as a login keeps them: every
+/// attribute that is [`Target::NotRetained`] dropped, and the attributes
+/// [`person_claims`] maps added under their ID Token names.
+#[must_use]
+pub fn received(mut claims: Map<String, Value>, format: Format) -> Map<String, Value> {
+    claims.retain(|name, _| !not_retained(name));
+    let person = person_claims(&claims, format);
+    claims.extend(person);
+    claims
+}
 
 /// Returns the ID Token claims the presented `claims` of `format` map to,
 /// each under its [`Target::Claim`] name and only in the shape the PID
@@ -411,7 +435,7 @@ mod tests {
         let rows: Vec<Vec<&str>> = table
             .lines()
             .filter(|line| !line.starts_with('#') && !line.is_empty())
-            .map(|line| line.split('\t').collect())
+            .map(|line| line.split('\t').take(5).collect())
             .collect();
         let expected: Vec<Vec<&str>> = ATTRIBUTES
             .iter()
@@ -424,7 +448,7 @@ mod tests {
                     match attribute.target {
                         Target::Claim(name) => name,
                         Target::Identifier => "identifier",
-                        Target::NotMapped => "-",
+                        Target::NotRetained => "not retained (CIR 2024/2977 Art 3a(3))",
                     },
                 ]
             })
@@ -433,6 +457,22 @@ mod tests {
             expected, rows,
             "conformance/pid-attributes.tsv lists the table row for row"
         );
+    }
+
+    #[test]
+    fn a_login_keeps_no_portrait_from_either_format() {
+        let sd_jwt = received(sd_jwt_pid(), Format::SdJwtVc);
+        assert!(!sd_jwt.contains_key("picture"), "{sd_jwt:?}");
+        assert_eq!(
+            Some(&json!("999990019")),
+            sd_jwt.get("personal_administrative_number")
+        );
+        assert_eq!(Some(&json!("Jansen")), sd_jwt.get("family_name"));
+        let mdoc = received(mdoc_pid(), Format::Mdoc);
+        assert!(!mdoc.contains_key("portrait"), "{mdoc:?}");
+        assert_eq!(Some(&json!("1980-02-12")), mdoc.get("birthdate"));
+        assert!(not_retained("picture") && not_retained("portrait"));
+        assert!(!not_retained("family_name"));
     }
 
     #[test]

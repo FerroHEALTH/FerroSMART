@@ -8,7 +8,9 @@
 #
 #   pid-rulebook.json      conformance/pid-attributes.tsv, which the PID
 #                          mapping test holds to the mapping: the attributes
-#                          mapped of those listed
+#                          handled (mapped, or not retained as the law
+#                          requires) whose named test exists under app/, of
+#                          those listed
 #   openid4vp.json         app/ferrosmart/oidf/expected.tsv: of the verifier
 #                          plans' negative modules (the login refused), those
 #                          the suite passes
@@ -56,12 +58,23 @@ smart_version() {
     grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
 }
 
+# Counts the rows of the PID table of the tree $1 that name a handling and a
+# test function defined under its app/.
+handled() {
+  local tree="$1" count=0 handling test
+  while IFS=$'\t' read -r _ _ _ _ handling test; do
+    [[ -n "$handling" && "$handling" != "-" && -n "$test" ]] || continue
+    grep -rqE "fn ${test}\(" "$tree/app" && count=$((count + 1))
+  done < <(rows "$tree/conformance/pid-attributes.tsv")
+  echo "$count"
+}
+
 # Writes the three badges of the tree $1 into the directory $2.
 render() {
   local tree="$1" out="$2" mapped listed refused negative passed tests version
-  mapped=$(rows "$tree/conformance/pid-attributes.tsv" | awk -F'\t' '$5 != "-"' | wc -l | tr -d ' ')
+  mapped=$(handled "$tree")
   listed=$(rows "$tree/conformance/pid-attributes.tsv" | wc -l | tr -d ' ')
-  badge "EUDI PID Rulebook 1.6" "$mapped" "$listed" "attributes mapped" eu > "$out/pid-rulebook.json"
+  badge "EUDI PID Rulebook 1.6" "$mapped" "$listed" "attributes handled" eu > "$out/pid-rulebook.json"
   negative=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
     awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused"' | wc -l | tr -d ' ')
   refused=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
@@ -126,7 +139,7 @@ run() {
 # Removes the self-test's tree under $1, file by file.
 clean() {
   local work="$1" tree="$1/repo"
-  rm -f "$work/badge" "$tree"/conformance/badges/*.json "$tree/conformance/pid-attributes.tsv" \
+  rm -f "$work/badge" "$tree"/conformance/badges/*.json "$tree/conformance/pid-attributes.tsv" "$tree/app/ferrosmart/pid.rs" \
     "$tree/app/ferrosmart/oidf/expected.tsv" "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json" \
     "$tree/docs/VERSIONS.md" "$tree/README.md"
   rmdir "$tree/conformance/badges" "$tree/conformance" "$tree/app/ferrosmart/oidf" \
@@ -142,8 +155,9 @@ self_test() {
   }
   tree="$work/repo"
   mkdir -p "$tree/conformance" "$tree/app/ferrosmart/oidf" "$tree/app/ferrosmart/inferno" "$tree/docs"
-  printf '# c\nfamily_name\tyes\tfamily_name\tfamily_name\tfamily_name\nportrait\tyes\tpicture\tportrait\t-\n' \
+  printf '# c\nfamily_name\tyes\tfamily_name\tfamily_name\tfamily_name\tmaps\nportrait\tyes\tpicture\tportrait\tnot retained (x)\tdrops\n' \
     > "$tree/conformance/pid-attributes.tsv"
+  printf '#[test]\nfn maps() {}\n' > "$tree/app/ferrosmart/pid.rs"
   printf '# c\noid4vp-p\tm1\tPASSED\trefused\t-\t\noid4vp-p\tm2\tFAILED\trefused\t#1\tx\noid4vp-p\tm3\tREVIEW\taccepted\t-\t\noidcc-p\tm4\tPASSED\trefused\t-\t\n' \
     > "$tree/app/ferrosmart/oidf/expected.tsv"
   printf '[{"test_id":"a","result":"pass"},{"test_id":"b","result":"omit"},{"test_group_id":"g","result":"pass"}]' \
@@ -151,8 +165,12 @@ self_test() {
   printf '| Item | Pin |\n|---|---|\n| SMART App Launch | 2.2.0 (STU 2.2) |\n' > "$tree/docs/VERSIONS.md"
   printf '[![x](https://img.shields.io/endpoint?url=conformance/badges/pid-rulebook.json)](x)\n' > "$tree/README.md"
   run "$tree" update > /dev/null || fail "a clean tree is refused"
-  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "1/2 attributes mapped" ]] ||
-    fail "the PID count"
+  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "1/2 attributes handled" ]] ||
+    fail "a row whose test does not exist counted"
+  printf 'fn drops() {}\n' >> "$tree/app/ferrosmart/pid.rs"
+  run "$tree" update > /dev/null || fail "the rewrite with both tests is refused"
+  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "2/2 attributes handled" ]] ||
+    fail "a not-retained row with its test left out"
   [[ "$(jq -r .message "$tree/conformance/badges/openid4vp.json")" == "1/2 negative tests" ]] ||
     fail "the negative-test count"
   [[ "$(jq -r .label "$tree/conformance/badges/smart-app-launch.json")" == "SMART App Launch 2.2.0" ]] ||
@@ -160,7 +178,7 @@ self_test() {
   [[ "$(jq -r .message "$tree/conformance/badges/smart-app-launch.json")" == "1/2 Inferno tests" ]] ||
     fail "the Inferno count"
   run "$tree" check > /dev/null || fail "fresh badges are refused"
-  printf 'given_name\tyes\tgiven_name\tgiven_name\tgiven_name\n' >> "$tree/conformance/pid-attributes.tsv"
+  printf 'given_name\tyes\tgiven_name\tgiven_name\t-\tmaps\n' >> "$tree/conformance/pid-attributes.tsv"
   if run "$tree" check > /dev/null 2>&1; then fail "a stale badge passes"; fi
   run "$tree" update > /dev/null || fail "the rewrite is refused"
   local word

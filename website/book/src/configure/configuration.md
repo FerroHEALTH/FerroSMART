@@ -270,9 +270,9 @@ only a `minimum`.
 | `wallet_endpoint` | Where the wallet is invoked; `eu-eaap://` by default |
 | `credential_formats` | The formats the PID is asked for in, of which the wallet presents one: `["dc+sd-jwt", "mso_mdoc"]` by default |
 | `vct_values` | The credential types accepted as an SD-JWT VC; `["urn:eudi:pid:1"]` by default. The first names the person's pairwise `sub`, whichever format the wallet presents |
-| `claims` | The PID claims asked for of an SD-JWT VC, dotted for a nested claim, with `identifier_claim` and `issuing_country` among them; the PID's names and the administrative number by default |
+| `claims` | The PID claims asked for of an SD-JWT VC, dotted for a nested claim, with `identifier_claim` and `issuing_country` among them and never the portrait `picture`, which FerroSMART does not retain (Implementing Regulation (EU) 2024/2977 Art 3a(3)); the PID's names and the administrative number by default |
 | `doctype` | The document type accepted as an mdoc, which is also the namespace of its elements; `eu.europa.ec.eudi.pid.1` by default |
-| `mdoc_claims` | The data elements asked for of an mdoc, with `identifier_claim` and `issuing_country` among them; the PID's names, `birth_date` and the administrative number by default |
+| `mdoc_claims` | The data elements asked for of an mdoc, with `identifier_claim` and `issuing_country` among them and never `portrait`; the PID's names, `birth_date` and the administrative number by default |
 | `identifier_claim` | The claim or element whose value names the person and that a [`fhirUser` lookup](#ferrosmartresource) reads; `personal_administrative_number` by default |
 | `identifier_systems` | A table from each issuing country's ISO 3166-1 alpha-2 code to the identifier system of its administrative numbers, which a `patient_index` is asked in; empty by default. A country it leaves out refuses a launch that needs the index |
 | `identifier_type` | The HL7 v2 table 0203 code of that identifier's type; `NI` by default |
