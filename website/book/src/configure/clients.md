@@ -54,6 +54,7 @@ registers itself sends too. `resources`, `launch_uri`, `upstreams` and
 | `upstreams` | The identity providers its people log in at; every provider when absent |
 | `default_acr_values` | The eIDAS level-of-assurance URIs a request without `acr_values` asks for (OpenID Connect Dynamic Client Registration 1.0 §2) |
 | `require_pushed_authorization_requests` | `true` when the app may start an authorization request only by pushing it to `POST {issuer}/par` (RFC 9126 §6); `false` by default |
+| `id_token_signed_response_alg` | `RS256` (the default) or `ML-DSA-65`: the algorithm the client's ID Tokens and access tokens are signed with (OpenID Connect Dynamic Client Registration 1.0 §2); `ML-DSA-65` needs an ML-DSA-65 key in `[ferrosmart.keys]` |
 | `dpop_bound_access_tokens` | `true` when every token request of the client carries a `DPoP` proof (RFC 9449 §5.2); `false` by default |
 | `tls_client_certificate_bound_access_tokens` | `true` when the client's tokens are bound to the certificate of its mutual-TLS connection, which every token request then presents (RFC 8705 §3.4); `false` by default |
 | `launch_uri` | Optional: the app's launch URL, absolute `https`, by which an EHR's [launch registration](../integrate/ehr-launch.md) may name the app (`app_launch_uri`), as a SMART Task does; compared after RFC 3986 normalization, one client per URL |
@@ -87,7 +88,7 @@ RFC 7591 §3.2.2 error `invalid_redirect_uri` or `invalid_client_metadata`:
 | `none` | `client-public` | PKCE alone; a browser or native app that keeps no secret |
 | `client_secret_basic` | `client-confidential-symmetric` | Its client secret by HTTP Basic |
 | `client_secret_post` | `client-confidential-symmetric` | Its client secret in the form |
-| `private_key_jwt` | `client-confidential-asymmetric` | A client assertion signed `RS384` or `ES384` with a key of its registered JWK Set |
+| `private_key_jwt` | `client-confidential-asymmetric` | A client assertion signed `RS384`, `ES384`, `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87` (RFC 9964, an `AKP` key) with a key of its registered JWK Set |
 
 A client authenticates only by the method it registered. SMART prefers
 asymmetric authentication for a client that can hold a key pair; a secret

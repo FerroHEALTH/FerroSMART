@@ -37,6 +37,11 @@ CREATE TABLE client (
     require_pushed_authorization_requests boolean NOT NULL DEFAULT false,
     dpop_bound_access_tokens boolean NOT NULL DEFAULT false,
     tls_client_certificate_bound_access_tokens boolean NOT NULL DEFAULT false,
+    -- OpenID Connect Dynamic Client Registration 1.0 section 2; it signs the
+    -- client's access tokens too.
+    id_token_signed_response_alg text NOT NULL DEFAULT 'RS256'
+        CONSTRAINT client_id_token_signed_response_alg_check
+        CHECK (id_token_signed_response_alg IN ('RS256', 'ML-DSA-65')),
     -- A private_key_jwt client has a JWK Set by URL or by value; no other has one.
     CONSTRAINT client_keys_check
         CHECK ((token_endpoint_auth_method = 'private_key_jwt')

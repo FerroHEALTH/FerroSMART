@@ -4,7 +4,8 @@
 //! The state of each token signing key, which the replicas share so they
 //! agree on the key that signs (`docs/architecture.md` §13.11).
 //!
-//! A key is `next` from the moment it is published, `active` while it
+//! The keys of each algorithm rotate on their own. A key is `next` from
+//! the moment it is published, `active` while it
 //! signs, `retiring` while the tokens it signed may still be presented, and
 //! `retired` for good after that. No specification governs the schedule:
 //! our own design over RFC 7517 §5 and OpenID Connect Core 1.0 §10.1.1.
@@ -206,14 +207,16 @@ impl Plan<'_> {
 }
 
 impl Store {
-    /// Moves the signing keys on as [`plan`] says at `now` and returns
-    /// every key that is not retired. One replica moves them at a time.
+    /// Moves the signing keys of `algorithm` on as [`plan`] says at `now`
+    /// and returns every key of it that is not retired. One replica moves
+    /// them at a time.
     ///
     /// # Errors
     /// Returns [`StoreError::Database`] when a statement fails, and
     /// [`StoreError::CorruptKey`] for a row the server never writes.
     pub async fn rotate_keys(
         &self,
+        algorithm: &str,
         pool: &[&str],
         schedule: &Schedule,
         now: i64,
@@ -224,7 +227,7 @@ impl Store {
         sqlx::query("LOCK TABLE signing_key IN EXCLUSIVE MODE")
             .execute(&mut *tx)
             .await?;
-        let rows = read_keys(&mut tx).await?;
+        let rows = read_keys(&mut tx, algorithm).await?;
         let changed = plan(&rows, pool, schedule, now);
         // NOTE: no specification governs this: our own design; the rows leave the
         // states they hold first, so the one-active and one-next indexes hold.
@@ -236,8 +239,8 @@ impl Store {
         });
         for row in &ordered {
             sqlx::query(
-                "INSERT INTO signing_key (kid, state, published_at, active_at, retiring_at, retired_at) \
-                 VALUES ($1, $2, to_timestamp($3), to_timestamp($4), to_timestamp($5), to_timestamp($6)) \
+                "INSERT INTO signing_key (kid, state, published_at, active_at, retiring_at, retired_at, algorithm) \
+                 VALUES ($1, $2, to_timestamp($3), to_timestamp($4), to_timestamp($5), to_timestamp($6), $7) \
                  ON CONFLICT (kid) DO UPDATE SET state = EXCLUDED.state, \
                  active_at = EXCLUDED.active_at, retiring_at = EXCLUDED.retiring_at, \
                  retired_at = EXCLUDED.retired_at",
@@ -248,10 +251,11 @@ impl Store {
             .bind(row.active_at)
             .bind(row.retiring_at)
             .bind(row.retired_at)
+            .bind(algorithm)
             .execute(&mut *tx)
             .await?;
         }
-        let rows = read_keys(&mut tx).await?;
+        let rows = read_keys(&mut tx, algorithm).await?;
         tx.commit().await?;
         Ok(rows
             .into_iter()
@@ -260,15 +264,19 @@ impl Store {
     }
 }
 
-/// Reads every key's row.
-async fn read_keys(tx: &mut sqlx::PgConnection) -> Result<Vec<KeyRow>, StoreError> {
+/// Reads the row of every key of `algorithm`.
+async fn read_keys(
+    tx: &mut sqlx::PgConnection,
+    algorithm: &str,
+) -> Result<Vec<KeyRow>, StoreError> {
     let rows = sqlx::query(
         "SELECT kid, state, extract(epoch FROM published_at)::bigint AS published_at, \
          extract(epoch FROM active_at)::bigint AS active_at, \
          extract(epoch FROM retiring_at)::bigint AS retiring_at, \
          extract(epoch FROM retired_at)::bigint AS retired_at \
-         FROM signing_key ORDER BY published_at, kid",
+         FROM signing_key WHERE algorithm = $1 ORDER BY published_at, kid",
     )
+    .bind(algorithm)
     .fetch_all(tx)
     .await?;
     rows.iter()

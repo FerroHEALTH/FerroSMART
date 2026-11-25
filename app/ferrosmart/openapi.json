@@ -1085,6 +1085,12 @@
             "default": false,
             "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
           },
+          "id_token_signed_response_alg": {
+            "type": "string",
+            "enum": ["RS256", "ML-DSA-65"],
+            "default": "RS256",
+            "description": "The algorithm the client's ID Tokens and access tokens are signed with (OpenID Connect Dynamic Client Registration 1.0 §2; ML-DSA-65 is RFC 9964 §5)."
+          },
           "tls_client_certificate_bound_access_tokens": {
             "type": "boolean",
             "default": false,
@@ -1112,6 +1118,7 @@
           "require_pushed_authorization_requests",
           "dpop_bound_access_tokens",
           "tls_client_certificate_bound_access_tokens",
+          "id_token_signed_response_alg",
           "registered_by"
         ],
         "properties": {
@@ -1230,6 +1237,12 @@
             "type": "boolean",
             "default": false,
             "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
+          },
+          "id_token_signed_response_alg": {
+            "type": "string",
+            "enum": ["RS256", "ML-DSA-65"],
+            "default": "RS256",
+            "description": "The algorithm the client's ID Tokens and access tokens are signed with (OpenID Connect Dynamic Client Registration 1.0 §2; ML-DSA-65 is RFC 9964 §5)."
           },
           "tls_client_certificate_bound_access_tokens": {
             "type": "boolean",
@@ -1371,6 +1384,12 @@
             "default": false,
             "description": "Whether the client sends a DPoP proof with every token request (RFC 9449 §5.2)."
           },
+          "id_token_signed_response_alg": {
+            "type": "string",
+            "enum": ["RS256", "ML-DSA-65"],
+            "default": "RS256",
+            "description": "The algorithm the client's ID Tokens and access tokens are signed with (OpenID Connect Dynamic Client Registration 1.0 §2; ML-DSA-65 is RFC 9964 §5)."
+          },
           "tls_client_certificate_bound_access_tokens": {
             "type": "boolean",
             "default": false,
@@ -1422,6 +1441,7 @@
           "require_pushed_authorization_requests",
           "dpop_bound_access_tokens",
           "tls_client_certificate_bound_access_tokens",
+          "id_token_signed_response_alg",
           "registered_by"
         ]
       },

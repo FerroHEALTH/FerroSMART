@@ -87,7 +87,7 @@ called first, so the EHR and FerroSMART share nothing but the key set.
 ```
 
 FerroSMART checks it the way it checks a client assertion: `typ`
-`launch+jwt`, signed `RS384` or `ES384`, `aud` FerroSMART's issuer as its
+`launch+jwt`, signed `RS384`, `ES384` or ML-DSA (RFC 9964), `aud` FerroSMART's issuer as its
 one value, `exp` at most five minutes ahead, and a `jti` used once.
 `client_id` is the app and `resource` the server.
 

@@ -58,7 +58,8 @@ fn a_backend_services_client_registers_its_jwk_set_by_url() {
 fn a_jwk_set_by_value_holds_bare_public_keys_with_kty_and_kid() {
     let set = json!({"keys": [
         {"kty": "RSA", "kid": "r1", "n": "AQAB", "e": "AQAB", "alg": "RS384"},
-        {"kty": "EC", "kid": "e1", "crv": "P-384", "x": "AA", "y": "AA"}
+        {"kty": "EC", "kid": "e1", "crv": "P-384", "x": "AA", "y": "AA"},
+        {"kty": "AKP", "kid": "m1", "alg": "ML-DSA-65", "pub": "AA"}
     ]});
     let client = admit_with(&by_value(), &set).expect("admitted");
     assert!(matches!(&client.keys, Some(ClientKeys::Set(kept)) if *kept == set));
@@ -71,7 +72,15 @@ fn a_jwk_set_by_value_holds_bare_public_keys_with_kty_and_kid() {
         ),
         (
             json!({"kty": "oct", "kid": "s", "k": "AA"}),
-            "is no RSA or EC key",
+            "is no RSA, EC or AKP key",
+        ),
+        (
+            json!({"kty": "AKP", "kid": "m", "pub": "AA"}),
+            "lacks a bare key member",
+        ),
+        (
+            json!({"kty": "AKP", "kid": "m", "alg": "ML-DSA-65", "pub": "AA", "priv": "AA"}),
+            "carries a private member",
         ),
         (
             json!({"kty": "RSA", "kid": "r", "n": "AQAB"}),

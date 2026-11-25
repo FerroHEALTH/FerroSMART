@@ -40,7 +40,7 @@ fn three(keys: &Keys) -> (SigningKeys, [String; 3]) {
         .resolve()
         .expect("resolves");
     let keys = std::sync::Arc::try_unwrap(settings.keys).expect("one owner");
-    let kids: Vec<String> = keys.pool().iter().map(|key| key.kid().to_owned()).collect();
+    let kids: Vec<String> = keys.pool().map(|key| key.kid().to_owned()).collect();
     (keys, kids.try_into().expect("three keys"))
 }
 
@@ -69,7 +69,9 @@ async fn the_keys_rotate_on_the_schedule_with_the_clock_moved() {
     let schedule = *signing.schedule();
 
     signing.refresh(&store, START).await.expect("refreshes");
-    let ring = signing.ring();
+    let ring = signing
+        .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+        .expect("the RS256 ring");
     assert_eq!(first, ring.current().kid(), "the first key signs at once");
     assert_eq!(
         vec![first.clone(), second.clone()],
@@ -81,13 +83,19 @@ async fn the_keys_rotate_on_the_schedule_with_the_clock_moved() {
     signing.refresh(&store, before).await.expect("refreshes");
     assert_eq!(
         first,
-        signing.ring().current().kid(),
+        signing
+            .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+            .expect("the RS256 ring")
+            .current()
+            .kid(),
         "no rotation before the period"
     );
 
     let rotated = START + seconds(schedule.period);
     signing.refresh(&store, rotated).await.expect("refreshes");
-    let ring = signing.ring();
+    let ring = signing
+        .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+        .expect("the RS256 ring");
     assert_eq!(
         second,
         ring.current().kid(),
@@ -107,7 +115,13 @@ async fn the_keys_rotate_on_the_schedule_with_the_clock_moved() {
     let held = rotated + seconds(schedule.retirement) - 1;
     signing.refresh(&store, held).await.expect("refreshes");
     assert!(
-        kids(&signing.ring().published()).contains(&first),
+        kids(
+            &signing
+                .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+                .expect("the RS256 ring")
+                .published()
+        )
+        .contains(&first),
         "published until every token it signed has expired"
     );
     signing
@@ -116,7 +130,12 @@ async fn the_keys_rotate_on_the_schedule_with_the_clock_moved() {
         .expect("refreshes");
     assert_eq!(
         vec![second, third],
-        kids(&signing.ring().published()),
+        kids(
+            &signing
+                .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+                .expect("the RS256 ring")
+                .published()
+        ),
         "the retired key is no longer published"
     );
     drop(signing);
@@ -146,11 +165,28 @@ async fn replicas_agree_on_the_signing_key_through_the_store() {
     first.refresh(&store, START).await.expect("refreshes");
     second.refresh(&store, START + 10).await.expect("refreshes");
     assert_eq!(
-        first.ring().current().kid(),
-        second.ring().current().kid(),
+        first
+            .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+            .expect("the RS256 ring")
+            .current()
+            .kid(),
+        second
+            .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+            .expect("the RS256 ring")
+            .current()
+            .kid(),
         "the store's active key signs on both, whatever order each names the files in"
     );
-    assert_eq!(first.ring().published(), second.ring().published());
+    assert_eq!(
+        first
+            .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+            .expect("the RS256 ring")
+            .published(),
+        second
+            .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+            .expect("the RS256 ring")
+            .published()
+    );
 
     let rotated = START + seconds(first.schedule().period);
     second.refresh(&store, rotated).await.expect("refreshes");
@@ -158,10 +194,25 @@ async fn replicas_agree_on_the_signing_key_through_the_store() {
         .refresh(&store, rotated + 30)
         .await
         .expect("refreshes");
-    assert_eq!(first.ring().current().kid(), second.ring().current().kid());
+    assert_eq!(
+        first
+            .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+            .expect("the RS256 ring")
+            .current()
+            .kid(),
+        second
+            .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+            .expect("the RS256 ring")
+            .current()
+            .kid()
+    );
     assert_ne!(
-        first.pool()[0].kid(),
-        first.ring().current().kid(),
+        first.pool().next().expect("a key").kid(),
+        first
+            .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+            .expect("the RS256 ring")
+            .current()
+            .kid(),
         "the rotation one replica made holds on the other"
     );
     drop((first, second));
@@ -181,8 +232,24 @@ async fn a_single_key_keeps_signing_past_its_period() {
     signing.refresh(&store, START).await.expect("refreshes");
     let later = START + 10 * seconds(signing.schedule().period);
     signing.refresh(&store, later).await.expect("refreshes");
-    assert_eq!(signing.pool()[0].kid(), signing.ring().current().kid());
-    assert_eq!(1, kids(&signing.ring().published()).len());
+    assert_eq!(
+        signing.pool().next().expect("a key").kid(),
+        signing
+            .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+            .expect("the RS256 ring")
+            .current()
+            .kid()
+    );
+    assert_eq!(
+        1,
+        kids(
+            &signing
+                .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+                .expect("the RS256 ring")
+                .published()
+        )
+        .len()
+    );
     drop(settings);
     database.drop(store).await;
 }

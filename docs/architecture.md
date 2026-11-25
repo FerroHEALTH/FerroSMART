@@ -2793,7 +2793,8 @@ specification governs.
      its SHA-256.
    - **The launch JWT**, for an EHR that calls FerroSMART for nothing: a
      JWS (`rfc7515`) the EHR signs with a key of its registered JWK Set
-     (`RS384` or `ES384`) and hands the app as `launch`. Its header carries
+     (`RS384`, `ES384` or an ML-DSA parameter set, `rfc9964 §5`) and
+     hands the app as `launch`. Its header carries
      `typ` `launch+jwt` (explicit typing, `rfc8725 §3.11`) and `kid`; its
      claims are `iss` (the EHR's `client_id`), `aud` (FerroSMART's issuer,
      one string), `exp` (at most five minutes ahead), `jti`, `client_id`
@@ -3380,7 +3381,7 @@ assurance_minimum = "substantial"            # the eIDAS level every login reach
 url_file = "/run/secrets/ferrosmart-db-url"
 max_connections = 16
 
-[ferrosmart.keys]                             # the RS256 keys, signing in turn (13.11)
+[ferrosmart.keys]                             # the RS256 and ML-DSA-65 keys, each algorithm signing in turn (13.11)
 private_key_files = [                         # in the order they take over; each kid its RFC 7638 thumbprint
     "/run/secrets/rs256-1.pem",
     "/run/secrets/rs256-2.pem",
@@ -3583,12 +3584,21 @@ presets or the commands: our own design.
 ### 13.11 Key handling
 
 - **Algorithms.** `RS256` is always available, because RFC 9068 §2.1 and
-  OpenID Connect Discovery §3 require it and SMART signs ID Tokens with it;
-  `ES256`, `ES384` and `PS256` can sign beside it. Names follow RFC 9864's
-  fully-specified registrations; `none` and HMAC never sign.
+  OpenID Connect Discovery §3 require it and SMART signs ID Tokens with it,
+  so the pool holds at least one RSA key. `ML-DSA-65` (RFC 9964 §5) signs
+  beside it when the pool holds an ML-DSA-65 key (RFC 9881 §6), and
+  `id_token_signing_alg_values_supported` names both. A client's
+  `id_token_signed_response_alg` (OpenID Connect Dynamic Client
+  Registration 1.0 §2), `RS256` by default, picks the algorithm of its ID
+  Tokens and of its access tokens alike, which no specification names for
+  an access token: our own design (#887). A registration naming another
+  algorithm, or one no key signs, is `invalid_client_metadata`. Names
+  follow RFC 9864's fully-specified registrations; `none` and HMAC never
+  sign.
 - **Rotation.** `[ferrosmart.keys]` names a pool of key files, and the
   `signing_key` table (13.9) holds where each key stands, so every replica
-  signs with the same one. A key is `next` from the moment it is
+  signs with the same one. The keys of each algorithm rotate on their own
+  under the one schedule below, each with its own active and next key. A key is `next` from the moment it is
   published, `active` while it signs, `retiring` after, and `retired` for
   good. The first key of the pool signs at the first start, and the next
   unseen key of the pool is published as `next` at once. The active key
@@ -3857,8 +3867,8 @@ the rest is FerroSMART's own API of 13.6 item 3.
      (#657). The client assertion is the one
      the EHR would send to the token endpoint: `iss` and `sub` its
      `client_id`, `aud` FerroSMART's token URL or issuer, `exp` at most
-     five minutes ahead, a fresh `jti`, signed `RS384` or `ES384`, `typ`
-     `JWT`.
+     five minutes ahead, a fresh `jti`, signed `RS384`, `ES384`,
+     `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87` (`rfc9964 §5`), `typ` `JWT`.
 
      ```http
      POST /launch HTTP/1.1
@@ -4378,7 +4388,7 @@ keyword of its own, so its rows are the profile's statements.
 | The server supports both registrations, a JWK Set URL and a JWK Set by value | SHALL | met: `jwks_uri` and `jwks` | `clients::a_backend_services_client_registers_its_jwk_set_by_url`, `clients::a_jwk_set_by_value_holds_bare_public_keys_with_kty_and_kid` |
 | The JWK Set URL is reachable over TLS without authentication; the client returns `Cache-Control` | SHALL, SHOULD | the client's; FerroSMART requires `https` outside loopback and honours the header | `token::a_jwk_set_url_is_read_and_cached_as_the_client_allows` |
 | The server protects a JWK Set given by value from corruption, and reminds the client to update it | SHALL, SHOULD | the deployment's: the set is a configuration file the operator owns, read at start, or a value the admin API stores (13.27), which an administrator replaces; FerroSMART has no channel to the client to send a reminder over | none |
-| The client signs with RS384 and ES384; the server validates at least one | SHALL | met: both, and nothing else | `token::a_backend_services_client_gets_an_rfc_9068_token`, `token::an_rs384_assertion_typed_by_rfc_10070_naming_the_issuer_is_admitted` |
+| The client signs with RS384 and ES384; the server validates at least one | SHALL | met: both, and the three ML-DSA parameter sets of RFC 9964 beside them (#888) | `token::a_backend_services_client_gets_an_rfc_9068_token`, `token::an_rs384_assertion_typed_by_rfc_10070_naming_the_issuer_is_admitted` |
 | Each JWK is an asymmetric key with `kty` and `kid`, bare `n` and `e` or `crv`, `x` and `y` | SHALL | met: a set breaking it is refused at load, a private member too | `clients::a_jwk_set_by_value_holds_bare_public_keys_with_kty_and_kid` |
 | The client uses its `client_id`, and TLS 1.2 or later (Requesting an access token) | SHALL | met for TLS by `ferrohealth-server`'s listener, which offers TLS 1.2 and 1.3 alone; the lane's kit checks it | Inferno lane `standalone_auth_tls`, `backend_services_authorization` TLS |
 | The authentication JWT carries `alg`, `kid`, `typ` `JWT`, `iss` and `sub` the client, `aud` the token URL, `exp` at most five minutes ahead, a `jti`; `jku` when present is the registered URL | SHALL | met: `typ` `JWT` or `client-authentication+jwt`, `aud` the token URL or the issuer (13.6 item 1) | `token::an_assertion_breaking_the_profile_is_refused`, `token::the_assertion_s_audience_is_one_string_naming_this_server`, `token::a_replayed_or_long_lived_or_unsigned_assertion_is_refused` |

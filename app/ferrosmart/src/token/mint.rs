@@ -171,10 +171,17 @@ pub(crate) fn mint(state: &AppState, client: &Client, grant: Grant<'_>) -> Resul
         acr,
         cnf: grant.confirmation,
     };
-    // NOTE: RFC 9068 §2.1, typ at+jwt.
-    let access_token = settings
+    let ring = settings
         .keys
-        .ring()
+        .ring(client.id_token_signed_response_alg)
+        .ok_or_else(|| {
+            server_error(
+                "no key signs the client's algorithm",
+                &crate::signing::SigningError::NoActive,
+            )
+        })?;
+    // NOTE: RFC 9068 §2.1, typ at+jwt.
+    let access_token = ring
         .current()
         .sign("at+jwt", &claims)
         .map_err(|error| server_error("the access token could not be signed", &error))?;
@@ -195,10 +202,7 @@ pub(crate) fn mint(state: &AppState, client: &Client, grant: Grant<'_>) -> Resul
             // NOTE: SMART App Launch 2.2.0, Scopes for requesting identity data, "The
             // EHR SHALL support Signing ID Tokens with RSA SHA-256"; typ JWT.
             Some(
-                settings
-                    .keys
-                    .ring()
-                    .current()
+                ring.current()
                     .sign("JWT", &claims)
                     .map_err(|error| server_error("the ID token could not be signed", &error))?,
             )

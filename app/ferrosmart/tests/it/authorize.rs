@@ -2780,7 +2780,7 @@ async fn the_document_lists_exactly_the_capabilities_the_server_supports() {
     // NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric, Advertising
     // server support, the algorithms beside `private_key_jwt`.
     assert_eq!(
-        json!(["RS384", "ES384"]),
+        json!(["RS384", "ES384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]),
         document["token_endpoint_auth_signing_alg_values_supported"]
     );
     assert_eq!(

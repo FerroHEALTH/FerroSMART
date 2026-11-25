@@ -41,11 +41,9 @@ pub const REVOKE_ROUTE: &str = "/revoke";
 /// (OpenID Connect Discovery 1.0 §4).
 pub const OPENID_CONFIGURATION_ROUTE: &str = "/.well-known/openid-configuration";
 
-/// The algorithms a client assertion may be signed with: the two of which
-/// "The FHIR authorization server SHALL be capable of validating signatures
-/// with at least one" (SMART App Launch 2.2.0, Client Authentication:
-/// Asymmetric, Registering a client).
-const ASSERTION_ALGORITHMS: [&str; 2] = ["RS384", "ES384"];
+/// The names of the algorithms a client assertion may be signed with
+/// ([`crate::token::assertion::ALGORITHMS`]).
+const ASSERTION_ALGORITHMS: [&str; 5] = ["RS384", "ES384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"];
 
 /// Returns the RFC 8414 §2 metadata of the server `settings` describe;
 /// with `login`, the authorization code flow and its endpoint too.
@@ -370,8 +368,9 @@ fn smart_document(settings: &Settings, metadata: &ServerMetadata, login: bool) -
 ///
 /// It is the RFC 8414 members with the three OpenID Connect Discovery 1.0
 /// §3 requires beside them, `subject_types_supported` (`pairwise`, 13.6
-/// item 9), `id_token_signing_alg_values_supported` (`RS256`, which "MUST
-/// be included") and the claims an ID Token carries, and the `display`
+/// item 9), `id_token_signing_alg_values_supported` (the algorithms of
+/// `keys`, `RS256` first, which "MUST be included", and `ML-DSA-65` when a
+/// key of it is configured) and the claims an ID Token carries, and the `display`
 /// values and page languages FerroSMART supports (13.25). It names no
 /// `claims_locales_supported`: no claim it returns depends on a language.
 ///
@@ -384,7 +383,10 @@ fn smart_document(settings: &Settings, metadata: &ServerMetadata, login: bool) -
     clippy::expect_used,
     reason = "ServerMetadata is plain strings and lists, which serde_json always serializes"
 )]
-pub fn openid_configuration(metadata: &ServerMetadata) -> Value {
+pub fn openid_configuration(
+    metadata: &ServerMetadata,
+    keys: &crate::signing::SigningKeys,
+) -> Value {
     let mut document =
         serde_json::to_value(metadata).expect("the metadata should serialize as JSON");
     if let Some(members) = document.as_object_mut() {
@@ -394,7 +396,10 @@ pub fn openid_configuration(metadata: &ServerMetadata) -> Value {
         );
         members.insert(
             String::from("id_token_signing_alg_values_supported"),
-            serde_json::json!(["RS256"]),
+            keys.algorithms()
+                .iter()
+                .map(|algorithm| Value::from(algorithm.name()))
+                .collect::<Value>(),
         );
         // NOTE: OpenID Connect Core 1.0 §3.1.2.1 and §15.1: every display value is
         // taken, and the pages answer at any size.

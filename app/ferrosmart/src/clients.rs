@@ -10,6 +10,7 @@
 
 use std::collections::BTreeSet;
 
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
@@ -185,6 +186,11 @@ pub struct ClientMetadata {
     /// Whether the client's tokens are bound to its mutual-TLS certificate
     /// (RFC 8705 §3.4).
     pub tls_client_certificate_bound_access_tokens: bool,
+    /// The algorithm its ID Tokens are signed with (OpenID Connect Dynamic
+    /// Client Registration 1.0 §2, `id_token_signed_response_alg`), which
+    /// signs its access tokens too: `RS256` or `ML-DSA-65`; `RS256` when
+    /// empty.
+    pub id_token_signed_response_alg: String,
 }
 
 /// A registered client, checked.
@@ -234,6 +240,8 @@ pub struct Client {
     /// Whether its tokens are bound to its mutual-TLS certificate (RFC 8705
     /// §3.4).
     pub tls_client_certificate_bound_access_tokens: bool,
+    /// The algorithm its ID Tokens and access tokens are signed with.
+    pub id_token_signed_response_alg: Algorithm,
 }
 
 /// Who registered a client.
@@ -618,7 +626,6 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
             "`first_party` needs `authorization_code`, the grant a person signs in to",
         ));
     }
-    let about = resolve_about(section)?;
     Ok(Client {
         client_id: section.client_id.clone(),
         name: if section.name.is_empty() {
@@ -640,12 +647,27 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
         registration: Registration::Administered {
             first_party: section.first_party,
         },
-        about,
+        about: resolve_about(section)?,
         require_pushed_authorization_requests: section.require_pushed_authorization_requests,
         dpop_bound_access_tokens: section.dpop_bound_access_tokens,
         tls_client_certificate_bound_access_tokens: section
             .tls_client_certificate_bound_access_tokens,
+        id_token_signed_response_alg: signing_algorithm(section)?,
     })
+}
+
+/// Returns the algorithm the client `section` has its tokens signed with.
+// NOTE: OpenID Connect Dynamic Client Registration 1.0 §2, RS256 when omitted;
+// no specification names an access token's algorithm: our own design signs it alike.
+fn signing_algorithm(section: &ClientMetadata) -> Result<Algorithm, ClientError> {
+    match section.id_token_signed_response_alg.as_str() {
+        "" | "RS256" => Ok(Algorithm::Rs256),
+        "ML-DSA-65" => Ok(Algorithm::MlDsa65),
+        _ => Err(ClientError::Rule {
+            client_id: section.client_id.clone(),
+            rule: "`id_token_signed_response_alg` is `RS256` or `ML-DSA-65`",
+        }),
+    }
 }
 
 /// Returns what the client `section` registers about its app, each URL
@@ -891,8 +913,9 @@ fn is_loopback(url: &Url) -> bool {
 /// `kty` and `kid` properties, with content conveyed using 'bare key'
 /// properties", `n` and `e` for RSA and `crv`, `x` and `y` for EC (SMART
 /// App Launch 2.2.0, Client Authentication: Asymmetric, Registering a
-/// client). A private member (`d`, RFC 7518 §6.2.2.1 and §6.3.2.1) is
-/// refused: a public key set never carries one.
+/// client), and `alg` and `pub` for an ML-DSA key (`AKP`, RFC 9964 §3). A
+/// private member (`d`, RFC 7518 §6.2.2.1 and §6.3.2.1; `priv`, RFC 9964
+/// §3) is refused: a public key set never carries one.
 fn check_set(client_id: &str, set: &Value) -> Result<(), ClientError> {
     let keys = set
         .get("keys")
@@ -917,12 +940,13 @@ fn check_set(client_id: &str, set: &Value) -> Result<(), ClientError> {
             Some("EC") => ["crv", "x", "y"]
                 .iter()
                 .all(|member| text(member).is_some()),
-            _ => return Err(fault("is no RSA or EC key")),
+            Some("AKP") => ["alg", "pub"].iter().all(|member| text(member).is_some()),
+            _ => return Err(fault("is no RSA, EC or AKP key")),
         };
         if !bare {
             return Err(fault("lacks a bare key member"));
         }
-        if key.get("d").is_some() {
+        if key.get("d").is_some() || key.get("priv").is_some() {
             return Err(fault("carries a private member"));
         }
     }
