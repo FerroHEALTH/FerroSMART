@@ -173,6 +173,10 @@ pub struct Fields {
     /// Whether the client's tokens are bound to its mutual-TLS certificate
     /// (RFC 8705 §3.4).
     pub tls_client_certificate_bound_access_tokens: bool,
+    /// The algorithm the client's ID Tokens and access tokens are signed
+    /// with (OpenID Connect Dynamic Client Registration 1.0 §2); `RS256`
+    /// when empty.
+    pub id_token_signed_response_alg: String,
 }
 
 impl Default for Fields {
@@ -201,13 +205,14 @@ impl Default for Fields {
             require_pushed_authorization_requests: false,
             dpop_bound_access_tokens: false,
             tls_client_certificate_bound_access_tokens: false,
+            id_token_signed_response_alg: String::new(),
         }
     }
 }
 
 /// The members a [`ClientDocument`] reads; a registration request's other
 /// members are ignored (RFC 7591 §2).
-const MEMBERS: [&str; 22] = [
+const MEMBERS: [&str; 23] = [
     "client_id",
     "client_name",
     "token_endpoint_auth_method",
@@ -229,6 +234,7 @@ const MEMBERS: [&str; 22] = [
     "require_pushed_authorization_requests",
     "dpop_bound_access_tokens",
     "tls_client_certificate_bound_access_tokens",
+    "id_token_signed_response_alg",
     "client_secret",
 ];
 
@@ -276,6 +282,7 @@ impl Fields {
             dpop_bound_access_tokens: self.dpop_bound_access_tokens,
             tls_client_certificate_bound_access_tokens: self
                 .tls_client_certificate_bound_access_tokens,
+            id_token_signed_response_alg: self.id_token_signed_response_alg,
         };
         let material = Material {
             jwks: self.jwks,
@@ -342,6 +349,8 @@ pub struct ClientView<'a> {
     dpop_bound_access_tokens: bool,
     /// Whether its tokens are bound to its mutual-TLS certificate.
     tls_client_certificate_bound_access_tokens: bool,
+    /// The algorithm its ID Tokens and access tokens are signed with.
+    id_token_signed_response_alg: &'static str,
     /// `admin`, or `self` for an app that registered itself (RFC 7591 §5).
     registered_by: &'static str,
     /// When it was disabled, an RFC 3339 instant; absent while enabled.
@@ -391,6 +400,7 @@ impl<'a> From<&'a Registered> for ClientView<'a> {
             dpop_bound_access_tokens: client.dpop_bound_access_tokens,
             tls_client_certificate_bound_access_tokens: client
                 .tls_client_certificate_bound_access_tokens,
+            id_token_signed_response_alg: client.id_token_signed_response_alg.name(),
             registered_by: registered.by.as_str(),
             disabled_at: registered.disabled_at.map(instant),
         }

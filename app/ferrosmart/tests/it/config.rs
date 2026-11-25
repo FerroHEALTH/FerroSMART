@@ -231,10 +231,7 @@ fn a_key_that_cannot_sign_rs256_is_refused() {
     );
     assert!(matches!(
         config(&text, &keys).resolve(),
-        Err(Error::Key {
-            key: "ferrosmart.keys.private_key_files",
-            ..
-        })
+        Err(Error::TokenKeyType { .. })
     ));
 }
 

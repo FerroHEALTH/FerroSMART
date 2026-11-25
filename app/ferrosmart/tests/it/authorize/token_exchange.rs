@@ -260,7 +260,7 @@ async fn a_machine_s_token_is_never_exchanged_and_is_recorded() {
     let machine = smart
         .settings
         .keys
-        .ring()
+        .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256).expect("the RS256 ring")
         .current()
         .sign(
             "at+jwt",
@@ -313,7 +313,8 @@ async fn an_expired_revoked_or_foreign_subject_token_is_refused() {
     let expired = smart
         .settings
         .keys
-        .ring()
+        .ring(ferrohealth_smart::jws::algorithm::Algorithm::Rs256)
+        .expect("the RS256 ring")
         .current()
         .sign(
             "at+jwt",

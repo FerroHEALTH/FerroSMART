@@ -458,8 +458,8 @@ pub(crate) fn server_error(description: &'static str, cause: &dyn std::error::Er
 }
 
 /// Returns the claims of `token` when it is a JWT of type `typ` that a key
-/// FerroSMART publishes signed with RS256 and FerroSMART issued, whatever
-/// its `exp` and `aud`, which the caller decides.
+/// FerroSMART publishes signed under that key's algorithm and FerroSMART
+/// issued, whatever its `exp` and `aud`, which the caller decides.
 ///
 /// A value that does not verify is one FerroSMART did not issue, which a
 /// caller reads as absent (RFC 7662 §2.2; RP-Initiated Logout 1.0 §2).
@@ -468,24 +468,24 @@ pub(crate) fn own_jwt(
     token: &str,
     typ: &str,
 ) -> Option<Value> {
-    use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-    let header = jsonwebtoken::decode_header(token).ok()?;
-    if header.typ.as_deref() != Some(typ) || header.alg != Algorithm::RS256 {
+    use ferrohealth_smart::jws::jwk::Jwk;
+    let jws = ferrohealth_smart::jws::compact::decode(token).ok()?;
+    let header = jws.header();
+    if header.typ.as_deref() != Some(typ) || !settings.keys.algorithms().contains(&header.alg) {
         return None;
     }
-    let kid = header.kid?;
-    let published = settings.keys.ring().published();
-    let jwk = published
-        .get("keys")
-        .and_then(Value::as_array)?
+    let kid = header.kid.as_deref()?;
+    // NOTE: RFC 7517 §5, a member that is no supported key verifies nothing.
+    let keys: Vec<Jwk> = settings
+        .keys
+        .published()
+        .get("keys")?
+        .as_array()?
         .iter()
-        .find(|key| key.get("kid").and_then(Value::as_str) == Some(kid.as_str()))?;
-    let jwk: jsonwebtoken::jwk::Jwk = serde_json::from_value(jwk.clone()).ok()?;
-    let key = DecodingKey::from_jwk(&jwk).ok()?;
-    let mut validation = Validation::new(Algorithm::RS256);
-    validation.validate_exp = false;
-    validation.validate_aud = false;
-    validation.set_required_spec_claims(&["iss"]);
-    validation.set_issuer(&[settings.issuer.as_str()]);
-    Some(jsonwebtoken::decode(token, &key, &validation).ok()?.claims)
+        .filter_map(|key| Jwk::try_from(key).ok())
+        .collect();
+    let key = ferrohealth_smart::jws::jwk::select(&keys, Some(kid), header.alg)?;
+    let claims = jws.verify_claims(key).ok()?;
+    (claims.get("iss").and_then(Value::as_str) == Some(settings.issuer.as_str()))
+        .then_some(Value::Object(claims))
 }

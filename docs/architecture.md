@@ -3380,7 +3380,7 @@ assurance_minimum = "substantial"            # the eIDAS level every login reach
 url_file = "/run/secrets/ferrosmart-db-url"
 max_connections = 16
 
-[ferrosmart.keys]                             # the RS256 keys, signing in turn (13.11)
+[ferrosmart.keys]                             # the RS256 and ML-DSA-65 keys, each algorithm signing in turn (13.11)
 private_key_files = [                         # in the order they take over; each kid its RFC 7638 thumbprint
     "/run/secrets/rs256-1.pem",
     "/run/secrets/rs256-2.pem",
@@ -3583,12 +3583,21 @@ presets or the commands: our own design.
 ### 13.11 Key handling
 
 - **Algorithms.** `RS256` is always available, because RFC 9068 §2.1 and
-  OpenID Connect Discovery §3 require it and SMART signs ID Tokens with it;
-  `ES256`, `ES384` and `PS256` can sign beside it. Names follow RFC 9864's
-  fully-specified registrations; `none` and HMAC never sign.
+  OpenID Connect Discovery §3 require it and SMART signs ID Tokens with it,
+  so the pool holds at least one RSA key. `ML-DSA-65` (RFC 9964 §5) signs
+  beside it when the pool holds an ML-DSA-65 key (RFC 9881 §6), and
+  `id_token_signing_alg_values_supported` names both. A client's
+  `id_token_signed_response_alg` (OpenID Connect Dynamic Client
+  Registration 1.0 §2), `RS256` by default, picks the algorithm of its ID
+  Tokens and of its access tokens alike, which no specification names for
+  an access token: our own design (#887). A registration naming another
+  algorithm, or one no key signs, is `invalid_client_metadata`. Names
+  follow RFC 9864's fully-specified registrations; `none` and HMAC never
+  sign.
 - **Rotation.** `[ferrosmart.keys]` names a pool of key files, and the
   `signing_key` table (13.9) holds where each key stands, so every replica
-  signs with the same one. A key is `next` from the moment it is
+  signs with the same one. The keys of each algorithm rotate on their own
+  under the one schedule below, each with its own active and next key. A key is `next` from the moment it is
   published, `active` while it signs, `retiring` after, and `retired` for
   good. The first key of the pool signs at the first start, and the next
   unseen key of the pool is published as `next` at once. The active key
