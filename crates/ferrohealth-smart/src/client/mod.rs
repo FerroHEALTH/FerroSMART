@@ -826,7 +826,10 @@ mod tests {
         .expect("a P-384 key");
         let token: Url = "https://as.example.org/token".parse().expect("a URL");
         let claims = |assertion: &str| -> (Option<String>, serde_json::Value) {
-            let header = jsonwebtoken::decode_header(assertion).expect("a header");
+            let header = crate::jws::compact::decode(assertion)
+                .expect("a header")
+                .header()
+                .clone();
             let payload = assertion.split('.').nth(1).expect("a payload");
             let bytes =
                 base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, payload)

@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use jsonwebtoken::Algorithm;
+use crate::jws::algorithm::Algorithm;
 
 use crate::kind::IssuerKind;
 use crate::profile::Profile;
@@ -30,12 +30,12 @@ impl Settings {
             issuer: issuer.into(),
             audience: vec![audience.into()],
             algorithms: vec![
-                Algorithm::RS256,
-                Algorithm::RS384,
-                Algorithm::PS256,
-                Algorithm::PS384,
-                Algorithm::ES256,
-                Algorithm::ES384,
+                Algorithm::Rs256,
+                Algorithm::Rs384,
+                Algorithm::Ps256,
+                Algorithm::Ps384,
+                Algorithm::Es256,
+                Algorithm::Es384,
             ],
             kind,
             profile: Profile::default(),
@@ -60,8 +60,8 @@ impl Settings {
     }
 
     /// Checks the settings: the issuer URL rule, at least one audience, at
-    /// least one algorithm and none symmetric, the clock skew bound, and no
-    /// list beside the product's standing.
+    /// least one algorithm, the clock skew bound, and no list beside the
+    /// product's standing.
     ///
     /// # Errors
     ///
@@ -73,16 +73,6 @@ impl Settings {
         }
         if self.algorithms.is_empty() {
             return Err(ResourceError::NoAlgorithm);
-        }
-        if let Some(algorithm) = self.algorithms.iter().find(|algorithm| {
-            matches!(
-                algorithm,
-                Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512
-            )
-        }) {
-            return Err(ResourceError::SymmetricAlgorithm {
-                algorithm: *algorithm,
-            });
         }
         if self.clock_skew > MAX_CLOCK_SKEW {
             return Err(ResourceError::ClockSkew {

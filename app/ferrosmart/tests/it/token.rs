@@ -69,8 +69,12 @@ impl Server {
             rsa_key(keys.dir.path(), "client.pem")
         };
         let pem = std::fs::read(&pem_path).expect("the key reads");
-        let key = AssertionKey::from_pem(&pem, Some(algorithm), Some(String::from("client-1")))
-            .expect("a client key");
+        let key = AssertionKey::from_pem(
+            &pem,
+            Some(crate::support::jws_algorithm(algorithm)),
+            Some(String::from("client-1")),
+        )
+        .expect("a client key");
         let registration = jwks_uri.map_or_else(
             || {
                 let set = crate::support::inline(&json!({"keys": [key.public_jwk()]}));

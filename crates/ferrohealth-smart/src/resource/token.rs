@@ -19,8 +19,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use http::Extensions;
-use jsonwebtoken::Validation;
-use jsonwebtoken::errors::ErrorKind;
 use serde_json::Map;
 use serde_json::Value;
 
@@ -28,6 +26,9 @@ use crate::assurance::AssuranceSection;
 use crate::federation::Context;
 use crate::federation::FederationSection;
 use crate::federation::person::AttributesSection;
+use crate::jws::JwsError;
+use crate::jws::claims::ClaimError;
+use crate::jws::claims::Validation;
 use crate::kind::CallerKind;
 use crate::kind::IssuerKind;
 use crate::kind::Unclassified;
@@ -97,8 +98,8 @@ pub(super) async fn verify(
     binding: &Binding,
 ) -> Result<Caller, Rejection> {
     let settings = server.settings();
-    let header =
-        jsonwebtoken::decode_header(token).map_err(|_malformed| invalid(Reason::Malformed))?;
+    let jws = crate::jws::compact::decode(token).map_err(|error| invalid(signature(&error)))?;
+    let header = jws.header();
     if !settings.algorithms.contains(&header.alg) {
         return Err(invalid(Reason::Algorithm));
     }
@@ -107,7 +108,7 @@ pub(super) async fn verify(
     if !settings.profile.accepts_type(header.typ.as_deref()) {
         return Err(invalid(Reason::Type));
     }
-    let (decoding, generation) = server
+    let (jwk, generation) = server
         .keys
         .find(header.kid.as_deref(), header.alg)
         .await
@@ -115,16 +116,17 @@ pub(super) async fn verify(
             source: Arc::new(source),
         })?
         .ok_or_else(|| invalid(Reason::UnknownKey))?;
-    let mut validation = Validation::new(header.alg);
-    validation.set_issuer(&[settings.issuer.as_str()]);
-    validation.set_audience(&settings.audience);
-    validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
-    validation.validate_nbf = true;
-    validation.leeway = settings.clock_skew.as_secs();
     server.count_signature();
-    let data = jsonwebtoken::decode::<Map<String, Value>>(token, &decoding, &validation)
-        .map_err(|error| invalid(reason(error.kind())))?;
-    let claims = data.claims;
+    let claims = jws
+        .verify_claims(&jwk)
+        .map_err(|error| invalid(signature(&error)))?;
+    Validation::default()
+        .with_issuer(settings.issuer.as_str())
+        .with_audiences(settings.audience.iter().map(String::as_str))
+        .with_required(&["exp", "sub"])
+        .with_leeway(settings.clock_skew)
+        .check(&claims)
+        .map_err(|error| invalid(claim(error)))?;
     if settings
         .profile
         .required_claims
@@ -139,7 +141,7 @@ pub(super) async fn verify(
             Verified {
                 claims: claims.clone(),
                 alg: header.alg,
-                kid: header.kid,
+                kid: header.kid.clone(),
                 generation,
             },
             exp,
@@ -303,16 +305,23 @@ pub(super) const fn invalid(reason: Reason) -> Rejection {
     Rejection::Invalid { reason }
 }
 
-/// Returns the debug-log reason of a failed decode.
-const fn reason(kind: &ErrorKind) -> Reason {
-    match kind {
-        ErrorKind::InvalidSignature => Reason::Signature,
-        ErrorKind::ExpiredSignature => Reason::Expired,
-        ErrorKind::ImmatureSignature => Reason::NotYetValid,
-        ErrorKind::InvalidIssuer => Reason::Issuer,
-        ErrorKind::InvalidAudience => Reason::Audience,
-        ErrorKind::MissingRequiredClaim(_) => Reason::MissingClaim,
-        ErrorKind::InvalidAlgorithm => Reason::Algorithm,
+/// Returns the debug-log reason of a token that fails to read or verify.
+const fn signature(error: &JwsError) -> Reason {
+    match error {
+        JwsError::Signature => Reason::Signature,
+        JwsError::Algorithm | JwsError::KeyAlgorithm { .. } => Reason::Algorithm,
+        _ => Reason::Malformed,
+    }
+}
+
+/// Returns the debug-log reason of claims that fail a check.
+const fn claim(error: ClaimError) -> Reason {
+    match error {
+        ClaimError::Expired => Reason::Expired,
+        ClaimError::NotYetValid => Reason::NotYetValid,
+        ClaimError::Issuer => Reason::Issuer,
+        ClaimError::Audience => Reason::Audience,
+        ClaimError::Missing { .. } => Reason::MissingClaim,
         _ => Reason::Malformed,
     }
 }
@@ -324,10 +333,11 @@ mod tests {
     use aws_lc_rs::rand::SystemRandom;
     use aws_lc_rs::signature::ECDSA_P256_SHA256_FIXED_SIGNING;
     use aws_lc_rs::signature::EcdsaKeyPair;
-    use jsonwebtoken::Algorithm;
-    use jsonwebtoken::EncodingKey;
-    use jsonwebtoken::Header;
-    use jsonwebtoken::jwk::Jwk;
+
+    use crate::jws::algorithm::Algorithm;
+    use crate::jws::compact::Header;
+    use crate::jws::key::PrivateKey;
+    use crate::jws::key::SigningKey;
 
     use crate::kind::IssuerKind;
     use crate::resource::ResourceServer;
@@ -339,7 +349,7 @@ mod tests {
     /// A signing key generated for the case, with its public JWK.
     struct Key {
         kid: &'static str,
-        encoding: EncodingKey,
+        signing: SigningKey,
         jwk: serde_json::Value,
     }
 
@@ -347,15 +357,10 @@ mod tests {
         let pkcs8 =
             EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &SystemRandom::new())
                 .expect("a key pair");
-        let encoding = EncodingKey::from_ec_der(pkcs8.as_ref());
-        let mut jwk = serde_json::to_value(
-            Jwk::from_encoding_key(&encoding, Algorithm::ES256).expect("a public JWK"),
-        )
-        .expect("the JWK serializes");
-        if let Some(members) = jwk.as_object_mut() {
-            members.insert(String::from("kid"), serde_json::json!(kid));
-        }
-        Key { kid, encoding, jwk }
+        let private = PrivateKey::from_pkcs8(pkcs8.as_ref()).expect("the key reads");
+        let signing = SigningKey::new(private, Algorithm::Es256).expect("a P-256 key signs ES256");
+        let jwk = signing.public_jwk().clone().with_kid(kid).to_value();
+        Key { kid, signing, jwk }
     }
 
     fn publish(path: &std::path::Path, keys: &[&Key]) {
@@ -366,7 +371,7 @@ mod tests {
 
     fn mint(key: &Key, jti: &str) -> String {
         let now = jiff::Timestamp::now().as_second();
-        let mut header = Header::new(Algorithm::ES256);
+        let mut header = Header::new(Algorithm::Es256);
         header.kid = Some(key.kid.to_owned());
         header.typ = Some(String::from("at+jwt"));
         let claims = serde_json::json!({
@@ -379,7 +384,7 @@ mod tests {
             "jti": jti,
             "scope": "user/Observation.rs"
         });
-        jsonwebtoken::encode(&header, &claims, &key.encoding).expect("the token signs")
+        crate::jws::compact::encode(&header, &claims, &key.signing).expect("the token signs")
     }
 
     async fn server(path: &std::path::Path, max_age: Duration) -> ResourceServer {

@@ -69,7 +69,7 @@ schema = ["dep:schemars", "ferrohealth-config/schema"]
 # runs, so it is compiled for every target but the browser's.
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 argon2.workspace = true
-aws-lc-rs.workspace = true
+aws-lc-rs = { workspace = true, features = ["ring-io"] }
 base64.workspace = true
 ferrohealth-config.workspace = true
 ferrohealth-server = { workspace = true, optional = true }
@@ -77,7 +77,6 @@ ferrohealth-secret.workspace = true
 schemars = { workspace = true, optional = true }
 http.workspace = true
 jiff.workspace = true
-jsonwebtoken.workspace = true
 reqwest = { workspace = true, optional = true }
 rustls.workspace = true
 secrecy.workspace = true

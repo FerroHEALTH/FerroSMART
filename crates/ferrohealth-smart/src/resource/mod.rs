@@ -44,9 +44,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::jws::algorithm::Algorithm;
 use http::Extensions;
 use http::StatusCode;
-use jsonwebtoken::Algorithm;
 use url::Url;
 
 use crate::assurance::Assessment;
@@ -81,8 +81,8 @@ pub struct Settings {
     /// The audiences, of which every token's `aud` must contain one
     /// (RFC 9068 §4); at least one.
     pub audience: Vec<String>,
-    /// The signature algorithms a token may use; asymmetric only (RFC 8725
-    /// §3.1, §3.2), which [`Settings::validate`] checks.
+    /// The signature algorithms a token may use, each asymmetric (RFC 8725
+    /// §3.1, §3.2).
     pub algorithms: Vec<Algorithm>,
     /// Whose tokens the issuer signs.
     pub kind: IssuerKind,
@@ -134,14 +134,6 @@ pub enum ResourceError {
     /// rule.
     #[error(transparent)]
     Discovery(#[from] DiscoveryError),
-    /// The settings admit a symmetric algorithm, which RFC 8725 §3.1 and
-    /// §3.2 have a verifier refuse: a key of the issuer's set would then
-    /// sign a token.
-    #[error("the settings admit the symmetric algorithm {algorithm:?}")]
-    SymmetricAlgorithm {
-        /// The algorithm admitted.
-        algorithm: Algorithm,
-    },
     /// The settings admit no algorithm at all.
     #[error("the settings admit no signature algorithm")]
     NoAlgorithm,

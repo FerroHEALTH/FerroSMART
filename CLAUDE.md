@@ -110,7 +110,9 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
 
 ## Repo map
 
-- `crates/ferrohealth-smart`: the library, with its own `CHANGELOG.md`. `src/` (`metadata`, `resource`
+- `crates/ferrohealth-smart`: the library, with its own `CHANGELOG.md`. `src/` (`jws` (every
+  JWS the crate signs or verifies, over `aws-lc-rs`: `algorithm`, `jwk`
+  with the `AKP` key of RFC 9964, `key`, `compact` and `claims`), `metadata`, `resource`
   with `jwks`, `token`, `configuration`, `described` (the issuer the
   discovery document describes) and `introspection`, `scope`, `basic`, `client` with
   `cache`, `endpoint`, `outbound` (the client of one outbound integration
@@ -210,7 +212,7 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
   SMART on openEHR draft (DEVELOPMENT, pinned by commit and read weekly
   upstream), RFC 6749, 6750, 7515, 7517, 7519, 7523, 7617, 7662, 8414, 8725,
   9068, 9700, 8707, 7638, 8705, 9449, 9470, 8259, 6454, 7636, 7009, 7521,
-  7522, 8693 and 3986, OpenID Connect Discovery 1.0, Core 1.0, RP-Initiated
+  7522, 8693, 3986, 7518, 8037, 9964 and 9881, OpenID Connect Discovery 1.0, Core 1.0, RP-Initiated
   Logout 1.0 and Back-Channel Logout 1.0, and for FerroSMART also RFC 6819, 7518, 7591, 8252, 9126,
   9207, 9864, 10070 and 9110 and the OAuth 2.1 draft (cited beside the RFCs it
   consolidates), the FAPI 2.0 Security Profile for a client grant held to it,

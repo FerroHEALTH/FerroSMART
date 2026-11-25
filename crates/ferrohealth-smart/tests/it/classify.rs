@@ -7,6 +7,8 @@
 
 use std::error::Error as StdError;
 
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::compact::Header;
 use ferrohealth_smart::kind::Actor;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
@@ -18,8 +20,6 @@ use ferrohealth_smart::resource::Rejection;
 use ferrohealth_smart::resource::ResourceServer;
 use ferrohealth_smart::resource::Settings;
 use ferrohealth_smart::scope::Permission;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::Header;
 use serde_json::Value;
 use serde_json::json;
 
@@ -52,7 +52,7 @@ impl Harness {
     /// Returns the harness.
     fn new() -> Self {
         Self {
-            key: ec_key("k1", Algorithm::ES256),
+            key: ec_key("k1", Algorithm::Es256),
         }
     }
 
@@ -70,7 +70,7 @@ impl Harness {
         let server = ResourceServer::discover(settings)
             .await
             .expect("the key set file reads");
-        let mut header = Header::new(Algorithm::ES256);
+        let mut header = Header::new(Algorithm::Es256);
         header.kid = Some(String::from("k1"));
         header.typ = Some(String::from("at+jwt"));
         server

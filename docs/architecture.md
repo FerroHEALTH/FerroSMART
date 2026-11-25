@@ -108,7 +108,7 @@ with the matrix.
 | Item | Pin | Ground |
 |---|---|---|
 | SMART App Launch | 2.2.0 (STU 2.2, on FHIR R4 4.0.1) | The registry's `latest` on 2026-10-19 and the current 2.x publication; the 2.x line is where the `cruds` scope grammar, the `.well-known/smart-configuration` document and the asymmetric client profile live. Vendored as the package `hl7.fhir.uv.smart-app-launch` 2.2.0 and the page sources at the release tag. |
-| IETF RFCs | RFC 6749, 6750, 7515, 7517, 7519, 7523, 7617, 7662, 8414, 8725, 9068, 9700, 8707, 7638, 9449, 8705, 9470, 8259, 6454, 7636, 7009, 7643, 9396, 7521, 7522, 8693, 3986, 6819, 7518, 7591, 8252, 9126, 9207, 9864, 10070, 9110 | None is obsoleted (the vendor script refuses an obsoleted pin). RFC 9700 updates 6749 and 6750 and RFC 8725 updates 7519, so each is read with its update. RFC 8707 is the `resource` parameter the client credentials client sends and RFC 7638 the thumbprint that names the product's own JWK. RFC 8705 §2 and §5 are the mutual-TLS client authentication of the token client (3.5), and §3 the certificate-bound tokens of 3.15. RFC 9470 is the step-up challenge of 3.7. RFC 8259 §4 is the repeated member name a metadata document is refused for, and RFC 6454 §4 and §5 the origin the opt-in endpoint check of 3.1 compares. RFC 7636 (PKCE) and RFC 7009 (token revocation) are the code exchange and the revocation of the `oidc` relying party. RFC 9449 (DPoP) is the proof-bound tokens of 3.15. RFC 7662 is in the set because section 6 says why introspection is not the default. RFC 7643 §2.4 and §4.1.2 are the SCIM `roles` and `entitlements` forms the role claims of 3.11 read. RFC 9396 (rich authorization requests, which SMART marks experimental) is the `authorization_details` a client grant sends and reads back (3.5); the resource server reads no `authorization_details` claim (3.11). RFC 8693 (token exchange, `act` in §4.1) and RFC 7521, the assertion framework that RFC 7523 profiles for the JWT bearer grant, with RFC 7522 its SAML 2.0 profile beside it, are the onward grants and the delegation of the caller classification (FerroHEALTH/FerroSMART#215, #217). RFC 3986 §6.2.2 and §6.2.3 are the normalizations RFC 9449 §4.3 has a server apply before it compares the `htu` (3.15), and §4.2 the network-path reference the session's return path refuses (FerroHEALTH/FerroSMART#235). RFC 6819, 7518, 7591, 8252, 9126, 9207, 9864 and 10070 are what FerroSMART, the authorization server of section 13, cites beyond the resource server's set: the threat model, the algorithms and their fully-specified names, dynamic registration, native apps, pushed authorization requests, the `iss` authorization response parameter, and RFC 10070's audience rule for client assertions, which updates RFC 7521, 7522, 7523 and 9126 and conflicts with SMART 2.2 (13.6). RFC 9110 §8.8.3 and §13.1.2 are the weak entity tag and the conditional GET of the Brands Bundle (13.23, §8). |
+| IETF RFCs | RFC 6749, 6750, 7515, 7517, 7519, 7523, 7617, 7662, 8414, 8725, 9068, 9700, 8707, 7638, 9449, 8705, 9470, 8259, 6454, 7636, 7009, 7643, 9396, 7521, 7522, 8693, 3986, 6819, 7518, 7591, 8252, 9126, 9207, 9864, 10070, 9110, 8037, 9964, 9881 | None is obsoleted (the vendor script refuses an obsoleted pin). RFC 9700 updates 6749 and 6750 and RFC 8725 updates 7519, so each is read with its update. RFC 8707 is the `resource` parameter the client credentials client sends and RFC 7638 the thumbprint that names the product's own JWK. RFC 8705 §2 and §5 are the mutual-TLS client authentication of the token client (3.5), and §3 the certificate-bound tokens of 3.15. RFC 9470 is the step-up challenge of 3.7. RFC 8259 §4 is the repeated member name a metadata document is refused for, and RFC 6454 §4 and §5 the origin the opt-in endpoint check of 3.1 compares. RFC 7636 (PKCE) and RFC 7009 (token revocation) are the code exchange and the revocation of the `oidc` relying party. RFC 9449 (DPoP) is the proof-bound tokens of 3.15. RFC 7662 is in the set because section 6 says why introspection is not the default. RFC 7643 §2.4 and §4.1.2 are the SCIM `roles` and `entitlements` forms the role claims of 3.11 read. RFC 9396 (rich authorization requests, which SMART marks experimental) is the `authorization_details` a client grant sends and reads back (3.5); the resource server reads no `authorization_details` claim (3.11). RFC 8693 (token exchange, `act` in §4.1) and RFC 7521, the assertion framework that RFC 7523 profiles for the JWT bearer grant, with RFC 7522 its SAML 2.0 profile beside it, are the onward grants and the delegation of the caller classification (FerroHEALTH/FerroSMART#215, #217). RFC 3986 §6.2.2 and §6.2.3 are the normalizations RFC 9449 §4.3 has a server apply before it compares the `htu` (3.15), and §4.2 the network-path reference the session's return path refuses (FerroHEALTH/FerroSMART#235). RFC 6819, 7518, 7591, 8252, 9126, 9207, 9864 and 10070 are what FerroSMART, the authorization server of section 13, cites beyond the resource server's set: the threat model, the algorithms and their fully-specified names, dynamic registration, native apps, pushed authorization requests, the `iss` authorization response parameter, and RFC 10070's audience rule for client assertions, which updates RFC 7521, 7522, 7523 and 9126 and conflicts with SMART 2.2 (13.6). RFC 9110 §8.8.3 and §13.1.2 are the weak entity tag and the conditional GET of the Brands Bundle (13.23, §8). RFC 8037 is the `EdDSA` algorithm and `OKP` key, RFC 9964 the ML-DSA algorithms and the `AKP` key, and RFC 9881 §6 the ML-DSA private key an assertion key reads, all in the `jws` module (3.3, #886). |
 | OpenID Connect Discovery 1.0 | incorporating errata set 2 (2023-12-15) | The edition the unversioned URL serves; RFC 9068 §4 names it as the alternative to RFC 8414 for publishing keys and the issuer. |
 | OpenID Connect Core 1.0 | incorporating errata set 2 (2023-12-15) | The edition the unversioned URL serves; the authorization code flow (§3.1) and the ID Token check (§3.1.3.7) of the `oidc` relying party. |
 | OpenID Connect RP-Initiated Logout 1.0 | final (2022-09-12) | The edition the unversioned URL serves; the end-session request (§2) and the `end_session_endpoint` metadata (§2.1) of the `oidc` relying party. |
@@ -213,7 +213,8 @@ supported ranges" is ignored, as §5 says to, so such a member is legitimately
 absent and no defect. A key is usable for verification when its `use`, if
 present, is `sig` (`rfc7517 §4.2`), its `key_ops`, if present, holds `verify`
 (`§4.3`), its `alg`, if present, equals the token's (`§4.4`), and its `kty`
-belongs to the token's algorithm family. A symmetric key (`kty` of `oct`)
+and curve are the token's algorithm's; an `AKP` key always names its `alg`,
+which fixes its ML-DSA parameter set (`rfc9964 §3`). A symmetric key (`kty` of `oct`)
 verifies nothing, whatever it says: see 3.3 on algorithms.
 
 Key selection follows the token's `kid` header (`rfc7515 §4.1.4`, "used to
@@ -263,6 +264,17 @@ not read: a token in a query string reaches logs and browser history
 (`rfc9700 §4.3.2`), and nothing in SMART needs either form. A request that
 carries two credentials is `invalid_request` (`rfc6750 §3.1`).
 
+Every JWS the crate reads or signs, the access token here, the ID Token and
+Logout Token of the `oidc` relying party, the `DPoP` proof of 3.15, the
+client assertion and the product's own JWTs of 3.5, goes through one module,
+`jws`, over `aws-lc-rs` (owner decision 2026-11-25, FerroHEALTH/FerroSMART#886):
+the compact serialization with `crit` refused (`rfc7515 §4.1.11`) and a
+repeated member name refused (`rfc7515 §5.2`), the JWK of every key type
+with its RFC 7638 thumbprint (`rfc9964 §6` for `AKP`), the key selection of
+3.2, and the registered claim checks of the steps below. An ECDSA signature
+is the fixed `R || S` (`rfc7518 §3.4`) and an ML-DSA signature the pure FIPS
+204 signature with an empty context (`rfc9964 §5`).
+
 The checks, in order, each a refusal when it fails:
 
 1. **Structure.** The token parses as a JWS in compact serialization
@@ -284,8 +296,11 @@ The checks, in order, each a refusal when it fails:
    client profile names them (`smart client-confidential-asymmetric`,
    Registering a client), and the PS and ES256 forms because they are the
    current algorithms a deployment's authorization server is likely to
-   mint. `EdDSA` is accepted when configured. A deployment narrows the list;
-   it cannot add `none` or an HMAC.
+   mint. `EdDSA` and `ML-DSA-44`, `ML-DSA-65` and `ML-DSA-87` (`rfc9964 §5`)
+   are accepted when configured. A deployment narrows the list; it cannot
+   add `none` or an HMAC, since neither has a value of
+   `jws::algorithm::Algorithm` and a configuration naming one fails to
+   parse.
 3. **Type.** Under the default `rfc9068` profile the `typ` header is
    `at+jwt` or `application/at+jwt`, compared case-insensitively, and any
    other value is refused (`rfc9068 §4`, "MUST verify that the `typ` header
@@ -299,6 +314,7 @@ The checks, in order, each a refusal when it fails:
    the resource server. The profile is configuration, default `rfc9068`.
 4. **Key and signature.** The key is selected as in 3.2 and the signature
    verified over the signing input (`rfc7515 §5.2` step 8).
+
 5. **Issuer.** `iss` equals the configured issuer exactly (`rfc9068 §4`,
    "MUST exactly match"; `rfc8725 §3.8`), compared as a string with no
    normalization, because the metadata's `issuer` was already required to be
@@ -4796,8 +4812,7 @@ eHDSI check's implementation (3.18) moved into its own module behind the
 depth and namespace declarations, its line-end translation and its tests
 against `xmllint --exc-c14n`; FerroSMART reads SAML messages under caps of
 256 KiB, 16 384 nodes, depth 32 and 256 namespace declarations. The
-cryptography is `aws-lc-rs`, the provider `jsonwebtoken` and `rustls`
-already link: RSA and ECDSA verification and signing, RSA-OAEP
+cryptography is `aws-lc-rs`, the provider `rustls` already links: RSA and ECDSA verification and signing, RSA-OAEP
 decryption, AES-GCM and AES-CBC. `x509-parser` reads the certificates,
 and `flate2` (pure Rust behind `rust_backend`) writes the raw DEFLATE of
 the HTTP-Redirect binding. The alternatives were weighed: `samael`, the

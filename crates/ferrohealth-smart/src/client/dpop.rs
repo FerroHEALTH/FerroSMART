@@ -30,14 +30,16 @@ use base64::Engine as _;
 use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::EncodingKey;
-use jsonwebtoken::Header;
-use jsonwebtoken::jwk::Jwk;
 use serde::Serialize;
 use url::Url;
 
-use crate::client::assertion::thumbprint;
+use crate::jws::JwsError;
+use crate::jws::algorithm::Algorithm;
+use crate::jws::compact::Header;
+use crate::jws::jwk::Jwk;
+use crate::jws::key::KeyError;
+use crate::jws::key::PrivateKey;
+use crate::jws::key::SigningKey;
 
 /// The header a proof travels in (RFC 9449 §4.1).
 pub const HEADER: &str = "DPoP";
@@ -61,21 +63,17 @@ pub const USE_NONCE: &str = "use_dpop_nonce";
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum DpopKeyError {
-    /// The PEM is no EC private key in PKCS#8 form.
-    #[error("the DPoP key is not an EC private key in PKCS#8 PEM")]
+    /// The PEM is no EC private key.
+    #[error("the DPoP key is not an EC private key in PEM form")]
     Key {
-        /// What the key reader reported.
+        /// What the key reader reported, when it read no key at all.
         #[source]
-        source: jsonwebtoken::errors::Error,
+        source: Option<KeyError>,
     },
     /// The key is on neither P-256 nor P-384, the curves ES256 and ES384
     /// sign with (RFC 7518 §3.4).
     #[error("the DPoP key is on neither P-256 (ES256) nor P-384 (ES384)")]
-    Curve {
-        /// What the key reader reported.
-        #[source]
-        source: jsonwebtoken::errors::Error,
-    },
+    Curve,
 }
 
 /// A proof that could not be signed.
@@ -90,7 +88,7 @@ pub enum DpopError {
     Sign {
         /// What the signer reported.
         #[source]
-        source: jsonwebtoken::errors::Error,
+        source: JwsError,
     },
     /// The signed proof is no header field value.
     #[error("the DPoP proof is not a header field value")]
@@ -114,12 +112,8 @@ pub enum Role {
 /// product's client that sends them. `Debug` shows the algorithm and the
 /// thumbprint alone.
 pub struct DpopKey {
-    /// The private half.
-    encoding: EncodingKey,
-    /// The algorithm every proof is signed with.
-    algorithm: Algorithm,
-    /// The public half every proof carries.
-    public: Jwk,
+    /// The private half, with the algorithm every proof is signed with.
+    signing: SigningKey,
     /// The RFC 7638 SHA-256 thumbprint of the public half.
     thumbprint: String,
     /// The last nonce each server sent, by role and origin.
@@ -129,7 +123,7 @@ pub struct DpopKey {
 impl std::fmt::Debug for DpopKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DpopKey")
-            .field("algorithm", &self.algorithm)
+            .field("algorithm", &self.signing.algorithm())
             .field("thumbprint", &self.thumbprint)
             .finish_non_exhaustive()
     }
@@ -155,7 +149,7 @@ struct Claims<'a> {
 }
 
 impl DpopKey {
-    /// Returns the EC private key `pem` holds in PKCS#8 form: a P-256 key
+    /// Returns the EC private key `pem` holds, PKCS#8 or SEC 1: a P-256 key
     /// signs ES256, a P-384 key ES384 (RFC 7518 §3.4).
     ///
     /// # Errors
@@ -163,21 +157,21 @@ impl DpopKey {
     /// Returns [`DpopKeyError::Key`] for a PEM that is no EC private key and
     /// [`DpopKeyError::Curve`] for a key on another curve.
     pub fn from_pem(pem: &[u8]) -> Result<Self, DpopKeyError> {
-        let encoding =
-            EncodingKey::from_ec_pem(pem).map_err(|source| DpopKeyError::Key { source })?;
-        let (algorithm, public) = match Jwk::from_encoding_key(&encoding, Algorithm::ES256) {
-            Ok(public) => (Algorithm::ES256, public),
-            Err(_not_p256) => (
-                Algorithm::ES384,
-                Jwk::from_encoding_key(&encoding, Algorithm::ES384)
-                    .map_err(|source| DpopKeyError::Curve { source })?,
-            ),
+        let private = PrivateKey::from_pem(pem).map_err(|source| match source {
+            KeyError::Curve => DpopKeyError::Curve,
+            source => DpopKeyError::Key {
+                source: Some(source),
+            },
+        })?;
+        let Some(algorithm @ (Algorithm::Es256 | Algorithm::Es384)) = private.algorithm() else {
+            return Err(DpopKeyError::Key { source: None });
         };
-        let thumbprint = thumbprint(&public);
+        let signing = SigningKey::new(private, algorithm).map_err(|source| DpopKeyError::Key {
+            source: Some(source),
+        })?;
+        let thumbprint = signing.public_jwk().thumbprint();
         Ok(Self {
-            encoding,
-            algorithm,
-            public,
+            signing,
             thumbprint,
             nonces: Mutex::new(BTreeMap::new()),
         })
@@ -186,13 +180,13 @@ impl DpopKey {
     /// Returns the algorithm every proof is signed with.
     #[must_use]
     pub const fn algorithm(&self) -> Algorithm {
-        self.algorithm
+        self.signing.algorithm()
     }
 
     /// Returns the public key every proof carries.
     #[must_use]
     pub const fn public_jwk(&self) -> &Jwk {
-        &self.public
+        self.signing.public_jwk()
     }
 
     /// Returns the key's RFC 7638 SHA-256 thumbprint, the `jkt` a token
@@ -234,10 +228,10 @@ impl DpopKey {
             ath: access_token.map(ath),
             nonce: nonce.as_deref(),
         };
-        let mut header = Header::new(self.algorithm);
+        let mut header = Header::new(self.signing.algorithm());
         header.typ = Some(String::from(PROOF_TYPE));
-        header.jwk = Some(self.public.clone());
-        jsonwebtoken::encode(&header, &claims, &self.encoding)
+        header.jwk = Some(self.signing.public_jwk().clone());
+        crate::jws::compact::encode(&header, &claims, &self.signing)
             .map_err(|source| DpopError::Sign { source })
     }
 

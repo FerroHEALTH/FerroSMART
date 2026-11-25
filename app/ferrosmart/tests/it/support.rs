@@ -690,3 +690,14 @@ pub(crate) fn listed_grants(document: &Value) -> Vec<String> {
         .map(|grant| grant.as_str().expect("a string").to_owned())
         .collect()
 }
+
+/// Returns the algorithm `algorithm` names, as ferrohealth-smart's JWS
+/// module reads it, for the keys these cases hand to it.
+pub(crate) fn jws_algorithm(
+    algorithm: jsonwebtoken::Algorithm,
+) -> ferrohealth_smart::jws::algorithm::Algorithm {
+    serde_json::to_value(algorithm)
+        .ok()
+        .and_then(|name| name.as_str().and_then(|name| name.parse().ok()))
+        .expect("an algorithm both modules name")
+}

@@ -9,6 +9,7 @@ use std::error::Error as StdError;
 
 use ferrohealth_secret::secret_url::SecretUrl;
 use ferrohealth_smart::config::AuthSection;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::metadata::ServerMetadata;
 use ferrohealth_smart::resource::ResourceServer;
@@ -17,7 +18,6 @@ use ferrohealth_smart::resource::described::Candidate;
 use ferrohealth_smart::resource::described::DescribeError;
 use ferrohealth_smart::resource::described::Metadata;
 use ferrohealth_smart::resource::described::describe;
-use jsonwebtoken::Algorithm;
 
 use crate::support::ec_key;
 use crate::support::temp_file;
@@ -234,7 +234,7 @@ fn a_section_without_the_key_names_no_issuer() -> Result<(), Box<dyn StdError>> 
 
 #[tokio::test]
 async fn a_key_set_file_issuer_has_metadata_only_once_supplied() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let set = serde_json::json!({ "keys": [key.jwk.clone()] }).to_string();
     let path = temp_file("described-jwks.json", set.as_bytes());
     let mut settings = crate::support::persons(OFFLINE, "https://fhir.example.org");
@@ -260,7 +260,7 @@ async fn a_key_set_file_issuer_has_metadata_only_once_supplied() -> Result<(), B
 #[cfg(feature = "fetch")]
 #[tokio::test]
 async fn an_issuer_read_from_the_network_has_metadata() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = crate::support::Issuer::start(&[&key]).await;
     let server = ResourceServer::discover(issuer.settings()).await?;
     let candidate = Candidate::of_server(&server, ());

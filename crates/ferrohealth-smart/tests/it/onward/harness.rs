@@ -15,16 +15,15 @@ use ferrohealth_smart::client::onward::SubjectToken;
 use ferrohealth_smart::client::onward::Target;
 use ferrohealth_smart::client::onward::exchange::Onward;
 use ferrohealth_smart::client::onward::exchange::OnwardToken;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::claims::Validation;
+use ferrohealth_smart::jws::jwk::Jwk;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::profile::Profile;
 use ferrohealth_smart::profile::ProfileKeys;
 use ferrohealth_smart::profile::onward::OnwardGrant;
 use ferrohealth_smart::resource::Settings;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::DecodingKey;
-use jsonwebtoken::Validation;
-use jsonwebtoken::jwk::Jwk;
 use serde_json::Value;
 use serde_json::json;
 use wiremock::Mock;
@@ -187,7 +186,7 @@ impl Harness {
         Self {
             flavor,
             server,
-            key: ec_key("as-2026", Algorithm::ES256),
+            key: ec_key("as-2026", Algorithm::Es256),
             client,
             clock,
             onward,
@@ -332,12 +331,18 @@ impl Endpoint {
         let assertion = param(form, "client_assertion").ok_or("client_assertion")?;
         let jwk: Jwk = serde_json::from_value(self.client_jwk.clone())
             .map_err(|_jwk| String::from("the client JWK"))?;
-        let key = DecodingKey::from_jwk(&jwk).map_err(|_key| String::from("the client key"))?;
-        let mut validation = Validation::new(Algorithm::ES384);
-        validation.set_audience(&[&self.audience]);
-        validation.set_issuer(&[self.flavor.client_id()]);
-        jsonwebtoken::decode::<Value>(assertion, &key, &validation)
-            .map(|_verified| ())
+        let jws = ferrohealth_smart::jws::compact::decode(assertion)
+            .map_err(|_unread| String::from("client_assertion"))?;
+        if jws.header().alg != Algorithm::Es384 {
+            return Err(String::from("client_assertion"));
+        }
+        let claims = jws
+            .verify_claims(&jwk)
+            .map_err(|_unverified| String::from("client_assertion"))?;
+        Validation::default()
+            .with_audiences([self.audience.as_str()])
+            .with_issuer(self.flavor.client_id())
+            .check(&claims)
             .map_err(|_unverified| String::from("client_assertion"))
     }
 }

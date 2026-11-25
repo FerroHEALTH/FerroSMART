@@ -37,7 +37,7 @@
 //! authorization requests, PKCE, §5.3.2.2) needs a user agent, and no grant
 //! of this client has one.
 
-use jsonwebtoken::Algorithm;
+use crate::jws::algorithm::Algorithm;
 use url::Url;
 
 use crate::client::ClientAuth;
@@ -48,7 +48,7 @@ use crate::client::binding::TokenBinding;
 use crate::metadata::ServerMetadata;
 
 /// The JWS algorithms FAPI 2.0 §5.4.1 admits.
-pub const ALGORITHMS: [Algorithm; 3] = [Algorithm::PS256, Algorithm::ES256, Algorithm::EdDSA];
+pub const ALGORITHMS: [Algorithm; 3] = [Algorithm::Ps256, Algorithm::Es256, Algorithm::EdDsa];
 
 /// The security profile a client grant is held to.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -172,7 +172,7 @@ pub enum Fapi2Error {
     )]
     ClientAuthentication,
     /// A key signs an algorithm the profile does not admit (§5.4.1).
-    #[error("the {role} key signs {algorithm:?}, which FAPI 2.0 §5.4.1 does not admit")]
+    #[error("the {role} key signs {algorithm}, which FAPI 2.0 §5.4.1 does not admit")]
     Algorithm {
         /// Which key.
         role: &'static str,
@@ -205,7 +205,7 @@ pub enum Fapi2Error {
         method: &'static str,
     },
     /// The token endpoint does not list the assertion's algorithm.
-    #[error("the token endpoint does not list {algorithm:?} for client assertions (RFC 8414 §2)")]
+    #[error("the token endpoint does not list {algorithm} for client assertions (RFC 8414 §2)")]
     SigningAlgorithm {
         /// The algorithm.
         algorithm: Algorithm,
@@ -222,7 +222,7 @@ pub enum Fapi2Error {
         grant_type: &'static str,
     },
     /// The server lists `DPoP` algorithms without the proof's.
-    #[error("the metadata's dpop_signing_alg_values_supported does not list {algorithm:?}")]
+    #[error("the metadata's dpop_signing_alg_values_supported does not list {algorithm}")]
     ProofAlgorithm {
         /// The algorithm.
         algorithm: Algorithm,
@@ -408,14 +408,7 @@ fn token_endpoint(
 /// `algorithm` as RFC 7518 §3.1 writes it.
 #[cfg(feature = "fetch")]
 fn names_algorithm(listed: Option<&Vec<String>>, algorithm: Algorithm) -> bool {
-    // NOTE: RFC 7518 §3.1, jsonwebtoken serializes an algorithm as its JWA name;
-    // one that does not serialize names none, and the list is read as lacking it.
-    let name = serde_json::to_value(algorithm).ok();
-    listed.is_some_and(|listed| {
-        listed
-            .iter()
-            .any(|item| name.as_ref().and_then(serde_json::Value::as_str) == Some(item))
-    })
+    listed.is_some_and(|listed| listed.iter().any(|item| item == algorithm.name()))
 }
 
 #[cfg(test)]

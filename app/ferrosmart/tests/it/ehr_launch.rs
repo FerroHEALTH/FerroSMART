@@ -105,8 +105,12 @@ impl Smart {
 
         let keys = Keys::new();
         let pem = std::fs::read(ec_key(keys.dir.path(), "ehr.pem")).expect("the key reads");
-        let ehr = AssertionKey::from_pem(&pem, Some(Algorithm::ES384), Some(String::from("ehr-1")))
-            .expect("a key");
+        let ehr = AssertionKey::from_pem(
+            &pem,
+            Some(ferrohealth_smart::jws::algorithm::Algorithm::Es384),
+            Some(String::from("ehr-1")),
+        )
+        .expect("a key");
         let set = crate::support::inline(&json!({"keys": [ehr.public_jwk()]}));
         let database = Database::create().await;
         let assertion = crate::support::upstream_assertion(keys.dir.path());

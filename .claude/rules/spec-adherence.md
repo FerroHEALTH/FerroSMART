@@ -48,8 +48,8 @@ version `docs/VERSIONS.md` pins, and the design of record,
    and 6(3) for the eIDAS level of assurance in FerroSMART's tokens, and the
    **Federation Tier with AQL specification** 1.0.1 Annex B for the Dutch
    `authorization_details`.
-6. **The docs.rs pages of the pinned crates** (`jsonwebtoken`, `argon2`,
-   `reqwest`, `secrecy`, `axum`, `tower`), the Rust book and reference, for
+6. **The docs.rs pages of the pinned crates** (`aws-lc-rs`, `jsonwebtoken`,
+   `argon2`, `reqwest`, `secrecy`, `axum`, `tower`), the Rust book and reference, for
    every question about the tools.
 
 ## Hard rules

@@ -7,10 +7,10 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::jws::algorithm::Algorithm;
 use ferrohealth_config::tls::TlsClientSection;
 use ferrohealth_config::units::Duration;
 use ferrohealth_secret::secret_url::SecretUrl;
-use jsonwebtoken::Algorithm;
 use secrecy::SecretString;
 use serde::Deserialize;
 use serde::Serialize;

@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ferrohealth_smart::client::{PresentedTls, Reach, Tls};
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::metadata::Http;
-use jsonwebtoken::Algorithm;
 
 use crate::support::ec_key;
 use crate::tls::{start, start_issuer_at};
@@ -42,7 +42,7 @@ fn address_of(issuer: &str) -> SocketAddr {
 
 #[tokio::test]
 async fn an_override_reaches_the_named_host_at_its_address() {
-    let key = ec_key("reach-resolve", Algorithm::ES256);
+    let key = ec_key("reach-resolve", Algorithm::Es256);
     let issuer = start_issuer_at(key.jwk.clone(), HOST, rustls::DEFAULT_VERSIONS).await;
     let tls = trusting(&issuer.ca_pem);
 
@@ -92,7 +92,7 @@ async fn the_client_certificate_is_presented_to_the_provider() {
 #[tokio::test]
 async fn a_provider_below_the_built_configuration_s_floor_is_refused() {
     use rustls::pki_types::pem::PemObject as _;
-    let key = ec_key("reach-floor", Algorithm::ES256);
+    let key = ec_key("reach-floor", Algorithm::Es256);
     let issuer = start_issuer_at(key.jwk.clone(), "localhost", &[&rustls::version::TLS12]).await;
     let mut roots = rustls::RootCertStore::empty();
     roots

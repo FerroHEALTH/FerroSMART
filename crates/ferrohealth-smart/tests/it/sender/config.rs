@@ -102,17 +102,31 @@ fn a_dpop_table_that_breaks_a_rule_refuses_the_start() {
                 max_age: Duration::ZERO,
             },
         ),
-        (
-            "algorithms = [\"HS256\"]",
-            ProofSettingsError::SymmetricAlgorithm {
-                algorithm: jsonwebtoken::Algorithm::HS256,
-            },
-        ),
+        ("algorithms = []", ProofSettingsError::NoAlgorithm),
     ] {
         let outcome = section(&format!("[dpop]\n{table}\n{}", issuer(""))).resolve(&[]);
         assert!(
             matches!(&outcome, Err(ConfigError::Dpop { source }) if *source == expected),
             "{table}: {outcome:?}"
+        );
+    }
+}
+
+#[test]
+fn a_dpop_table_naming_a_symmetric_algorithm_is_refused() {
+    // NOTE: RFC 9449 §4.2 and §11.6, a proof is never signed with a MAC, so no
+    // `[dpop]` table can name one.
+    for symmetric in ["HS256", "HS384", "HS512", "none"] {
+        let outcome = toml::from_str::<AuthSection>(&format!(
+            "[dpop]\nalgorithms = [\"{symmetric}\"]\n{}",
+            issuer("")
+        ));
+        let error = outcome.expect_err("no algorithm has the name");
+        assert!(
+            error
+                .to_string()
+                .contains("signature algorithm is not one of"),
+            "{symmetric}: {error}"
         );
     }
 }

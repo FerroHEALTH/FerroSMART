@@ -15,8 +15,8 @@ use ferrohealth_smart::config::BasicSection;
 use ferrohealth_smart::config::BasicUser;
 use ferrohealth_smart::config::ConfigError;
 use ferrohealth_smart::config::IssuerEntry;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::kind::IssuerKind;
-use jsonwebtoken::Algorithm;
 use secrecy::SecretString;
 
 use crate::support::Issuer;
@@ -26,7 +26,7 @@ use crate::support::server;
 
 #[tokio::test]
 async fn a_token_carries_the_roles_of_the_default_claims() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     let mut claims = issuer.claims("system/Condition.r");
@@ -42,7 +42,7 @@ async fn a_token_carries_the_roles_of_the_default_claims() -> Result<(), Box<dyn
 
 #[tokio::test]
 async fn configured_paths_replace_the_default_claims() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let mut settings = issuer.settings();
     settings.role_claims = vec![String::from("realm_access.roles")];
@@ -57,7 +57,7 @@ async fn configured_paths_replace_the_default_claims() -> Result<(), Box<dyn Std
 
 #[tokio::test]
 async fn a_token_without_role_claims_holds_no_role() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     let caller = server

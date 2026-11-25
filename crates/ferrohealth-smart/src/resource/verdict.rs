@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 
-use jsonwebtoken::Algorithm;
+use crate::jws::algorithm::Algorithm;
 use serde_json::Map;
 use serde_json::Value;
 
@@ -222,7 +222,7 @@ pub(super) fn digest(token: &str) -> [u8; 32] {
 
 #[cfg(test)]
 mod tests {
-    use jsonwebtoken::Algorithm;
+    use crate::jws::algorithm::Algorithm;
     use serde_json::Map;
     use serde_json::json;
 
@@ -238,7 +238,7 @@ mod tests {
         claims.insert(String::from("pad"), json!("x".repeat(padding)));
         Verified {
             claims,
-            alg: Algorithm::ES256,
+            alg: Algorithm::Es256,
             kid: Some(String::from("k1")),
             generation,
         }

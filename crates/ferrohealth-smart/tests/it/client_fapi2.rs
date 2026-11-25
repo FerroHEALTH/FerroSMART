@@ -26,7 +26,7 @@ use ferrohealth_smart::client::keys::KeyRing;
 use ferrohealth_smart::client::keys::KeyRingError;
 use ferrohealth_smart::config::ConfigError;
 use ferrohealth_smart::config::credentials::OauthSection;
-use jsonwebtoken::Algorithm;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use secrecy::SecretString;
 use serde_json::Value;
 use serde_json::json;
@@ -64,9 +64,9 @@ fn fapi2(issuer: &str) -> ClientCredentials {
     let mut grant = ClientCredentials::with_private_key_jwt(
         Endpoint::Issuer(issuer.to_owned()),
         String::from("gateway"),
-        assertion_key("client", Algorithm::ES256),
+        assertion_key("client", Algorithm::Es256),
     )
-    .with_dpop(dpop_key(Algorithm::ES256));
+    .with_dpop(dpop_key(Algorithm::Es256));
     grant.scope = Some(String::from("system/Patient.r"));
     grant.profile = SecurityProfile::Fapi2(Fapi2::new());
     grant.timeout = Duration::from_secs(5);
@@ -125,9 +125,9 @@ fn claims(token: &str) -> Result<Value, Box<dyn StdError>> {
 
 #[test]
 fn the_ring_publishes_the_current_previous_and_next_keys_and_signs_with_one() -> TestResult {
-    let current = assertion_key("current", Algorithm::ES256);
-    let previous = assertion_key("previous", Algorithm::ES384);
-    let next = assertion_key("next", Algorithm::ES256);
+    let current = assertion_key("current", Algorithm::Es256);
+    let previous = assertion_key("previous", Algorithm::Es384);
+    let next = assertion_key("next", Algorithm::Es256);
     let ring = KeyRing::new(current.clone())
         .with_previous_for(previous.clone(), Duration::from_secs(60))?
         .with_next(next.clone())?;
@@ -188,23 +188,23 @@ fn a_fapi2_grant_that_breaks_a_build_rule_is_refused() -> TestResult {
         String::from("gateway"),
         SecretString::from("synthetic-secret"),
     )
-    .with_dpop(dpop_key(Algorithm::ES256));
+    .with_dpop(dpop_key(Algorithm::Es256));
     grant.scope = Some(String::from("s"));
     grant.profile = SecurityProfile::Fapi2(Fapi2::new());
     assert_eq!(Some(Fapi2Error::ClientAuthentication), refused(&grant));
     let mut grant = fapi2(issuer);
-    grant.assertion_keys = Some(Arc::new(KeyRing::new(assertion_key("c", Algorithm::ES384))));
+    grant.assertion_keys = Some(Arc::new(KeyRing::new(assertion_key("c", Algorithm::Es384))));
     assert!(matches!(
         refused(&grant),
         Some(Fapi2Error::Algorithm {
             role: "assertion",
-            algorithm: Algorithm::ES384
+            algorithm: Algorithm::Es384
         })
     ));
     let mut grant = fapi2(issuer);
     grant.assertion_keys = Some(Arc::new(
-        KeyRing::new(assertion_key("c", Algorithm::ES256))
-            .with_previous_until_removed(assertion_key("p", Algorithm::ES384))?,
+        KeyRing::new(assertion_key("c", Algorithm::Es256))
+            .with_previous_until_removed(assertion_key("p", Algorithm::Es384))?,
     ));
     assert!(matches!(
         refused(&grant),
@@ -213,7 +213,7 @@ fn a_fapi2_grant_that_breaks_a_build_rule_is_refused() -> TestResult {
             ..
         })
     ));
-    let grant = fapi2(issuer).with_dpop(dpop_key(Algorithm::ES384));
+    let grant = fapi2(issuer).with_dpop(dpop_key(Algorithm::Es384));
     assert!(matches!(
         refused(&grant),
         Some(Fapi2Error::Algorithm { role: "DPoP", .. })
@@ -281,7 +281,7 @@ async fn a_fapi2_grant_discovers_its_endpoint_and_sends_the_issuer_as_aud() -> T
     // NOTE: RFC 10070 §4, a client authentication JWT is explicitly typed.
     assert_eq!(
         Some(String::from("client-authentication+jwt")),
-        jsonwebtoken::decode_header(&assertion)?.typ
+        crate::support::header(&assertion).typ
     );
     assert!(request.headers.contains_key("dpop"));
     Ok(())
@@ -313,7 +313,7 @@ async fn metadata_that_does_not_admit_the_fapi2_grant_is_refused_before_a_token_
                 document["token_endpoint_auth_signing_alg_values_supported"] = json!(["PS256"]);
             },
             Fapi2Error::SigningAlgorithm {
-                algorithm: Algorithm::ES256,
+                algorithm: Algorithm::Es256,
             },
         ),
         (
@@ -329,7 +329,7 @@ async fn metadata_that_does_not_admit_the_fapi2_grant_is_refused_before_a_token_
                 document["dpop_signing_alg_values_supported"] = json!(["PS256"]);
             },
             Fapi2Error::ProofAlgorithm {
-                algorithm: Algorithm::ES256,
+                algorithm: Algorithm::Es256,
             },
         ),
         (
@@ -459,10 +459,10 @@ async fn a_mutual_tls_alias_on_an_unnamed_host_is_refused() -> TestResult {
 
 #[test]
 fn the_oauth_table_names_a_fapi2_grant_its_key_ring_and_its_details() -> TestResult {
-    let current = temp_file("current.pem", &ec_key("c", Algorithm::ES256).pem);
-    let previous = temp_file("previous.pem", &ec_key("p", Algorithm::ES256).pem);
-    let next = temp_file("next.pem", &ec_key("n", Algorithm::ES256).pem);
-    let dpop = temp_file("dpop.pem", &ec_key("d", Algorithm::ES256).pem);
+    let current = temp_file("current.pem", &ec_key("c", Algorithm::Es256).pem);
+    let previous = temp_file("previous.pem", &ec_key("p", Algorithm::Es256).pem);
+    let next = temp_file("next.pem", &ec_key("n", Algorithm::Es256).pem);
+    let dpop = temp_file("dpop.pem", &ec_key("d", Algorithm::Es256).pem);
     let table = format!(
         r#"issuer = "https://as.example.org"
 client_id = "gateway"
@@ -530,10 +530,10 @@ fn a_mutual_tls_fapi2_grant_holds_its_actor_key_to_the_profile_s_algorithms() ->
             actor.display().to_string(),
         ))
     };
-    let grant = table(Algorithm::ES256, "ES256")?.resolve_with_tls(&crate::tls::PemTls)?;
+    let grant = table(Algorithm::Es256, "ES256")?.resolve_with_tls(&crate::tls::PemTls)?;
     assert!(grant.assertion_keys.is_some(), "the actor key is read");
     assert!(matches!(
-        table(Algorithm::ES384, "ES384")?.resolve_with_tls(&crate::tls::PemTls),
+        table(Algorithm::Es384, "ES384")?.resolve_with_tls(&crate::tls::PemTls),
         Err(ConfigError::Grant { source }) if matches!(
             *source,
             TokenError::Fapi2 { source: Fapi2Error::Algorithm { role: "assertion", .. } }

@@ -8,6 +8,7 @@ use std::error::Error as StdError;
 use std::future::Future;
 use std::sync::Arc;
 
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::resource::Caller;
 use ferrohealth_smart::resource::Rejection;
 use ferrohealth_smart::sender::Check;
@@ -18,7 +19,6 @@ use ferrohealth_smart::sender::proof::ProofSettings;
 use ferrohealth_smart::sender::replay::MemoryReplayStore;
 use http::HeaderMap;
 use http::Method;
-use jsonwebtoken::Algorithm;
 use serde_json::Value;
 use serde_json::json;
 
@@ -229,7 +229,7 @@ async fn a_proof_of_another_type_is_refused() {
             &header,
             &case.claims(),
             &case_encoding(&case),
-            Algorithm::ES256,
+            Algorithm::Es256,
         );
         assert_refused(
             &case.send(&check(), &proofs(&[&jwt])).await,
@@ -243,7 +243,7 @@ async fn a_proof_of_another_type_is_refused() {
         &header,
         &case.claims(),
         &case_encoding(&case),
-        Algorithm::ES256,
+        Algorithm::Es256,
     );
     assert!(
         case.send(&check(), &proofs(&[&jwt])).await.is_ok(),
@@ -252,7 +252,7 @@ async fn a_proof_of_another_type_is_refused() {
 }
 
 /// Returns the private half of the case's key.
-fn case_encoding(case: &Case) -> jsonwebtoken::EncodingKey {
+fn case_encoding(case: &Case) -> ferrohealth_smart::jws::key::SigningKey {
     case.key.encoding.clone()
 }
 
@@ -266,7 +266,7 @@ async fn a_proof_whose_jwk_carries_a_private_key_is_refused() {
         &header,
         &case.claims(),
         &case_encoding(&case),
-        Algorithm::ES256,
+        Algorithm::Es256,
     );
     assert_refused(
         &case.send(&check(), &proofs(&[&jwt])).await,
@@ -281,7 +281,7 @@ async fn a_proof_whose_jwk_carries_a_private_key_is_refused() {
         &header,
         &case.claims(),
         &case_encoding(&case),
-        Algorithm::ES256,
+        Algorithm::Es256,
     );
     assert_refused(
         &case.send(&check(), &proofs(&[&jwt])).await,
@@ -302,7 +302,7 @@ async fn a_symmetric_or_absent_algorithm_is_refused() {
             &header,
             &case.claims(),
             &case_encoding(&case),
-            Algorithm::ES256,
+            Algorithm::Es256,
         );
         assert_refused(
             &case.send(&check(), &proofs(&[&jwt])).await,
@@ -322,7 +322,7 @@ async fn a_proof_signed_by_another_key_is_refused() {
         &proof_header(&case.key),
         &case.claims(),
         &other.encoding,
-        Algorithm::ES256,
+        Algorithm::Es256,
     );
     assert_refused(
         &case.send(&check(), &proofs(&[&jwt])).await,
@@ -469,5 +469,53 @@ async fn a_proof_at_the_token_endpoint_carries_no_token_hash() -> Result<(), Box
             .is_err(),
         "§4.3 check 9, the htu names this endpoint"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_ml_dsa_proof_is_admitted_when_the_settings_name_its_algorithm()
+-> Result<(), Box<dyn StdError>> {
+    // NOTE: RFC 9449 §4.3 check 5 and RFC 9964 §5, an `AKP` key in the `jwk`
+    // header signs the proof under the algorithm local policy accepts.
+    for algorithm in [Algorithm::MlDsa44, Algorithm::MlDsa65, Algorithm::MlDsa87] {
+        let bound = Bound::start().await;
+        let key = crate::support::ml_dsa_key("dpop", algorithm);
+        let public = key.signing.public_jwk();
+        let token = bound.token(Some(json!({ "jkt": public.thumbprint() })));
+        let header =
+            json!({ "typ": "dpop+jwt", "alg": algorithm.name(), "jwk": public.to_value() });
+        let claims = proof_claims("GET", &format!("{EXTERNAL}{PATH}"), &token);
+        let jwt = signed(&header, &claims, &key.signing, algorithm);
+        let server = bound.server(SenderConstraint::None).await;
+        let send = |check: ProofCheck| {
+            let headers = proofs(&[&jwt]);
+            let server = Arc::clone(&server);
+            let token = token.clone();
+            async move {
+                check
+                    .authenticate(
+                        server.as_ref(),
+                        &Presented {
+                            method: &Method::GET,
+                            path: PATH,
+                            headers: &headers,
+                            token: &token,
+                            certificate: None,
+                        },
+                    )
+                    .await
+            }
+        };
+        assert_refused(
+            &send(check()).await,
+            Check::ProofAlgorithm,
+            algorithm.name(),
+        );
+        let mut settings = ProofSettings::new(EXTERNAL.parse()?);
+        settings.algorithms.push(algorithm);
+        let accepting = ProofCheck::new(settings, Arc::new(MemoryReplayStore::new()))?;
+        let caller = send(accepting).await?;
+        assert_eq!("synthetic-client-sub", caller.subject(), "{algorithm}");
+    }
     Ok(())
 }

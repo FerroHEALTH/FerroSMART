@@ -18,11 +18,11 @@ use ferrohealth_smart::federation::FederationSection;
 use ferrohealth_smart::federation::Field;
 use ferrohealth_smart::federation::Mapping;
 use ferrohealth_smart::federation::Source;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::kind::Unclassified;
 use ferrohealth_smart::resource::Settings;
-use jsonwebtoken::Algorithm;
 use serde_json::Value;
 use serde_json::json;
 use wiremock::MockServer;
@@ -111,7 +111,7 @@ impl Case {
         .expect("the client builds");
         Self {
             server,
-            key: ec_key("fed", Algorithm::ES256),
+            key: ec_key("fed", Algorithm::Es256),
             onward,
         }
     }

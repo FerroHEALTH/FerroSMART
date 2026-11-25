@@ -20,6 +20,8 @@ use ferrohealth_smart::federation::FederationSection;
 use ferrohealth_smart::federation::Field;
 use ferrohealth_smart::federation::Mapping;
 use ferrohealth_smart::federation::Source;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::compact::Header;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::kind::Unclassified;
@@ -28,8 +30,6 @@ use ferrohealth_smart::resource::Rejection;
 use ferrohealth_smart::resource::ResourceError;
 use ferrohealth_smart::resource::ResourceServer;
 use ferrohealth_smart::resource::Settings;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::Header;
 use serde_json::Value;
 use serde_json::json;
 
@@ -127,7 +127,7 @@ pub(crate) struct Harness {
 impl Harness {
     pub(crate) fn new() -> Self {
         Self {
-            key: ec_key("fed", Algorithm::ES256),
+            key: ec_key("fed", Algorithm::Es256),
         }
     }
 
@@ -153,7 +153,7 @@ impl Harness {
         let server = ResourceServer::discover(self.settings(section))
             .await
             .expect("the key set file reads");
-        let mut header = Header::new(Algorithm::ES256);
+        let mut header = Header::new(Algorithm::Es256);
         header.kid = Some(String::from("fed"));
         header.typ = Some(String::from("IUA-JWT"));
         server

@@ -11,6 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::compact::Header;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::metadata::DiscoveryError;
 use ferrohealth_smart::metadata::ServerMetadata;
@@ -30,9 +32,6 @@ use ferrohealth_smart::resource::configuration::PermissionCapability;
 use ferrohealth_smart::resource::configuration::SmartOptions;
 use ferrohealth_smart::scope::Permission;
 use http::StatusCode;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::EncodingKey;
-use jsonwebtoken::Header;
 
 use crate::support::AUDIENCE;
 use crate::support::CLIENT;
@@ -68,7 +67,7 @@ fn assert_invalid(outcome: &Result<Caller, Rejection>, case: &str) {
 
 #[tokio::test]
 async fn a_valid_token_names_its_caller_and_claims() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     let mut claims = issuer.claims("openid system/Condition.rs __operator");
@@ -101,12 +100,12 @@ async fn a_valid_token_names_its_caller_and_claims() -> Result<(), Box<dyn StdEr
 #[tokio::test]
 async fn every_asymmetric_algorithm_of_the_default_set_verifies() -> Result<(), Box<dyn StdError>> {
     let keys: Vec<SigningKey> = vec![
-        rsa_key("rs256", Algorithm::RS256),
-        rsa_key("rs384", Algorithm::RS384),
-        rsa_key("ps256", Algorithm::PS256),
-        rsa_key("ps384", Algorithm::PS384),
-        ec_key("es256", Algorithm::ES256),
-        ec_key("es384", Algorithm::ES384),
+        rsa_key("rs256", Algorithm::Rs256),
+        rsa_key("rs384", Algorithm::Rs384),
+        rsa_key("ps256", Algorithm::Ps256),
+        rsa_key("ps384", Algorithm::Ps384),
+        ec_key("es256", Algorithm::Es256),
+        ec_key("es384", Algorithm::Es384),
     ];
     let refs: Vec<&SigningKey> = keys.iter().collect();
     let issuer = Issuer::start(&refs).await;
@@ -131,7 +130,7 @@ async fn eddsa_verifies_only_when_configured() -> Result<(), Box<dyn StdError>> 
         "EdDSA outside the default set",
     );
     let mut settings = issuer.settings();
-    settings.algorithms.push(Algorithm::EdDSA);
+    settings.algorithms.push(Algorithm::EdDsa);
     let configured = server(settings).await;
     assert!(configured.authenticate(&token).await.is_ok());
     Ok(())
@@ -139,7 +138,7 @@ async fn eddsa_verifies_only_when_configured() -> Result<(), Box<dyn StdError>> 
 
 #[tokio::test]
 async fn every_invalid_claim_set_is_the_same_rejection() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     let now = now();
@@ -192,7 +191,7 @@ async fn every_invalid_claim_set_is_the_same_rejection() -> Result<(), Box<dyn S
 
 #[tokio::test]
 async fn the_audience_list_admits_any_of_its_members() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let mut settings = issuer.settings();
     settings
@@ -218,7 +217,7 @@ async fn the_audience_list_admits_any_of_its_members() -> Result<(), Box<dyn Std
 async fn the_clock_skew_admits_a_token_just_expired() -> Result<(), Box<dyn StdError>> {
     // NOTE: RFC 7519 §4.1.4, "implementers MAY provide for some small leeway,
     // usually no more than a few minutes, to account for clock skew".
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let mut settings = issuer.settings();
     settings.clock_skew = Duration::from_secs(120);
@@ -238,8 +237,8 @@ async fn the_clock_skew_admits_a_token_just_expired() -> Result<(), Box<dyn StdE
 #[tokio::test]
 async fn a_token_signed_by_another_key_under_a_known_kid_is_refused()
 -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
-    let forger = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
+    let forger = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     let token = mint(&forger, &issuer.claims("system/Condition.r"));
@@ -249,10 +248,10 @@ async fn a_token_signed_by_another_key_under_a_known_kid_is_refused()
 
 #[tokio::test]
 async fn an_algorithm_outside_the_configured_set_is_refused() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k384", Algorithm::ES384);
+    let key = ec_key("k384", Algorithm::Es384);
     let issuer = Issuer::start(&[&key]).await;
     let mut settings = issuer.settings();
-    settings.algorithms = vec![Algorithm::ES256];
+    settings.algorithms = vec![Algorithm::Es256];
     let server = server(settings).await;
     let token = mint(&key, &issuer.claims("system/Condition.r"));
     assert_invalid(&server.authenticate(&token).await, "ES384 outside the set");
@@ -263,40 +262,34 @@ async fn an_algorithm_outside_the_configured_set_is_refused() -> Result<(), Box<
 async fn a_symmetric_token_is_refused() -> Result<(), Box<dyn StdError>> {
     // NOTE: RFC 8725 §3.1, an HMAC over a published key is the algorithm
     // confusion a verifier closes by refusing every symmetric algorithm.
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
-    let mut header = Header::new(Algorithm::HS256);
-    header.kid = Some(String::from("k1"));
-    header.typ = Some(String::from("at+jwt"));
-    let token = jsonwebtoken::encode(
-        &header,
-        &issuer.claims("system/Condition.r"),
-        &EncodingKey::from_secret(b"synthetic-shared-secret"),
-    )?;
+    let encode = |bytes: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    let header = serde_json::json!({ "alg": "HS256", "typ": "at+jwt", "kid": "k1" });
+    let input = format!(
+        "{}.{}",
+        encode(header.to_string().as_bytes()),
+        encode(issuer.claims("system/Condition.r").to_string().as_bytes())
+    );
+    let secret =
+        aws_lc_rs::hmac::Key::new(aws_lc_rs::hmac::HMAC_SHA256, b"synthetic-shared-secret");
+    let tag = aws_lc_rs::hmac::sign(&secret, input.as_bytes());
+    let token = format!("{input}.{}", encode(tag.as_ref()));
     assert_invalid(&server.authenticate(&token).await, "HS256");
     Ok(())
 }
 
 #[tokio::test]
 async fn settings_that_break_a_rule_refuse_the_start() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
-    let mut hmac = issuer.settings();
-    hmac.algorithms.push(Algorithm::HS256);
-    let error = ResourceServer::discover(hmac)
-        .await
-        .err()
-        .ok_or("RFC 8725 §3.1 refuses HS256")?;
-    assert!(
-        matches!(
-            error,
-            ResourceError::SymmetricAlgorithm {
-                algorithm: Algorithm::HS256
-            }
-        ),
-        "{error:?}"
-    );
+    for symmetric in ["HS256", "HS384", "HS512"] {
+        assert!(
+            serde_json::from_value::<Algorithm>(serde_json::json!(symmetric)).is_err(),
+            "RFC 8725 §3.1 refuses {symmetric}: no setting can name it"
+        );
+    }
     let mut none = issuer.settings();
     none.algorithms.clear();
     assert!(matches!(
@@ -322,7 +315,7 @@ async fn settings_that_break_a_rule_refuse_the_start() -> Result<(), Box<dyn Std
 async fn an_unsigned_token_is_refused() -> Result<(), Box<dyn StdError>> {
     // NOTE: RFC 8725 §3.2, the `none` algorithm is refused however the
     // token is otherwise well-formed.
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     let encode = |value: &serde_json::Value| {
@@ -340,7 +333,7 @@ async fn an_unsigned_token_is_refused() -> Result<(), Box<dyn StdError>> {
 
 #[tokio::test]
 async fn a_token_that_is_no_jws_is_refused() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     assert_invalid(&server.authenticate("an-opaque-token").await, "opaque");
@@ -354,11 +347,11 @@ async fn a_token_that_is_no_jws_is_refused() -> Result<(), Box<dyn StdError>> {
 
 #[tokio::test]
 async fn the_typ_rule_of_the_profile_token_types() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let claims = issuer.claims("system/Condition.r");
     let with_typ = |typ: Option<&str>| {
-        let mut header = Header::new(Algorithm::ES256);
+        let mut header = Header::new(Algorithm::Es256);
         header.kid = Some(String::from("k1"));
         header.typ = typ.map(str::to_owned);
         mint_with(&key, &header, &claims)
@@ -402,7 +395,7 @@ async fn the_typ_rule_of_the_profile_token_types() -> Result<(), Box<dyn StdErro
 
 #[tokio::test]
 async fn the_required_claims_are_the_profiles() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let mut claims = issuer.claims("system/Condition.r");
     let object = claims.as_object_mut().ok_or("claims are an object")?;
@@ -424,8 +417,8 @@ async fn the_required_claims_are_the_profiles() -> Result<(), Box<dyn StdError>>
 
 #[tokio::test]
 async fn an_unknown_kid_reads_the_key_set_once_more_and_passes() -> Result<(), Box<dyn StdError>> {
-    let old = ec_key("old", Algorithm::ES256);
-    let rotated = ec_key("rotated", Algorithm::ES256);
+    let old = ec_key("old", Algorithm::Es256);
+    let rotated = ec_key("rotated", Algorithm::Es256);
     let issuer = Issuer::bare().await;
     issuer
         .mount_metadata("/.well-known/oauth-authorization-server")
@@ -446,8 +439,8 @@ async fn an_unknown_kid_reads_the_key_set_once_more_and_passes() -> Result<(), B
 #[tokio::test]
 async fn an_unknown_kid_within_the_interval_reads_nothing_and_is_refused()
 -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
-    let stranger = ec_key("stranger", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
+    let stranger = ec_key("stranger", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let mut settings = issuer.settings();
     settings.jwks_refresh_interval = Duration::from_secs(3600);
@@ -462,8 +455,8 @@ async fn an_unknown_kid_within_the_interval_reads_nothing_and_is_refused()
 
 #[tokio::test]
 async fn a_held_set_older_than_its_max_age_is_read_again() -> Result<(), Box<dyn StdError>> {
-    let old = ec_key("old", Algorithm::ES256);
-    let withdrawn = ec_key("withdrawn", Algorithm::ES256);
+    let old = ec_key("old", Algorithm::Es256);
+    let withdrawn = ec_key("withdrawn", Algorithm::Es256);
     let issuer = Issuer::bare().await;
     issuer
         .mount_metadata("/.well-known/oauth-authorization-server")
@@ -492,8 +485,8 @@ async fn a_held_set_older_than_its_max_age_is_read_again() -> Result<(), Box<dyn
 #[tokio::test]
 async fn a_key_set_that_cannot_be_read_again_is_unavailable_for_an_unknown_key()
 -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
-    let stranger = ec_key("stranger", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
+    let stranger = ec_key("stranger", Algorithm::Es256);
     let issuer = Issuer::bare().await;
     issuer
         .mount_metadata("/.well-known/oauth-authorization-server")
@@ -519,14 +512,14 @@ async fn a_key_set_that_cannot_be_read_again_is_unavailable_for_an_unknown_key()
 async fn a_token_without_a_kid_verifies_with_the_sets_one_key() -> Result<(), Box<dyn StdError>> {
     // NOTE: RFC 7515 §4.1.4 makes `kid` optional, so the one key of its
     // family verifies it, and none does when the set holds several.
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
-    let mut header = Header::new(Algorithm::ES256);
+    let mut header = Header::new(Algorithm::Es256);
     header.typ = Some(String::from("at+jwt"));
     let token = mint_with(&key, &header, &issuer.claims("system/Condition.r"));
     assert!(server.authenticate(&token).await.is_ok());
-    let second = ec_key("k2", Algorithm::ES256);
+    let second = ec_key("k2", Algorithm::Es256);
     let two = Issuer::start(&[&key, &second]).await;
     let server = crate::support::server(two.settings()).await;
     let token = mint_with(&key, &header, &two.claims("system/Condition.r"));
@@ -536,10 +529,10 @@ async fn a_token_without_a_kid_verifies_with_the_sets_one_key() -> Result<(), Bo
 
 #[tokio::test]
 async fn a_key_of_another_use_or_without_verify_is_passed_over() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
-    let mut encryption = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
+    let mut encryption = ec_key("k1", Algorithm::Es256);
     encryption.jwk["use"] = serde_json::json!("enc");
-    let mut signing_only = ec_key("k1", Algorithm::ES256);
+    let mut signing_only = ec_key("k1", Algorithm::Es256);
     signing_only.jwk["use"] = serde_json::json!("sig");
     signing_only.jwk["key_ops"] = serde_json::json!(["sign"]);
     for (name, published) in [
@@ -564,7 +557,7 @@ async fn a_key_of_another_use_or_without_verify_is_passed_over() -> Result<(), B
 
 #[tokio::test]
 async fn a_key_set_file_replaces_discovery() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::bare().await;
     let set = serde_json::json!({ "keys": [key.jwk.clone()] }).to_string();
     let path = temp_file("jwks.json", set.as_bytes());
@@ -595,7 +588,7 @@ async fn a_key_set_file_replaces_discovery() -> Result<(), Box<dyn StdError>> {
 
 #[tokio::test]
 async fn discovery_falls_back_to_the_openid_connect_location() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::bare().await;
     issuer
         .mount_metadata("/.well-known/openid-configuration")
@@ -688,7 +681,7 @@ async fn metadata_naming_another_issuer_no_key_set_or_an_insecure_one_refuses_th
 
 #[tokio::test]
 async fn a_scope_claim_under_another_name_grants_nothing() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let mut claims = issuer.claims("");
     claims.as_object_mut().ok_or("an object")?.remove("scope");
@@ -713,7 +706,7 @@ async fn a_scope_claim_under_another_name_grants_nothing() -> Result<(), Box<dyn
 #[tokio::test]
 async fn a_system_token_without_a_clinical_scope_reaches_nothing() -> Result<(), Box<dyn StdError>>
 {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     // NOTE: RFC 9068 §5, a client credentials token whose `sub` is its
@@ -728,7 +721,7 @@ async fn a_system_token_without_a_clinical_scope_reaches_nothing() -> Result<(),
 
 #[tokio::test]
 async fn a_resource_table_narrows_the_clinical_scopes() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = ResourceServer::discover(issuer.settings())
         .await?
@@ -750,8 +743,8 @@ async fn a_resource_table_narrows_the_clinical_scopes() -> Result<(), Box<dyn St
 
 #[tokio::test]
 async fn an_issuer_set_routes_each_token_to_its_issuer() -> Result<(), Box<dyn StdError>> {
-    let one_key = ec_key("one", Algorithm::ES256);
-    let two_key = ec_key("two", Algorithm::ES256);
+    let one_key = ec_key("one", Algorithm::Es256);
+    let two_key = ec_key("two", Algorithm::Es256);
     let one = Issuer::start(&[&one_key]).await;
     let two = Issuer::start(&[&two_key]).await;
     let set: Arc<dyn Verifier> = Arc::new(
@@ -784,7 +777,7 @@ async fn an_issuer_set_routes_each_token_to_its_issuer() -> Result<(), Box<dyn S
 
 #[tokio::test]
 async fn the_smart_configuration_republishes_the_issuer() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     let options = SmartOptions {
@@ -846,7 +839,7 @@ async fn the_smart_configuration_republishes_the_issuer() -> Result<(), Box<dyn 
 // principal, which an empty or whitespace-only value does not.
 #[tokio::test]
 async fn a_blank_sub_is_refused() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     for blank in ["", " ", "\t \n"] {
@@ -870,7 +863,7 @@ async fn a_blank_sub_is_refused() -> Result<(), Box<dyn StdError>> {
 
 #[tokio::test]
 async fn metadata_read_from_the_issuer_is_never_replaced() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let fetched = ResourceServer::discover(issuer.settings()).await?;
     let supplied = ServerMetadata {
@@ -890,7 +883,7 @@ fn assert_send<T: Send>(_future: &T) {}
 
 #[tokio::test]
 async fn discovery_and_a_lazy_check_are_send_futures() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let discover = ResourceServer::discover(issuer.settings());
     assert_send(&discover);
@@ -906,7 +899,7 @@ async fn discovery_and_a_lazy_check_are_send_futures() -> Result<(), Box<dyn Std
 
 #[tokio::test]
 async fn a_lazy_server_reads_the_issuer_on_its_first_token() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let lazy = ResourceServer::lazy(issuer.settings())?;
     assert_eq!(
@@ -934,7 +927,7 @@ async fn a_lazy_server_reads_the_issuer_on_its_first_token() -> Result<(), Box<d
 #[tokio::test]
 async fn an_unreachable_issuer_answers_503_and_is_not_asked_again_inside_the_interval()
 -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::bare().await;
     let mut settings = issuer.settings();
     settings.jwks_refresh_interval = Duration::from_secs(60);
@@ -964,7 +957,7 @@ async fn an_unreachable_issuer_answers_503_and_is_not_asked_again_inside_the_int
 
 #[tokio::test]
 async fn a_lazy_server_recovers_once_the_issuer_answers() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::bare().await;
     let lazy = ResourceServer::lazy(issuer.settings())?;
     let token = mint(&key, &issuer.claims("system/Condition.rs"));
@@ -986,7 +979,7 @@ async fn a_lazy_server_recovers_once_the_issuer_answers() -> Result<(), Box<dyn 
 #[tokio::test]
 async fn a_late_issuer_is_read_in_the_background_and_the_set_turns_ready()
 -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::bare().await;
     let lazy = Arc::new(ResourceServer::lazy(issuer.settings())?);
     let set = IssuerSet::new().with_lazy(Arc::clone(&lazy));
@@ -1042,10 +1035,10 @@ fn a_lazy_server_checks_its_settings_at_once() {
         Err(ResourceError::Discovery(DiscoveryError::Insecure { .. }))
     ));
     settings.issuer = String::from("https://as.example.org");
-    settings.algorithms = vec![Algorithm::HS256];
+    settings.algorithms = Vec::new();
     assert!(matches!(
         ResourceServer::lazy(settings),
-        Err(ResourceError::SymmetricAlgorithm { .. })
+        Err(ResourceError::NoAlgorithm)
     ));
 }
 
@@ -1059,9 +1052,9 @@ struct Policy {
 #[tokio::test]
 async fn an_issuer_set_routes_to_a_lazy_server_and_carries_its_extension()
 -> Result<(), Box<dyn StdError>> {
-    let ready_key = ec_key("ready", Algorithm::ES256);
+    let ready_key = ec_key("ready", Algorithm::Es256);
     let ready_issuer = Issuer::start(&[&ready_key]).await;
-    let lazy_key = ec_key("lazy", Algorithm::ES256);
+    let lazy_key = ec_key("lazy", Algorithm::Es256);
     let lazy_issuer = Issuer::start(&[&lazy_key]).await;
     let ready = ResourceServer::discover(ready_issuer.settings())
         .await?
@@ -1099,7 +1092,7 @@ async fn an_issuer_set_routes_to_a_lazy_server_and_carries_its_extension()
 #[tokio::test]
 async fn a_bearer_token_presented_twice_within_its_life_is_accepted_both_times()
 -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     let token = mint(&key, &issuer.claims("user/Observation.rs"));

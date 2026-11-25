@@ -5,7 +5,7 @@
 //! `[auth.issuer.introspection]` table, and the rules one table is checked
 //! against when `[auth]` resolves.
 
-use jsonwebtoken::Algorithm;
+use crate::jws::algorithm::Algorithm;
 
 use crate::config::AuthMode;
 use crate::config::ConfigError;
@@ -23,12 +23,12 @@ impl Default for IssuerEntry {
             kind: None,
             audience: Vec::new(),
             algorithms: vec![
-                Algorithm::RS256,
-                Algorithm::RS384,
-                Algorithm::PS256,
-                Algorithm::PS384,
-                Algorithm::ES256,
-                Algorithm::ES384,
+                Algorithm::Rs256,
+                Algorithm::Rs384,
+                Algorithm::Ps256,
+                Algorithm::Ps384,
+                Algorithm::Es256,
+                Algorithm::Es384,
             ],
             clock_skew: Duration::from_secs(60),
             jwks_max_age: Duration::from_mins(10),

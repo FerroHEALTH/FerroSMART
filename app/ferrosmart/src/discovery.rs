@@ -74,7 +74,7 @@ pub fn metadata(settings: &Settings, login: bool) -> ServerMetadata {
             ferrohealth_smart::sender::proof::ProofSettings::new(settings.issuer_url.clone())
                 .algorithms
                 .iter()
-                .map(|algorithm| format!("{algorithm:?}"))
+                .map(|algorithm| algorithm.name().to_owned())
                 .collect(),
         ),
         // NOTE: RFC 8705 §3.3, certificate-bound tokens need a listener that asks the

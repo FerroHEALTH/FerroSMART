@@ -21,19 +21,17 @@ use ferrohealth_smart::client::TokenError;
 use ferrohealth_smart::client::assertion::ASSERTION_TYPE;
 use ferrohealth_smart::client::assertion::AssertionKey;
 use ferrohealth_smart::client::assertion::jwk_set;
-use ferrohealth_smart::client::assertion::thumbprint;
 use ferrohealth_smart::client::cache::Clock;
 use ferrohealth_smart::client::cache::Token;
 use ferrohealth_smart::client::cache::TokenSource;
 use ferrohealth_smart::config::ConfigError;
 use ferrohealth_smart::config::credentials::OauthSection;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::claims::Validation;
+use ferrohealth_smart::jws::jwk::Jwk;
 use ferrohealth_smart::metadata::DiscoveryError;
 use ferrohealth_smart::metadata::Http;
 use http::StatusCode;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::DecodingKey;
-use jsonwebtoken::Validation;
-use jsonwebtoken::jwk::Jwk;
 use secrecy::SecretString;
 use wiremock::Mock;
 use wiremock::MockServer;
@@ -338,16 +336,17 @@ async fn private_key_jwt_sends_a_signed_assertion_per_request() -> Result<(), Bo
         .mount(&server)
         .await;
 
-    let key = ec_key("unused", Algorithm::ES384);
+    let key = ec_key("unused", Algorithm::Es384);
     let assertion_key = AssertionKey::from_pem(&key.pem, None, None)?;
     assert_eq!(
-        Algorithm::ES384,
+        Algorithm::Es384,
         assertion_key.algorithm(),
         "an EC key signs ES384"
     );
-    let public: Jwk = serde_json::from_value(assertion_key.public_jwk())?;
+    let assertion_jwk = assertion_key.public_jwk();
+    let public: Jwk = serde_json::from_value(assertion_jwk.clone())?;
     assert_eq!(
-        thumbprint(&public),
+        public.thumbprint(),
         assertion_key.kid(),
         "RFC 7638 §3, the thumbprint names the key"
     );
@@ -375,21 +374,16 @@ async fn private_key_jwt_sends_a_signed_assertion_per_request() -> Result<(), Bo
     );
     assert_eq!(None, param(&form, "client_secret"));
     let assertion = param(&form, "client_assertion").ok_or("the assertion")?;
-    let header = jsonwebtoken::decode_header(&assertion)?;
-    assert_eq!(Algorithm::ES384, header.alg);
+    let header = crate::support::header(&assertion);
+    assert_eq!(Algorithm::Es384, header.alg);
     assert_eq!(Some(String::from("JWT")), header.typ);
-    assert_eq!(Some(thumbprint(&public)), header.kid);
-    let mut validation = Validation::new(Algorithm::ES384);
-    validation.set_audience(&[endpoint.as_str()]);
-    validation.set_issuer(&["ferrobridge"]);
-    validation.set_required_spec_claims(&["exp", "iss", "aud", "sub", "jti"]);
-    let decoding = DecodingKey::from_jwk(&public)?;
-    let claims = jsonwebtoken::decode::<serde_json::Map<String, serde_json::Value>>(
-        &assertion,
-        &decoding,
-        &validation,
-    )?
-    .claims;
+    assert_eq!(Some(public.thumbprint()), header.kid);
+    let validation = Validation::default()
+        .with_audiences([endpoint.as_str()])
+        .with_issuer("ferrobridge")
+        .with_required(&["exp", "sub", "jti"]);
+    let claims = crate::support::verified(&assertion, &assertion_jwk);
+    validation.check(&claims)?;
     assert_eq!(Some(&serde_json::json!("ferrobridge")), claims.get("sub"));
     let exp = claims
         .get("exp")
@@ -410,12 +404,8 @@ async fn private_key_jwt_sends_a_signed_assertion_per_request() -> Result<(), Bo
     assert!(source.token().await.is_ok());
     let second = token_request_form(&server, 1).await?;
     let second_assertion = param(&second, "client_assertion").ok_or("the second assertion")?;
-    let second_claims = jsonwebtoken::decode::<serde_json::Map<String, serde_json::Value>>(
-        &second_assertion,
-        &decoding,
-        &validation,
-    )?
-    .claims;
+    let second_claims = crate::support::verified(&second_assertion, &assertion_jwk);
+    validation.check(&second_claims)?;
     assert_ne!(
         first_jti,
         second_claims.get("jti").cloned(),
@@ -427,28 +417,28 @@ async fn private_key_jwt_sends_a_signed_assertion_per_request() -> Result<(), Bo
 #[tokio::test]
 async fn an_assertion_key_takes_its_configured_kid_and_algorithm() -> Result<(), Box<dyn StdError>>
 {
-    let rsa = rsa_key("unused", Algorithm::RS256);
+    let rsa = rsa_key("unused", Algorithm::Rs256);
     let by_type = AssertionKey::from_pem(&rsa.pem, None, None)?;
     assert_eq!(
-        Algorithm::RS384,
+        Algorithm::Rs384,
         by_type.algorithm(),
         "an RSA key signs RS384"
     );
     let named = AssertionKey::from_pem(
         &rsa.pem,
-        Some(Algorithm::PS256),
+        Some(Algorithm::Ps256),
         Some(String::from("2026-10")),
     )?;
-    assert_eq!(Algorithm::PS256, named.algorithm());
+    assert_eq!(Algorithm::Ps256, named.algorithm());
     assert_eq!("2026-10", named.kid());
     assert_eq!(serde_json::json!("2026-10"), named.public_jwk()["kid"]);
     assert!(
-        AssertionKey::from_pem(&rsa.pem, Some(Algorithm::ES256), None).is_err(),
+        AssertionKey::from_pem(&rsa.pem, Some(Algorithm::Es256), None).is_err(),
         "an EC algorithm cannot sign with an RSA key"
     );
     assert!(
-        AssertionKey::from_pem(&rsa.pem, Some(Algorithm::HS256), None).is_err(),
-        "a symmetric algorithm signs no assertion"
+        "HS256".parse::<Algorithm>().is_err(),
+        "a symmetric algorithm names no algorithm, so it signs no assertion"
     );
     assert!(AssertionKey::from_pem(b"not a pem", None, None).is_err());
     Ok(())
@@ -1031,9 +1021,9 @@ async fn a_grant_configured_by_its_issuer_names_the_discovered_token_endpoint()
         .respond_with(issued("synthetic-token", 300))
         .mount(&server)
         .await;
-    let key = ec_key("unused", Algorithm::ES384);
+    let key = ec_key("unused", Algorithm::Es384);
     let assertion_key = AssertionKey::from_pem(&key.pem, None, None)?;
-    let public: Jwk = serde_json::from_value(assertion_key.public_jwk())?;
+    let public = assertion_key.public_jwk();
     let config = ClientCredentials::with_private_key_jwt(
         Endpoint::Issuer(server.uri()),
         String::from("ferrofed"),
@@ -1047,18 +1037,14 @@ async fn a_grant_configured_by_its_issuer_names_the_discovered_token_endpoint()
     let assertion = param(&form, "client_assertion").ok_or("the assertion")?;
     assert_eq!(
         Some(String::from("JWT")),
-        jsonwebtoken::decode_header(&assertion)?.typ
+        crate::support::header(&assertion).typ
     );
     let token_endpoint = format!("{}{TOKEN_PATH}", server.uri());
-    let mut validation = Validation::new(Algorithm::ES384);
-    validation.set_audience(&[token_endpoint.as_str()]);
-    validation.set_issuer(&["ferrofed"]);
-    let claims = jsonwebtoken::decode::<serde_json::Map<String, serde_json::Value>>(
-        &assertion,
-        &DecodingKey::from_jwk(&public)?,
-        &validation,
-    )?
-    .claims;
+    let claims = crate::support::verified(&assertion, &public);
+    Validation::default()
+        .with_audiences([token_endpoint.as_str()])
+        .with_issuer("ferrofed")
+        .check(&claims)?;
     assert_eq!(Some(&serde_json::json!(token_endpoint)), claims.get("aud"));
     Ok(())
 }

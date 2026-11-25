@@ -15,13 +15,13 @@ use ferrohealth_smart::client::onward::Rejected;
 use ferrohealth_smart::client::onward::Target;
 use ferrohealth_smart::client::onward::TokenType;
 use ferrohealth_smart::client::onward::exchange::Onward;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::kind::Actor;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::profile::ProfileKeys;
 use ferrohealth_smart::profile::onward::OnwardGrant;
 use ferrohealth_smart::resource::Settings;
-use jsonwebtoken::Algorithm;
 use secrecy::SecretString;
 use serde_json::Value;
 use serde_json::json;
@@ -147,7 +147,7 @@ async fn rfc8693_figure_3_signed_again_now_names_no_actor_and_is_refused() {
     // NOTE: RFC 8693 §2.3 Figure 3's claims carry no `client_id` and no `act`,
     // so the requesting client is named nowhere and the check refuses them.
     let server = MockServer::start().await;
-    let key = ec_key("9er", Algorithm::ES256);
+    let key = ec_key("9er", Algorithm::Es256);
     let now = crate::support::now();
     let claims = json!({
         "aud": "https://backend.example.com", "iss": AS, "exp": now + 60,
@@ -167,7 +167,7 @@ async fn rfc8693_figure_3_with_the_rfc9068_client_id_is_accepted() {
     // NOTE: RFC 9068 §2.2 makes `client_id` REQUIRED in a JWT access token;
     // with it, Figure 3 signed again now passes every check.
     let server = MockServer::start().await;
-    let key = ec_key("9er", Algorithm::ES256);
+    let key = ec_key("9er", Algorithm::Es256);
     let now = crate::support::now();
     let claims = json!({
         "aud": "https://backend.example.com", "iss": AS, "exp": now + 60,
@@ -202,7 +202,7 @@ async fn rfc8693_figure_10_is_reproduced_and_figure_13_refused_for_its_missing_i
     // NOTE: RFC 8693 Appendix A.1, impersonation: `audience` names the target
     // and the subject token is a JWT; Figure 13 carries no `iat`.
     let server = MockServer::start().await;
-    let key = ec_key("72", Algorithm::ES256);
+    let key = ec_key("72", Algorithm::Es256);
     let now = crate::support::now();
     let subject_claims = figure_11(now);
     let subject_token = sign(&key, &subject_claims);
@@ -258,7 +258,7 @@ async fn rfc8693_figure_13_with_an_iat_is_refused_for_naming_another_issuers_per
     // original-issuer.example.net and Figure 13 of as.example.com, so `iss`
     // differs under the default `person_equality` of `iss` and `sub`.
     let server = MockServer::start().await;
-    let key = ec_key("72", Algorithm::ES256);
+    let key = ec_key("72", Algorithm::Es256);
     let now = crate::support::now();
     let subject_claims = figure_11(now);
     let issued = json!({
@@ -305,7 +305,7 @@ async fn rfc8693_figure_14_is_reproduced_and_the_figure_17_n_a_token_refused() {
     // Figure 17 issues a JWT with `token_type` N_A, which no bearer request
     // can carry (RFC 8693 §2.2.1).
     let server = MockServer::start().await;
-    let key = ec_key("16", Algorithm::ES256);
+    let key = ec_key("16", Algorithm::Es256);
     let now = crate::support::now();
     let subject_claims = json!({
         "aud": AS, "iss": "https://original-issuer.example.net", "exp": now + 1060,
@@ -374,7 +374,7 @@ async fn rfc7523_section_4_is_reproduced_with_the_section_2_2_client_assertion()
     // NOTE: RFC 7523 §4: `grant_type` jwt-bearer and the JWT as `assertion`;
     // §2.2 adds the client assertion, and the target is named in `scope`.
     let server = MockServer::start().await;
-    let issuer_key = ec_key("16", Algorithm::ES256);
+    let issuer_key = ec_key("16", Algorithm::Es256);
     let client = ClientKey::new();
     let now = crate::support::now();
     let assertion_claims = json!({

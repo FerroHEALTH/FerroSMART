@@ -19,7 +19,8 @@ ferrohealth-smart = { version = "=0.34.0", features = ["axum", "openehr"] }
 - **`resource`**: the resource server. `ResourceServer::discover` reads the
   issuer's metadata (RFC 8414, OpenID Connect Discovery 1.0 as the fallback)
   and its key set, and `authenticate` checks a JWT access token under
-  RFC 9068: the signature with an asymmetric algorithm, `iss`, `aud`, `exp`
+  RFC 9068: the signature with an asymmetric algorithm (RSA, ECDSA, `EdDSA`
+  or ML-DSA of RFC 9964, through the `jws` module), `iss`, `aud`, `exp`
   and `nbf` within a clock skew, the `at+jwt` type and the required claims.
   The `Caller` it returns carries the subject, the client, the scopes, the
   `patient` launch context and the raw claims. `IssuerSet` routes tokens of

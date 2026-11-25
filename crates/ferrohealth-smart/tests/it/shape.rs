@@ -7,6 +7,8 @@
 
 use std::error::Error as StdError;
 
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::compact::Header;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::profile::Profile;
@@ -15,8 +17,6 @@ use ferrohealth_smart::resource::Caller;
 use ferrohealth_smart::resource::Rejection;
 use ferrohealth_smart::resource::ResourceServer;
 use ferrohealth_smart::resource::Settings;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::Header;
 use serde_json::Value;
 use serde_json::json;
 
@@ -83,7 +83,7 @@ fn figure_2() -> Value {
 // "kid":"RjEwOwOA"} and its claims; §4 accepts `typ` "at+jwt", case aside.
 #[tokio::test]
 async fn the_rfc_9068_figure_2_token_passes_the_core() -> Outcome {
-    let key = rsa_key("RjEwOwOA", Algorithm::RS256);
+    let key = rsa_key("RjEwOwOA", Algorithm::Rs256);
     let caller = admit(&key, "at+JWT", &figure_2(), profile()).await?;
     assert_eq!("5ba552d67", caller.subject(), "the resource owner");
     assert_eq!(Some("s6BhdRkqt3"), caller.client_id());
@@ -96,7 +96,7 @@ async fn the_rfc_9068_figure_2_token_passes_the_core() -> Outcome {
 // is at+jwt or application/at+jwt and reject tokens carrying any other value".
 #[tokio::test]
 async fn the_figure_2_token_typed_jwt_is_refused() -> Outcome {
-    let key = rsa_key("RjEwOwOA", Algorithm::RS256);
+    let key = rsa_key("RjEwOwOA", Algorithm::Rs256);
     let outcome = admit(&key, "JWT", &figure_2(), profile()).await;
     assert!(
         matches!(
@@ -113,7 +113,7 @@ async fn the_figure_2_token_typed_jwt_is_refused() -> Outcome {
 // NOTE: RFC 9068 §2.2 lists `client_id`, `iat` and `jti` as REQUIRED.
 #[tokio::test]
 async fn the_figure_2_token_without_a_required_claim_is_refused() -> Outcome {
-    let key = rsa_key("RjEwOwOA", Algorithm::RS256);
+    let key = rsa_key("RjEwOwOA", Algorithm::Rs256);
     for claim in ["client_id", "iat", "jti"] {
         let mut claims = figure_2();
         claims.as_object_mut().ok_or("an object")?.remove(claim);

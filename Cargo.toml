@@ -6,7 +6,7 @@ resolver = "3"
 members = ["crates/*", "app/*", "tools/*"]
 
 [workspace.package]
-version = "0.34.0"
+version = "0.35.0"
 edition = "2024"
 rust-version = "1.98"
 license = "BUSL-1.1"
@@ -52,7 +52,7 @@ ferrohealth-server = { version = "0.12.0", default-features = false, features = 
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
 # ferrohealth-authz reads the subject ferrohealth-smart authenticates; the
 # path is the workspace member, the version the one it publishes.
-ferrohealth-smart = { path = "crates/ferrohealth-smart", version = "0.34.0", default-features = false }
+ferrohealth-smart = { path = "crates/ferrohealth-smart", version = "0.35.0", default-features = false }
 # ferrohealth-authz: the engine seam, the embedded Cedar engine and its
 # hot-swapped policy set. Verified against crates.io on 2026-10-25.
 async-trait = "0.1.92"
@@ -78,10 +78,10 @@ ferrohealth-ui = { version = "0.6.6", default-features = false }
 # The framework integrations, each behind its feature.
 tower = { version = "0.5.3", default-features = false }
 axum = { version = "0.8.9", default-features = false }
-# The SHA-256 of the RFC 7638 thumbprint, the random `jti` of a client
-# assertion and the HMAC that names a cached Basic credential, from the
-# crypto provider jsonwebtoken already links.
-aws-lc-rs = { version = "1.18.2", default-features = false, features = ["aws-lc-sys"] }
+# Every JWS ferrohealth-smart signs and verifies, ML-DSA (FIPS 204) among
+# them, its digests, randomness and HMAC: the crypto provider rustls already
+# links. Verified against crates.io on 2026-11-25.
+aws-lc-rs = { version = "1.19.0", default-features = false, features = ["aws-lc-sys"] }
 # FerroSMART, the authorization server under app/ferrosmart: the run path,
 # the console log and the health routes the family's servers share, and the
 # command line. Verified against crates.io on 2026-11-16.

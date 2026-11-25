@@ -17,24 +17,19 @@
 //! publishes.
 
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(feature = "fetch")]
 use http::StatusCode;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::AlgorithmFamily;
-use jsonwebtoken::DecodingKey;
-use jsonwebtoken::jwk::AlgorithmParameters;
-use jsonwebtoken::jwk::Jwk;
-use jsonwebtoken::jwk::KeyOperations;
-use jsonwebtoken::jwk::PublicKeyUse;
 use serde::Deserialize;
 #[cfg(feature = "fetch")]
 use url::Url;
 
+use crate::jws::algorithm::Algorithm;
+use crate::jws::jwk::Jwk;
+use crate::jws::jwk::select;
 #[cfg(feature = "fetch")]
 use crate::metadata::Http;
 use crate::resource::ResourceError;
@@ -62,31 +57,6 @@ impl std::fmt::Display for KeySource {
     }
 }
 
-/// One signing key of the set.
-#[derive(Clone)]
-struct Key {
-    /// The key's `kid`, when it names one.
-    kid: Option<String>,
-    /// The key's `alg`, when it names one.
-    alg: Option<Algorithm>,
-    /// The algorithm family the key belongs to.
-    family: AlgorithmFamily,
-    /// The verification key.
-    verifier: DecodingKey,
-    /// The set member the key was read from, which tells one read of the
-    /// set from another.
-    member: serde_json::Value,
-}
-
-impl std::fmt::Debug for Key {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Key")
-            .field("kid", &self.kid)
-            .field("alg", &self.alg)
-            .finish_non_exhaustive()
-    }
-}
-
 /// The JWK Set document (RFC 7517 §5), each member read on its own.
 #[derive(Deserialize)]
 struct Document {
@@ -98,7 +68,7 @@ struct Document {
 #[derive(Debug)]
 struct Cached {
     /// The usable signing keys.
-    keys: Arc<[Key]>,
+    keys: Arc<[Jwk]>,
     /// When they were read.
     read_at: Instant,
     /// When a read was last tried, whether or not it succeeded.
@@ -184,11 +154,9 @@ impl KeySet {
         &self,
         kid: Option<&str>,
         alg: Algorithm,
-    ) -> Result<Option<(DecodingKey, u64)>, ResourceError> {
-        self.locate(kid, alg, |key, generation| {
-            (key.verifier.clone(), generation)
-        })
-        .await
+    ) -> Result<Option<(Jwk, u64)>, ResourceError> {
+        self.locate(kid, alg, |key, generation| (key.clone(), generation))
+            .await
     }
 
     /// Returns the generation of the set when it holds the key a token
@@ -208,7 +176,7 @@ impl KeySet {
         &self,
         kid: Option<&str>,
         alg: Algorithm,
-        read: impl Fn(&Key, u64) -> T,
+        read: impl Fn(&Jwk, u64) -> T,
     ) -> Result<Option<T>, ResourceError> {
         {
             let cached = self.cached.read().await;
@@ -254,7 +222,7 @@ impl KeySet {
         .await
         {
             Ok(keys) => {
-                if !same(&cached.keys, &keys) {
+                if *cached.keys != *keys {
                     cached.generation = cached.generation.saturating_add(1);
                     self.verdicts.clear(cached.generation);
                 }
@@ -270,37 +238,11 @@ impl KeySet {
     }
 }
 
-/// Returns whether `held` and `read` are the same keys in the same order.
-fn same(held: &[Key], read: &[Key]) -> bool {
-    held.len() == read.len()
-        && held
-            .iter()
-            .zip(read)
-            .all(|(held, read)| held.member == read.member)
-}
-
-/// Returns the key of `keys` that verifies `alg` under `kid`.
-///
-/// A token without a `kid` (RFC 7515 §4.1.4 makes it optional) verifies with
-/// the one key of its family when the set holds exactly one; two or more
-/// candidates verify nothing, so a rotation never decides which key
-/// verifies a request.
-fn select<'a>(keys: &'a [Key], kid: Option<&str>, alg: Algorithm) -> Option<&'a Key> {
-    let mut candidates = keys
-        .iter()
-        .filter(|key| key.family == alg.family() && key.alg.is_none_or(|named| named == alg));
-    if let Some(kid) = kid {
-        return candidates.find(|key| key.kid.as_deref() == Some(kid));
-    }
-    let only = candidates.next()?;
-    candidates.next().is_none().then_some(only)
-}
-
 /// Reads the set at `source` and keeps its usable signing keys.
 async fn fetch(
     #[cfg(feature = "fetch")] http: &Http,
     source: &KeySource,
-) -> Result<Vec<Key>, ResourceError> {
+) -> Result<Vec<Jwk>, ResourceError> {
     let body =
         match source {
             #[cfg(feature = "fetch")]
@@ -347,46 +289,17 @@ async fn fetch(
 /// Returns the signing key `member` describes.
 ///
 /// A member whose `use` is not `sig` (RFC 7517 §4.2), whose `key_ops` lack
-/// `verify` (§4.3), that is a symmetric key, whose `alg` is no signature
-/// algorithm, or that this reader cannot load verifies no token.
+/// `verify` (§4.3), that is a symmetric key, carries a private member,
+/// names an `alg` this crate does not verify, or is no key of a supported
+/// type verifies no token.
 // NOTE: RFC 7517 §5 has a reader ignore a set member it does not understand,
 // so such a member is legitimately absent here rather than a defective set.
-fn usable(member: &serde_json::Value) -> Option<Key> {
-    let alg = match member.get("alg").and_then(serde_json::Value::as_str) {
-        None => None,
-        Some(name) => Some(Algorithm::from_str(name).ok()?),
-    };
-    let jwk: Jwk = serde_json::from_value(member.clone()).ok()?;
-    if jwk
-        .common
-        .public_key_use
-        .as_ref()
-        .is_some_and(|key_use| *key_use != PublicKeyUse::Signature)
-    {
-        return None;
-    }
-    if jwk
-        .common
-        .key_operations
-        .as_ref()
-        .is_some_and(|operations| !operations.contains(&KeyOperations::Verify))
-    {
-        return None;
-    }
-    let family = match &jwk.algorithm {
-        AlgorithmParameters::RSA(_) => AlgorithmFamily::Rsa,
-        AlgorithmParameters::EllipticCurve(_) => AlgorithmFamily::Ec,
-        AlgorithmParameters::OctetKeyPair(_) => AlgorithmFamily::Ed,
-        AlgorithmParameters::OctetKey(_) | _ => return None,
-    };
-    let verifier = DecodingKey::from_jwk(&jwk).ok()?;
-    Some(Key {
-        kid: jwk.common.key_id,
-        alg,
-        family,
-        verifier,
-        member: member.clone(),
-    })
+fn usable(member: &serde_json::Value) -> Option<Jwk> {
+    let jwk = Jwk::try_from(member).ok()?;
+    Algorithm::all()
+        .iter()
+        .any(|alg| jwk.verifies(*alg))
+        .then_some(jwk)
 }
 
 #[cfg(test)]
