@@ -597,6 +597,26 @@ async fn an_mdoc_of_another_type_or_with_elements_not_asked_for_is_unrequested()
     wallet.stop().await;
 }
 
+// NOTE: Implementing Regulation (EU) 2024/2977 Art 3a(3), the portrait is never asked for, so never taken.
+#[tokio::test]
+async fn an_mdoc_carrying_the_portrait_is_unrequested() {
+    let wallet = Wallet::start().await;
+    let begun = wallet.begin().await;
+    let mut portrayed = Mdoc::pid();
+    portrayed.elements.push((
+        String::from("portrait"),
+        Cbor::Bytes(vec![0xFF, 0xD8, 0xFF]),
+    ));
+    wallet
+        .mdoc_refused(
+            &begun,
+            &wallet.mdoc(&portrayed, &begun),
+            "unrequested_credential",
+        )
+        .await;
+    wallet.stop().await;
+}
+
 #[tokio::test]
 async fn an_mdoc_outside_its_validity_is_expired() {
     let wallet = Wallet::start().await;

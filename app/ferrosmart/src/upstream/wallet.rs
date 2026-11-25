@@ -365,6 +365,7 @@ pub fn upstream(
         ));
     }
     names_the_person(section)?;
+    asks_no_portrait(section)?;
     let anchor_files = section
         .issuer_anchor_files
         .iter()
@@ -466,6 +467,27 @@ fn names_the_person(section: &WalletSection) -> Result<(), WalletConfigError> {
     let kind = &section.identifier_type;
     if kind.is_empty() || kind.trim() != kind || kind.contains("  ") {
         return Err(WalletConfigError::Rule("`identifier_type` is a code"));
+    }
+    Ok(())
+}
+
+/// Checks that neither `claims` nor `mdoc_claims` names an attribute that
+/// is [`pid::Target::NotRetained`].
+fn asks_no_portrait(section: &WalletSection) -> Result<(), WalletConfigError> {
+    let named = section
+        .claims
+        .iter()
+        .filter_map(|claim| claim.split('.').next())
+        .chain(section.mdoc_claims.iter().map(String::as_str));
+    for name in named {
+        if pid::not_retained(name) {
+            return Err(WalletConfigError::Rule(
+                "`claims` and `mdoc_claims` never name the portrait (`picture`, `portrait`): \
+                 a wallet-relying party does not retain it unless identification or \
+                 authentication needs it (Implementing Regulation (EU) 2024/2977 Art 3a(3); \
+                 Regulation (EU) 2016/679 Art 5(1)(c))",
+            ));
+        }
     }
     Ok(())
 }
@@ -882,14 +904,15 @@ impl WalletLogin {
 
     /// Returns the person the verified `claims` of `format`, presented at
     /// `presented_at`, name, refusing them without the identifier or
-    /// another claim asked for; the claims carry the PID's attributes under
-    /// the ID Token names [`pid::person_claims`] maps them to.
+    /// another claim asked for; the claims are those [`pid::received`]
+    /// keeps.
     fn identity(
         &self,
-        mut claims: serde_json::Map<String, serde_json::Value>,
+        claims: serde_json::Map<String, serde_json::Value>,
         presented_at: i64,
         format: Format,
     ) -> Result<Identity, Refusal> {
+        let claims = pid::received(claims, format);
         let asked = match format {
             Format::SdJwtVc => &self.upstream.claims,
             Format::Mdoc => &self.upstream.mdoc_claims,
@@ -912,7 +935,6 @@ impl WalletLogin {
             .collect::<Vec<_>>()
             .join(" ");
         let name = Some(name).filter(|name| !name.is_empty());
-        claims.extend(pid::person_claims(&claims, format));
         Ok(Identity {
             issuer: self.upstream.issuer.clone(),
             subject: format!("{country}:{identifier}"),

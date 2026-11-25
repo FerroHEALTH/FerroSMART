@@ -5295,10 +5295,19 @@ format presented (§3.1.2, §4.1.1):
 | `birth_date` | `birthdate` | `birth_date` | `birthdate`, under `profile` |
 | `birth_place` | `place_of_birth` | `place_of_birth` | `place_of_birth`, under `profile`, the name the Rulebook takes from OpenID Connect for Identity Assurance |
 | `nationality` | `nationalities` | `nationality` | `nationalities`, under `profile`, likewise |
-| `portrait` | `picture` | `portrait` | not mapped: no part of the person a token names |
+| `portrait` | `picture` | `portrait` | not retained: never asked for, and dropped on receipt |
 | `personal_administrative_number` | the same | the same | the identifier the patient index resolves |
 
-A value of another shape than the Rulebook gives it maps to nothing. The
+A value of another shape than the Rulebook gives it maps to nothing.
+FerroSMART identifies the person without the portrait, so as a
+wallet-relying party it does not retain it (Implementing Regulation (EU)
+2024/2977 Art 3a(3), inserted by 2026/1731; Regulation (EU) 2016/679
+Art 5(1)(c)). A `claims` or `mdoc_claims` naming `picture` or `portrait` is
+refused at start, an mdoc carrying it is `unrequested_credential`, and an
+SD-JWT VC that discloses it unasked has it dropped before the login reads
+its claims, so no stored login, token or audit record carries it. The
+README's PID badge counts each attribute of the table whose handling a
+named test in `conformance/pid-attributes.tsv` holds. The
 identifier is the number in the system
 `[ferrosmart.upstream.openid4vp.identifier_systems]` names for its
 `issuing_country`, typed by `identifier_type` (HL7 v2 table 0203, `NI` by

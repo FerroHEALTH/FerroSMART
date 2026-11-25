@@ -1,17 +1,20 @@
 # SPDX-FileCopyrightText: Cadasto B.V.
 # SPDX-License-Identifier: BUSL-1.1
-# The PID Rulebook 1.6 attributes FerroSMART reads (#857, #859): the
+# The PID Rulebook 1.6 attributes FerroSMART handles (#857, #859, #879): the
 # mandatory attributes of section 2.2 and the administrative number of
-# section 2.3, each with its SD-JWT VC and mdoc name and where it goes (a
-# claim name, `identifier`, or - for none). The unit test
-# wallet::pid::tests::the_conformance_table_is_the_mapping holds it to
-# app/ferrosmart/src/wallet/pid.rs, and scripts/checks/conformance.sh counts
-# it for the README badge. Columns, tab separated: data identifier,
-# mandatory (yes or no), SD-JWT VC name, mdoc name, target.
-family_name	yes	family_name	family_name	family_name
-given_name	yes	given_name	given_name	given_name
-birth_date	yes	birthdate	birth_date	birthdate
-birth_place	yes	place_of_birth	place_of_birth	place_of_birth
-nationality	yes	nationalities	nationality	nationalities
-portrait	yes	picture	portrait	-
-personal_administrative_number	no	personal_administrative_number	personal_administrative_number	identifier
+# section 2.3, each with its SD-JWT VC and mdoc name, how FerroSMART handles
+# it (a claim name, `identifier`, or `not retained` for the portrait, which
+# Implementing Regulation (EU) 2024/2977 Art 3a(3) keeps a wallet-relying
+# party from retaining), and the test that holds it. The unit test
+# wallet::pid::tests::the_conformance_table_is_the_mapping holds the first
+# five columns to app/ferrosmart/src/wallet/pid.rs, and
+# scripts/checks/conformance.sh counts a row for the README badge only when
+# its test exists. Columns, tab separated: data identifier, mandatory (yes or
+# no), SD-JWT VC name, mdoc name, handling, test.
+family_name	yes	family_name	family_name	family_name	every_mapped_attribute_reaches_its_claim_from_an_sd_jwt_vc
+given_name	yes	given_name	given_name	given_name	every_mapped_attribute_reaches_its_claim_from_an_sd_jwt_vc
+birth_date	yes	birthdate	birth_date	birthdate	every_mapped_attribute_reaches_its_claim_from_an_sd_jwt_vc
+birth_place	yes	place_of_birth	place_of_birth	place_of_birth	every_mapped_attribute_reaches_its_claim_from_an_sd_jwt_vc
+nationality	yes	nationalities	nationality	nationalities	every_mapped_attribute_reaches_its_claim_from_an_mdoc
+portrait	yes	picture	portrait	not retained (CIR 2024/2977 Art 3a(3))	the_portrait_is_never_asked_for_kept_or_forwarded
+personal_administrative_number	no	personal_administrative_number	personal_administrative_number	identifier	the_administrative_number_is_named_in_its_member_state_system
