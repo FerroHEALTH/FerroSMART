@@ -23,7 +23,8 @@
 # are refused, in a badge and in the README's badge text. Every badge, and
 # every static badge in the README, carries a logo from badge-logos/, and
 # the small caption under the README's conformance heading says once what the
-# badges count (owner decision, 2026-11-25).
+# badges count (owner decision, 2026-11-25). A badge's colour follows its
+# count: green when all pass, yellow when some do, red when none do.
 #
 #   scripts/checks/conformance.sh             rewrite the badges
 #   scripts/checks/conformance.sh --check     fail when a badge or a label
@@ -48,8 +49,8 @@ rows() {
 
 # Prints the endpoint JSON of label $1 with the message $2/$3 $4 and logo $5.
 badge() {
-  local color=brightgreen logo
-  [[ "$2" -eq "$3" ]] || color=yellow
+  local color logo
+  color="$(badge_count_color "$2" "$3")"
   logo="$(badge_logo_fields "$5")"
   jq -cn --arg label "$1" --arg message "$2/$3 $4" --arg color "$color" --argjson logo "$logo" \
     '{schemaVersion: 1, label: $label, message: $message, color: $color} + $logo'
@@ -116,6 +117,7 @@ labels() {
   badge_logo_check "$tree"/conformance/badges/*.json || failures=$((failures + 1))
   badge_logo_readme "$tree/README.md" || failures=$((failures + 1))
   badge_caption_check "$tree/README.md" || failures=$((failures + 1))
+  badge_color_check "$tree"/conformance/badges/*.json || failures=$((failures + 1))
   [[ "$failures" -eq 0 ]]
 }
 
@@ -192,8 +194,17 @@ self_test() {
     fail "a failed test left out of the count"
   [[ "$(jq -r .color "$tree/conformance/badges/smart-app-launch.json")" == yellow ]] ||
     fail "a failed test leaves the badge green"
+  jq -c 'map(if .test_id then .result = "fail" else . end)' "$work/badge" > "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
+  run "$tree" update > /dev/null || fail "a tree with every test failed is refused"
+  [[ "$(jq -r .color "$tree/conformance/badges/smart-app-launch.json")" == red ]] ||
+    fail "a badge with nothing passing is not red"
   cp "$work/badge" "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
   run "$tree" update > /dev/null || fail "the rewrite after a fail is refused"
+  [[ "$(jq -r .color "$tree/conformance/badges/smart-app-launch.json")" == brightgreen ]] ||
+    fail "a badge with every test passing is not green"
+  jq -c '.color = "blue"' "$tree/conformance/badges/smart-app-launch.json" > "$tree/conformance/badges/extra.json"
+  if labels "$tree" 2> /dev/null; then fail "a counted badge in blue passes"; fi
+  rm "$tree/conformance/badges/extra.json"
   printf 'given_name\tyes\tgiven_name\tgiven_name\t-\tmaps\n' >> "$tree/conformance/pid-attributes.tsv"
   if run "$tree" check > /dev/null 2>&1; then fail "a stale badge passes"; fi
   run "$tree" update > /dev/null || fail "the rewrite is refused"
