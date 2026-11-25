@@ -240,6 +240,7 @@ self_test() {
   printf '[![SMART certified](https://img.shields.io/endpoint?url=conformance/badges/x.json)](x)\n' >> "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a README badge text claiming certification passes"; fi
   clean "$work"
+  badge_post_quantum_self_test || exit 1
   echo "conformance: self-test OK"
 }
 
