@@ -76,10 +76,10 @@ line moves the minor version). An unchanged version is checked as a patch.
 `scripts/checks/semver.sh` runs it at the version pinned in
 `docs/VERSIONS.md`:
 
-- on every pull request and merge group whose change reaches a crate,
-  over the workspace (the `cargo-semver-checks` job of `ci.yml`,
-  `semver.sh --changed` against the base), so a breaking change carries its minor bump in
-  the pull request that breaks. A change that reaches no crate leaves every
+- on every pull request whose change reaches a crate, over the workspace
+  (the `cargo-semver-checks` job of `ci.yml`, `semver.sh --changed`
+  against the base), so a breaking change carries its minor bump in the
+  pull request that breaks. A change that reaches no crate leaves every
   API as its base has it, and is not judged: judging it would judge only
   the base, against whatever crates.io holds when the run starts;
 - in the release plan (`scripts/release/plan.sh`, which

@@ -25,6 +25,12 @@
 # guards share one job, and each step there runs when an earlier one failed,
 # so a run still reports every finding.
 #
+# A merge group runs the light set: the guards without the publish dry run,
+# rustfmt, cargo-deny and the advisory-exception check, and every test target
+# compiled with every feature and the unit tests run. The pull request ran the full suite on the same change,
+# so clippy, rustdoc, the other test runs, the lanes, cargo-semver-checks
+# and the quickstart do not run there.
+#
 # The vendored-specification guard runs in specs.yml beside this workflow.
 # The `conclusion` job is the single required status check on main.
 name: CI
@@ -241,13 +247,13 @@ jobs:
           comment-summary-in-pr: on-failure
       # No cache: the dry run checks the bytes a publish would upload.
       - uses: ./.github/actions/setup-rust
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         with:
           cache: "false"
       # NOTE: Cargo packages the workspace members together, so ferrohealth-authz
       # verifies against the ferrohealth-smart it ships beside before that is on crates.io.
       - name: Publish dry run
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         run: cargo publish --workspace --dry-run --locked
 
       # The site link guard: the book's sources linted, and the site assembled
@@ -297,33 +303,33 @@ jobs:
       # SMART on openEHR grammar (`openehr-scopes`) is linted on the host
       # and for the browser target, where it is the whole crate.
       - name: clippy
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: clippy with every feature
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: clippy with axum and openehr alone
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         run: cargo clippy --workspace --all-targets --no-default-features --features axum,openehr --locked -- -D warnings
       - name: clippy with axum
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         run: cargo clippy --workspace --all-targets --features axum --locked -- -D warnings
       - name: clippy with openehr-scopes alone
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         run: cargo clippy -p ferrohealth-smart --all-targets --no-default-features --features openehr-scopes --locked -- -D warnings
       - name: clippy with openehr-scopes for wasm32
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         run: cargo clippy -p ferrohealth-smart --no-default-features --features openehr-scopes --target wasm32-unknown-unknown --locked -- -D warnings
       - name: rustdoc with every feature
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         run: cargo doc --locked --workspace --all-features --no-deps --document-private-items
       # docs.rs builds all features, a product's `cargo doc` the features it
       # takes: each set documents without a broken link (#135).
       - name: rustdoc with the default features
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         run: cargo doc --locked --workspace --no-deps --document-private-items
       - name: rustdoc with no feature
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && github.event_name != 'merge_group' }}
         run: cargo doc --locked --workspace --no-default-features --no-deps --document-private-items
       - name: cargo-deny
         if: ${{ !cancelled() }}
@@ -384,10 +390,22 @@ jobs:
           key: ${{ steps.fhir-packages.outputs.key }}
       - name: Fetch and verify the FHIR packages
         run: bash scripts/vendor/fhir-packages.sh
-      - run: cargo nextest run --workspace --locked
-      - run: cargo nextest run --workspace --all-features --locked
-      - run: cargo nextest run --workspace --no-default-features --features axum,openehr --locked
-      - run: cargo test --doc --workspace --all-features --locked
+      - if: github.event_name != 'merge_group'
+        run: cargo nextest run --workspace --locked
+      - if: github.event_name != 'merge_group'
+        run: cargo nextest run --workspace --all-features --locked
+      - if: github.event_name != 'merge_group'
+        run: cargo nextest run --workspace --no-default-features --features axum,openehr --locked
+      - if: github.event_name != 'merge_group'
+        run: cargo test --doc --workspace --all-features --locked
+      # The merge group's smoke set: the pull request ran every suite, so the
+      # queue compiles every test target with every feature and runs only the
+      # unit tests.
+      - if: github.event_name == 'merge_group'
+        run: |
+          set -euo pipefail
+          cargo nextest run --workspace --all-features --no-run --locked
+          cargo nextest run --workspace --lib --bins --all-features --locked --no-tests=pass
       # FerroSMART with Keycloak upstream (#522): a SMART standalone launch
       # through the example's realm to a token with the mapped fhirUser
       # (scripts/idp/keycloak-launch.sh).
@@ -582,20 +600,19 @@ jobs:
           if-no-files-found: ignore
 
   # Every crate's public API against its newest version on crates.io, on a
-  # pull request and in the merge queue: a break, or a public dependency
-  # moved to another compatibility line, that the manifest version does not
-  # answer with a minor bump fails, so a caret requirement on these crates
-  # stays safe (scripts/checks/semver.sh).
+  # pull request: a break, or a public dependency moved to another
+  # compatibility line, that the manifest version does not answer with a
+  # minor bump fails, so a caret requirement on these crates stays safe
+  # (scripts/checks/semver.sh).
   semver:
     name: cargo-semver-checks
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
     steps:
-      # The pull request's or the merge group's commit and its first parent,
-      # the base, so the check judges only a change that reaches a crate.
+      # The pull request's merge commit and its first parent, the base, so the check judges only a change that reaches a crate.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -616,6 +633,7 @@ jobs:
   # gated tier is skipped; it fails when a needed job failed or was cancelled.
   quickstart:
     name: quickstart
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -627,7 +645,6 @@ jobs:
           fetch-depth: 0
       - id: reach
         name: Does the change reach the image or the quickstart
-        if: github.event_name != 'merge_group'
         env:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
