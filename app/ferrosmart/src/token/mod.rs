@@ -164,27 +164,18 @@ pub async fn token(
     body: Bytes,
 ) -> Response {
     let certificates = certificates.map(|axum::Extension(chain)| chain);
-    let answer = issue(&state, &headers, &body, from, certificates.as_ref()).await;
-    // NOTE: a form that cannot be read names no client; the record then says so.
-    let form = Params::parse(&body, &[]).ok();
-    let endpoint = state.settings().endpoint_url(TOKEN_ROUTE);
-    let request = TokenRequest {
-        client_id: form.as_ref().and_then(|form| form.get("client_id")),
-        from,
-        endpoint: &endpoint,
-        content_type: headers
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-        body: &body,
+    let answer = match answered(&state, &headers, &body, from, certificates.as_ref()).await {
+        Ok(answer) => answer,
+        Err(error) => {
+            tracing::error!(error = %ferrohealth_server::run::chain(&error), "a token request could not be recorded");
+            return unrecorded();
+        }
     };
-    let committed = commit(&state, &answer, &request).await;
-    if let Err(error) = committed {
-        tracing::error!(error = %ferrohealth_server::run::chain(&error), "a token request could not be recorded");
-        return unrecorded();
-    }
     let client_id = match &answer {
         Ok(issued) => Some(issued.client_id.clone()),
-        Err(_) => request.client_id.map(str::to_owned),
+        Err(_) => Params::parse(&body, &[])
+            .ok()
+            .and_then(|form| form.get("client_id").map(str::to_owned)),
     };
     let mut response = match answer {
         Ok(issued) => no_store(Json(issued.response).into_response()),
@@ -226,6 +217,37 @@ async fn allow_registered_origin(
         headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin.clone());
         headers.append(header::VARY, HeaderValue::from_static("origin"));
     }
+}
+
+/// Answers the token request `body` and commits its record, as the token
+/// endpoint does for every request, a request FerroSMART sends itself
+/// included (`docs/architecture.md` §13.33).
+///
+/// # Errors
+/// Returns the [`audit::RecordFailure`] of a record that could not be
+/// stored; no token is issued then.
+pub(crate) async fn answered(
+    state: &AppState,
+    headers: &HeaderMap,
+    body: &[u8],
+    from: std::net::IpAddr,
+    certificates: Option<&ferrohealth_server::tls::PeerCertificates>,
+) -> Result<Result<Issued, Refusal>, audit::RecordFailure> {
+    let answer = issue(state, headers, body, from, certificates).await;
+    // NOTE: a form that cannot be read names no client; the record then says so.
+    let form = Params::parse(body, &[]).ok();
+    let endpoint = state.settings().endpoint_url(TOKEN_ROUTE);
+    let request = TokenRequest {
+        client_id: form.as_ref().and_then(|form| form.get("client_id")),
+        from,
+        endpoint: &endpoint,
+        content_type: headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        body,
+    };
+    commit(state, &answer, &request).await?;
+    Ok(answer)
 }
 
 /// Commits the record of `request` answered `answer`: an issued token
@@ -347,6 +369,11 @@ pub(crate) struct Issued {
 }
 
 impl Issued {
+    /// Returns the token's `jti`.
+    pub(crate) fn jti(&self) -> &str {
+        &self.jti
+    }
+
     /// Returns this answer as a token exchange's, naming the type issued
     /// (RFC 8693 §2.2.1).
     fn exchanged(mut self) -> Self {
@@ -355,7 +382,7 @@ impl Issued {
     }
 
     /// Returns the access token as the store records it.
-    fn record(&self) -> IssuedToken<'_> {
+    pub(crate) fn record(&self) -> IssuedToken<'_> {
         IssuedToken {
             jti: &self.jti,
             client_id: &self.client_id,

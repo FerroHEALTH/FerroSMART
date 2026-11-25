@@ -19,7 +19,8 @@ use ehds_logging::record::{Action, DataSubject};
 use serde_json::{Map, Value};
 use url::Url;
 
-use super::{Access, Ask, as_person, entries, fhir_request, is_fhir_id};
+use super::send::as_person;
+use super::{Access, Ask, entries, fhir_request, is_fhir_id};
 use crate::server::AppState;
 use crate::store::Pending;
 

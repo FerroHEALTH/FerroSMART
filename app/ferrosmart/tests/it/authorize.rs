@@ -1939,15 +1939,15 @@ impl wiremock::Respond for Fhir {
         let Ok(claims) = jsonwebtoken::dangerous::insecure_decode_claims::<Value>(token) else {
             return ResponseTemplate::new(401);
         };
-        // The clinician sees every patient; the patient p-1 sees their own record.
-        let allowed = claims.get("scope") == Some(&json!("user/Patient.rs"))
-            && (claims.get("fhirUser") == Some(&json!("Practitioner/synthetic-1"))
-                || claims
-                    .get("fhirUser")
-                    .and_then(Value::as_str)
-                    .is_some_and(|user| {
-                        user == "Patient/p-1" || user.ends_with("/fhir/Patient/p-1")
-                    }));
+        // The clinician sees every patient, and so does a Backend Services client
+        // (SMART App Launch 2.2.0, Backend Services: `sub` is the client).
+        let person = claims.get("scope") == Some(&json!("user/Patient.rs"))
+            && claims.get("fhirUser") == Some(&json!("Practitioner/synthetic-1"));
+        let system = claims.get("scope") == Some(&json!("system/Patient.rs"))
+            && claims.get("fhirUser").is_none()
+            && claims.get("sub").is_some()
+            && claims.get("sub") == claims.get("client_id");
+        let allowed = person || system;
         self.seen.lock().expect("held").push(claims);
         let patient = json!({
             "resourceType": "Patient", "id": "p-1",
@@ -2086,12 +2086,56 @@ async fn as_patient(
     (cookie, answer)
 }
 
+/// Asserts that each of the `reads` Backend Services reads of the own-record
+/// case was acquired at the token endpoint and recorded for the patient `person`.
+async fn backend_reads_recorded(smart: &Smart, reads: usize, person: &Value) {
+    // NOTE: IHE IUA §3.71.5.1, each Backend Services token's acquisition is the
+    // token endpoint's record, and the access record names the patient it was for.
+    let records = records(&smart.store).await;
+    let acquired = records
+        .iter()
+        .filter(|record| iua_71(record).is_ok())
+        .filter(|record| record.pointer("/agent/0/who/display") == Some(&json!(ISSUER)))
+        .filter(|record| record.get("agent").and_then(Value::as_array).map(Vec::len) == Some(2))
+        .count();
+    assert_eq!(reads, acquired, "one token request per read, no user agent");
+    // NOTE: no specification governs a system read's beneficiary: our own design,
+    // each access record of the client's reads is filed under the patient.
+    let on_behalf = smart
+        .store
+        .audit_records(&ferrosmart::store::audit::AuditQuery {
+            subject: person.as_str().map(str::to_owned),
+            client: Some(String::from(ISSUER)),
+            limit: 100,
+            ..ferrosmart::store::audit::AuditQuery::default()
+        })
+        .await
+        .expect("the records read");
+    let reads_recorded = on_behalf
+        .iter()
+        .filter(|record| record.get("action") == Some(&json!("R")))
+        .filter(|record| {
+            record
+                .get("entity")
+                .and_then(Value::as_array)
+                .is_some_and(|entities| {
+                    entities.iter().any(|entity| {
+                        entity.pointer("/role/code") == Some(&json!("1"))
+                            && entity.pointer("/what/identifier/value") == Some(&json!("p-1"))
+                    })
+                })
+        })
+        .count();
+    assert_eq!(reads, reads_recorded, "{on_behalf:?}");
+}
+
 // NOTE: SMART App Launch 2.2.0, Obtain authorization code: the server acquires
 // the context it needs; a patient's own record needs no picker (#673).
 #[tokio::test]
 async fn a_patient_gets_their_own_record_in_context_with_no_picker_and_no_role() {
     let (smart, fhir, seen) = picker_launch().await;
     let base = format!("{}/fhir", fhir.uri());
+    let mut person = Value::Null;
     for fhir_user in ["Patient/p-1", &format!("{base}/Patient/p-1")] {
         let (cookie, (status, headers, body)) = as_patient(
             &smart,
@@ -2138,6 +2182,7 @@ async fn a_patient_gets_their_own_record_in_context_with_no_picker_and_no_role()
         assert_eq!(StatusCode::OK, status, "{body}");
         let body: Value = serde_json::from_str(&body).expect("JSON");
         assert_eq!(json!("p-1"), body["patient"]);
+        person = jwt_claims(&body, "access_token")["sub"].clone();
         assert_eq!(
             json!("openid fhirUser launch/patient patient/Observation.rs"),
             body["scope"]
@@ -2157,15 +2202,18 @@ async fn a_patient_gets_their_own_record_in_context_with_no_picker_and_no_role()
         .expect("admitted");
         assert!(caller.is_the_person(), "{fhir_user}: {:?}", caller.kind());
     }
-    // NOTE: SMART App Launch 2.2.0, Scopes and Launch Context, the record is read
-    // again as the person before it is put in context.
+    // NOTE: SMART App Launch 2.2.0, Backend Services, the record is read by
+    // FerroSMART's own client, whose token's `sub` is its `client_id` (IUA
+    // §3.71.4.2.2.1), and never by a token issued for the person with no grant.
     let reads = seen.lock().expect("held").clone();
-    assert!(
-        reads
-            .iter()
-            .any(|claims| claims.get("fhirUser") == Some(&json!("Patient/p-1"))),
-        "{reads:?}"
-    );
+    assert!(!reads.is_empty(), "the record is read");
+    for claims in &reads {
+        assert_eq!(json!("system/Patient.rs"), claims["scope"], "{claims}");
+        assert_eq!(json!(ISSUER), claims["sub"], "{claims}");
+        assert_eq!(json!(ISSUER), claims["client_id"], "{claims}");
+        assert!(claims.get("fhirUser").is_none(), "{claims}");
+    }
+    backend_reads_recorded(&smart, reads.len(), &person).await;
     smart.stop().await;
 }
 
@@ -2543,6 +2591,7 @@ mod ehr_picker;
 mod encounter_picker;
 mod fhir_user_lookup;
 mod logout;
+mod onward_exchange;
 mod paired_picker;
 mod par;
 mod picker_purpose;

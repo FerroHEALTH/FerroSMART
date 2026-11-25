@@ -7,11 +7,15 @@
 #
 #   docker compose -f compose.yaml -f compose.keycloak.yaml up
 #
-# SECRETS. Two more files under ./secrets, made the way compose.yaml's are:
+# SECRETS. Three more files under ./secrets, made the way compose.yaml's are:
 #
 #   openssl rand -hex 16 | tr -d '\n' > secrets/keycloak_user_password
 #   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out secrets/upstream_assertion_key.pem
-#   chmod 0644 secrets/keycloak_user_password secrets/upstream_assertion_key.pem
+#   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out secrets/backend_assertion_key.pem
+#   chmod 0644 secrets/keycloak_user_password secrets/upstream_assertion_key.pem secrets/backend_assertion_key.pem
+#
+# The backend assertion key signs the client assertions of FerroSMART's own
+# SMART Backend Services client (docs/architecture.md §13.33).
 #
 # The realm is app/ferrosmart/examples/keycloak/ferrosmart-realm.json, with
 # fixed ids; its placeholders take the password, FerroSMART's JWK Set URL
@@ -95,10 +99,13 @@ services:
       FERROSMART__FERROSMART__ROLE__0__NAME: clinician
       FERROSMART__FERROSMART__ROLE__0__SCOPES__0: user/Patient.rs
       FERROSMART__FERROSMART__ROLE__0__SCOPES__1: user/Observation.rs
+      # FerroSMART's own Backend Services client (docs/architecture.md §13.33).
+      FERROSMART__FERROSMART__BACKEND__KEYS__PRIVATE_KEY_FILE: /run/secrets/backend_assertion_key
     secrets:
       - database_url
       - signing_key
       - upstream_assertion_key
+      - backend_assertion_key
     volumes:
       - type: bind
         source: ./app/ferrosmart/examples/keycloak/example-app.json
@@ -108,5 +115,7 @@ services:
 secrets:
   upstream_assertion_key:
     file: ./secrets/upstream_assertion_key.pem
+  backend_assertion_key:
+    file: ./secrets/backend_assertion_key.pem
   keycloak_user_password:
     file: ./secrets/keycloak_user_password

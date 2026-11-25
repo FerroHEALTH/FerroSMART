@@ -15,6 +15,7 @@ pub mod audit;
 pub mod audit_feed;
 pub mod audit_log;
 pub mod authorize;
+pub mod backend;
 pub mod brands;
 pub mod cli;
 pub mod client_keys;

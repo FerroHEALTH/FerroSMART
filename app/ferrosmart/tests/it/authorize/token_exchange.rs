@@ -59,7 +59,7 @@ async fn platform() -> Platform {
     );
     let smart = Smart::start_over(
         &grants,
-        "[\"patient/composition-*.r\", \"patient/aql-*.s\"]",
+        "[\"patient/composition-*.r\", \"patient/aql-*.s\", \"user/composition-*.r\", \"user/aql-*.s\"]",
         "[\"user/Observation.rs\"]",
         &format!(
             "[[ferrosmart.resource]]\nbase = {fhir_base:?}\n\
@@ -208,8 +208,10 @@ async fn a_patient_s_own_token_is_exchanged_for_their_ehr_at_the_paired_base() {
     platform.smart.stop().await;
 }
 
+// NOTE: RFC 8693 §2.1, a professional's own token is exchanged for one that
+// names them at the paired openEHR base, within their own `user/` permissions.
 #[tokio::test]
-async fn a_professional_s_or_a_machine_s_token_is_never_exchanged_and_is_recorded() {
+async fn a_professional_s_token_is_exchanged_as_them_with_user_scopes() {
     let platform = platform().await;
     let smart = &platform.smart;
     let professional = token_at_fhir(
@@ -224,8 +226,36 @@ async fn a_professional_s_or_a_machine_s_token_is_never_exchanged_and_is_recorde
         &[],
     )
     .await;
-    assert_eq!(StatusCode::BAD_REQUEST, status);
-    assert_eq!(json!("invalid_request"), body["error"]);
+    assert_eq!(StatusCode::OK, status, "{body}");
+    assert_eq!(json!("user/composition-*.r user/aql-*.s"), body["scope"]);
+    let issued = jwt_claims(&body, "access_token");
+    let original = jwt_claims(&professional, "access_token");
+    assert_eq!(original["sub"], issued["sub"]);
+    assert_eq!(json!(platform.openehr_base), issued["aud"]);
+    assert_eq!(json!("bridge"), issued["client_id"]);
+    assert_eq!(json!("Practitioner/synthetic-1"), issued["fhirUser"]);
+    assert!(issued.get("act").is_none(), "no actor: {issued}");
+    assert!(issued.get("patient").is_none(), "no patient: {issued}");
+    assert!(issued.get("ehrId").is_none(), "no EHR: {issued}");
+    let (status, body) = exchange(
+        smart,
+        professional["access_token"].as_str().expect("a token"),
+        &[("scope", "patient/composition-*.r")],
+    )
+    .await;
+    assert_eq!(StatusCode::BAD_REQUEST, status, "{body}");
+    assert_eq!(
+        json!("invalid_scope"),
+        body["error"],
+        "never the patient compartment"
+    );
+    platform.smart.stop().await;
+}
+
+#[tokio::test]
+async fn a_machine_s_token_is_never_exchanged_and_is_recorded() {
+    let platform = platform().await;
+    let smart = &platform.smart;
     let now = jiff::Timestamp::now().as_second();
     let machine = smart
         .settings
@@ -263,7 +293,7 @@ async fn a_professional_s_or_a_machine_s_token_is_never_exchanged_and_is_recorde
         .iter()
         .filter(|record| record.to_string().contains("invalid_request"))
         .count();
-    assert_eq!(2, refused, "each refusal is recorded");
+    assert_eq!(1, refused, "the refusal is recorded");
     platform.smart.stop().await;
 }
 

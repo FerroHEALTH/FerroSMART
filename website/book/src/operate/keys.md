@@ -3,15 +3,17 @@
 
 # Keys and rotation
 
-FerroSMART holds two rings of keys, each for one purpose, so a key of one
+FerroSMART holds three rings of keys, each for one purpose, so a key of one
 kind signs nothing the other is trusted for (RFC 8725 §3.12):
 
 | Ring | Configured in | Published at | Signs |
 |---|---|---|---|
 | The token keys | `[ferrosmart.keys]` | `{issuer}/jwks`, which every discovery document names | Access tokens and ID Tokens |
 | The assertion keys | `[ferrosmart.upstream.oidc.private_key_jwt.keys]` | `{issuer}/upstream-jwks`, which no discovery document names | FerroSMART's own client assertions to the identity provider |
+| The backend keys | `[ferrosmart.backend.keys]` | Its own client registration, by value | The client assertions of FerroSMART's own SMART Backend Services client to its token endpoint |
 
-The two rings may share no key; FerroSMART refuses to start when they do.
+The token keys share no key with either assertion ring; FerroSMART refuses
+to start when they do.
 Each key is a PEM file from a mounted secret. The private key never enters
 the database.
 
@@ -97,3 +99,14 @@ The assertion ring rotates by its files, with a restart at each step:
    by itself after that long; at `0s` it stays until you remove
    `previous_private_key_file` and restart. Remove an old certificate from
    the provider after this step.
+
+## The backend keys
+
+FerroSMART's own SMART Backend Services client (`[ferrosmart.backend]`)
+signs an assertion for each token it requests from its own token endpoint:
+`iss` and `sub` its client id, `aud` the token endpoint, a unique `jti`,
+`exp` 60 seconds ahead, `typ` `JWT`, under `ES384` or `RS384`. Before each
+request FerroSMART checks its client registration against the ring and
+writes the ring's published keys into it when they differ, so the ring
+rotates by its files as the assertion ring does, each step a restart, with
+nothing to upload.

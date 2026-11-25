@@ -321,6 +321,12 @@ fn example_config(example: &str, keys: &Keys, database: Option<&Database>) -> Co
         std::fs::write(&path, certificate.pem()).expect("the certificate is written");
         jwt.certificate_file = Some(path);
     }
+    let backend = config
+        .ferrosmart
+        .backend
+        .as_mut()
+        .expect("the example names FerroSMART's Backend Services client");
+    backend.keys.private_key_file = Some(crate::support::ec_key(keys.dir.path(), "backend.pem"));
     config
 }
 

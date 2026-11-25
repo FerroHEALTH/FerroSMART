@@ -755,3 +755,103 @@ fn the_deployment_s_name_is_one_key_the_brand_takes_by_default() {
         "the branding name is gone"
     );
 }
+
+/// The environment of a case that names its own `[ferrosmart.backend]`, or
+/// none: the unreached database and the resource server `kind`.
+fn backend_environment(kind: &str) -> std::collections::BTreeMap<String, String> {
+    std::collections::BTreeMap::from([
+        (
+            String::from("FERROSMART__FERROSMART__DATABASE__URL"),
+            String::from(crate::support::UNREACHED_DATABASE),
+        ),
+        (
+            String::from("FERROSMART__FERROSMART__RESOURCE"),
+            format!("[{{ base = \"https://ehr.example.org/v1\", kind = \"{kind}\" }}]"),
+        ),
+    ])
+}
+
+/// Returns the configuration of `text` over [`backend_environment`].
+fn with_backend(text: &str, kind: &str) -> ferrosmart::config::Config {
+    ferrosmart::config::Config::from_sources(Some(text), &backend_environment(kind))
+        .expect("the configuration reads")
+}
+
+// NOTE: SMART App Launch 2.2.0, Backend Services; docs/architecture.md §13.33, a
+// login at a FHIR base reads the person's own record as FerroSMART's client.
+#[test]
+fn a_login_at_a_fhir_base_needs_the_backend_client() {
+    let keys = Keys::new();
+    let text = private_key_jwt(&keys, "");
+    assert!(matches!(
+        with_backend(&text, "fhir").resolve(),
+        Err(Error::Backend {
+            rule: "people log in at a FHIR base, so `[ferrosmart.backend]` is set"
+        })
+    ));
+    assert!(
+        with_backend(&text, "openehr").resolve().is_ok(),
+        "no FHIR base, no backend client"
+    );
+    let key = ec_key(keys.dir.path(), "backend.pem");
+    let backend = format!(
+        "[ferrosmart.backend.keys]\nprivate_key_file = {:?}\n",
+        key.display().to_string()
+    );
+    let settings = with_backend(&format!("{text}{backend}"), "fhir")
+        .resolve()
+        .expect("resolves");
+    let resolved = settings.backend.expect("the backend client");
+    // NOTE: IHE IUA §3.71.4.2.2.1, the client is FerroSMART under its issuer
+    // identifier, so no `client_id` is configured.
+    assert_eq!("https://smart.example.org", resolved.client_id);
+    let named = format!("{text}[ferrosmart.backend]\nclient_id = \"ferrosmart\"\n{backend}");
+    assert!(
+        ferrosmart::config::Config::from_sources(Some(&named), &backend_environment("fhir"))
+            .is_err(),
+        "client_id is an unknown key"
+    );
+}
+
+// NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric, the server
+// validates RS384 and ES384, and RFC 8725 §3.12 keeps assertion keys off tokens.
+#[test]
+fn a_backend_client_outside_the_asymmetric_profile_is_refused() {
+    let keys = Keys::new();
+    let text = private_key_jwt(&keys, "");
+    let ec = ec_key(keys.dir.path(), "backend.pem").display().to_string();
+    let rsa = crate::support::rsa_key(keys.dir.path(), "backend-rsa.pem")
+        .display()
+        .to_string();
+    let token = keys.current.display().to_string();
+    for (table, refused) in [
+        (
+            format!(
+                "algorithm = \"RS384\"\n[ferrosmart.backend.keys]\nprivate_key_file = {rsa:?}\n"
+            ),
+            None,
+        ),
+        (
+            format!(
+                "algorithm = \"ES256\"\n[ferrosmart.backend.keys]\nprivate_key_file = {ec:?}\n"
+            ),
+            Some("`algorithm` is `ES384` or `RS384`"),
+        ),
+        (
+            format!(
+                "algorithm = \"RS384\"\n[ferrosmart.backend.keys]\nprivate_key_file = {token:?}\n"
+            ),
+            Some("the assertion keys share no key with `[ferrosmart.keys]`"),
+        ),
+    ] {
+        let resolved =
+            with_backend(&format!("{text}[ferrosmart.backend]\n{table}"), "fhir").resolve();
+        match refused {
+            None => assert!(resolved.is_ok(), "{table}"),
+            Some(rule) => assert!(
+                matches!(&resolved, Err(Error::Backend { rule: named }) if *named == rule),
+                "{table}"
+            ),
+        }
+    }
+}

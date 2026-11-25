@@ -7,16 +7,20 @@
 #
 #   docker compose -f compose.yaml -f compose.zitadel.yaml up
 #
-# SECRETS. Three more files under ./secrets, made the way compose.yaml's are:
+# SECRETS. Four more files under ./secrets, made the way compose.yaml's are:
 #
 #   openssl rand -hex 16 | tr -d '\n' > secrets/zitadel_masterkey
 #   printf 'A1!%s' "$(openssl rand -hex 12)" > secrets/zitadel_user_password
 #   openssl rand -hex 32 | tr -d '\n' > secrets/zitadel_login_cookie_secret
+#   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out secrets/backend_assertion_key.pem
+#   chmod 0644 secrets/backend_assertion_key.pem
 #
 # The masterkey encrypts ZITADEL's keys; the user password is the
 # `clinician`'s, which must meet ZITADEL's password complexity policy (an
 # upper case letter, a digit and a symbol, `cmd/defaults.yaml`); the cookie
-# secret signs the Login v2 UI's session.
+# secret signs the Login v2 UI's session; the backend assertion key signs
+# the client assertions of FerroSMART's own SMART Backend Services client
+# (docs/architecture.md §13.33).
 #
 # WHAT RUNS. ZITADEL v4.20.3 with its Login v2 UI on its own PostgreSQL, and
 # `zitadel-bootstrap` once: app/ferrosmart/examples/zitadel/bootstrap.sh makes
@@ -190,6 +194,10 @@ services:
       # The configuration the bootstrap wrote, with the client id ZITADEL
       # generated; compose.yaml's environment sets the rest and wins.
       FERROSMART_CONFIG: /zitadel/bootstrap/out/ferrosmart.toml
+      # FerroSMART's own Backend Services client (docs/architecture.md §13.33).
+      FERROSMART__FERROSMART__BACKEND__KEYS__PRIVATE_KEY_FILE: /run/secrets/backend_assertion_key
+    secrets:
+      - backend_assertion_key
     volumes:
       - zitadel-bootstrap:/zitadel/bootstrap:ro
 
@@ -200,6 +208,8 @@ secrets:
     file: ./secrets/zitadel_user_password
   zitadel_login_cookie_secret:
     file: ./secrets/zitadel_login_cookie_secret
+  backend_assertion_key:
+    file: ./secrets/backend_assertion_key.pem
 
 volumes:
   zitadel-data:

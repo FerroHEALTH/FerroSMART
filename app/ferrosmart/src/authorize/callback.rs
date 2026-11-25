@@ -416,7 +416,7 @@ async fn proceed(
     // chosen within the authorization flow, before the consent.
     if pending.launch_context.is_none() && offered.contains(&"launch/patient") {
         // NOTE: docs/architecture.md §13.6 item 4 (owner, 2026-11-19, #673): a patient's
-        // own record is the context, read again as them, with no picker.
+        // own record is the context, read for them, with no picker.
         if let Some(id) = &own {
             return match state.store().pending(&pending.id).await {
                 Ok(Some(signed_in)) => crate::picker::own_record(state, &signed_in, from, id).await,

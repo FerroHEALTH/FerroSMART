@@ -11,16 +11,18 @@
 //! that widget itself, between the login and the consent: a FHIR R4 search
 //! of `Patient` at the request's resource server, by name or identifier.
 //!
-//! The search runs with the signed-in person's own access: FerroSMART issues
-//! itself a token whose `sub` is the person's pairwise subject and whose
-//! `fhirUser` is theirs, for the one resource server, with the one scope
-//! `user/Patient.rs`, living [`TOKEN_SECONDS`], and revoked once the
-//! request is answered. The resource server applies that person's rules,
-//! so the picker offers only the patients they may see, and a patient they
-//! cannot read is never chosen. The issue and the revocation each commit
-//! with their record, and every search and read writes the access record
-//! of Regulation (EU) 2025/327 Annex II 3.2 through `ehds-logging`. The
-//! search parameters, the token and the page are our own design.
+//! The search runs with the signed-in person's own access: a grant of the
+//! person to FerroSMART's own client for the one resource server and the one
+//! scope `user/Patient.rs`, whose token lives [`TOKEN_SECONDS`] and is
+//! revoked with the grant once the request is answered. The resource server
+//! applies that person's rules, and one that carries the person onward
+//! exchanges the token (RFC 8693 §2.1), so the picker offers only the
+//! patients they may see. The person's own record is read by FerroSMART's
+//! SMART Backend Services client on their behalf (`docs/architecture.md`
+//! §13.33). Every token commits with its record, and every search and read
+//! writes the access record of Regulation (EU) 2025/327 Annex II 3.2 through
+//! `ehds-logging`. The search parameters, the grant and the page are our own
+//! design.
 //!
 //! At a FHIR resource server the picker also offers the chosen patient's
 //! encounters when the app asks for `launch/encounter` (Standalone apps,
@@ -35,29 +37,20 @@ use std::sync::Arc;
 use axum::body::Bytes;
 use axum::extract::{RawQuery, State};
 use axum::response::Response;
-use ehds_logging::classify::Evidence;
-use ehds_logging::label::LabelPolicy;
-use ehds_logging::map::CategoryMap;
-use ehds_logging::record::{
-    AccessRecord, Accessor, Action, Coded, DataSubject, Origin, Outcome, PatientIdentifier,
-    Professional, Purpose, Request,
-};
-use ehds_logging::retention::RetentionPolicy;
+use ehds_logging::record::{Action, DataSubject, PatientIdentifier, Request};
 use http::HeaderMap;
-use ihe_atna::balp::NetworkAddress;
 use secrecy::SecretString;
-use serde::Serialize;
 use serde_json::Value;
 use url::Url;
 
-use crate::audit::{self, Connected, Event, Happening};
+use crate::audit::{self, Connected};
 use crate::authorize::callback::{Asked, onward};
 use crate::authorize::{Back, logged_in, see_other};
 use crate::form::Params;
 use crate::launch::context::Context;
 use crate::pages::{self, Fault};
 use crate::server::AppState;
-use crate::store::{IssuedToken, Pending};
+use crate::store::Pending;
 
 pub mod encounter;
 pub mod fhir_user;
@@ -65,6 +58,7 @@ pub mod openehr;
 mod paired;
 pub mod patient_index;
 pub mod purpose;
+pub(crate) mod send;
 pub mod shortcuts;
 
 /// The route of the picker under the issuer.
@@ -76,7 +70,7 @@ pub const PICKER_SCOPE: &str = "user/Patient.rs";
 
 /// How long the picker's token lives, in seconds: one search and its read.
 /// No specification governs the value: our own design.
-pub const TOKEN_SECONDS: i64 = 30;
+pub const TOKEN_SECONDS: u64 = 30;
 
 /// The most patients one search shows.
 pub const MAX_RESULTS: usize = 20;
@@ -196,14 +190,15 @@ pub(crate) async fn own_record(
 }
 
 /// Returns the openEHR base paired with the FHIR base `fhir_base`, with the
-/// id of the EHR of its patient `id` read as `person`; none when no base is
-/// paired with it or the patient has no EHR the person may see there.
+/// id of the EHR of its patient `id`: the patient read for `person` by
+/// FerroSMART's Backend Services client, the EHR looked up as them; none
+/// when no base is paired with it or the patient has no EHR they may see.
 ///
 /// # Errors
 /// Returns the [`PickerError`] of a read or lookup that failed.
 pub(crate) async fn paired_ehr(
     state: &AppState,
-    person: &Person<'_>,
+    person: &send::Person<'_>,
     from: IpAddr,
     fhir_base: &str,
     id: &str,
@@ -216,8 +211,21 @@ pub(crate) async fn paired_ehr(
     else {
         return Ok(None);
     };
-    let ehr = paired::ehr_of(state, person, from, (base, pairing), id).await?;
+    // NOTE: the Backend Services read reaches the token endpoint, whose exchange
+    // reaches this lookup, so the future is boxed (Rust reference, async recursion).
+    let ehr = Box::pin(paired::ehr_of(state, person, from, (base, pairing), id)).await?;
     Ok(ehr.map(|ehr| (base.clone(), ehr)))
+}
+
+/// Returns the openEHR base paired with the FHIR base `fhir_base`, when
+/// one is.
+pub(crate) fn paired_base<'s>(state: &'s AppState, fhir_base: &str) -> Option<&'s str> {
+    state
+        .settings()
+        .pairings
+        .iter()
+        .find(|(_, pairing)| pairing.fhir_base == fhir_base)
+        .map(|(base, _)| base.as_str())
 }
 
 /// Returns the subject namespace of `audience` when it is an openEHR
@@ -259,9 +267,15 @@ pub enum PickerError {
     /// The token could not be issued, revoked or recorded.
     #[error("the picker's token could not be issued or recorded")]
     Record(#[source] audit::RecordFailure),
-    /// The token could not be signed.
-    #[error("the picker's token could not be signed")]
-    Sign(#[source] ferrohealth_smart::client::assertion::AssertionError),
+    /// The token could not be issued.
+    #[error("the picker's token could not be issued: {description}")]
+    Issue {
+        /// Why.
+        description: &'static str,
+    },
+    /// FerroSMART's Backend Services token could not be obtained.
+    #[error("FerroSMART's Backend Services token could not be obtained")]
+    Backend(#[source] crate::backend::BackendError),
     /// The resource server could not be reached or answered badly.
     #[error("the resource server could not be searched")]
     Fetch(#[source] reqwest::Error),
@@ -345,7 +359,14 @@ pub async fn picker_get(
         }
         pairs.append_pair("_count", &MAX_RESULTS.to_string());
     }
-    match as_person(&state, &pending, from, &fhir_ask(&url, base, Action::Query)).await {
+    match send::as_person(
+        &state,
+        &pending,
+        from,
+        &fhir_ask(&url, base, Action::Query, PICKER_SCOPE),
+    )
+    .await
+    {
         Ok(Value::Object(bundle)) if bundle.get("resourceType") == Some(&Value::from("Bundle")) => {
             let found = patients(&Value::Object(bundle));
             pages::picker(
@@ -419,8 +440,11 @@ pub async fn picker_post(
     enter(&state, &pending, &context, from).await
 }
 
-/// Reads the patient `id` at the FHIR base `base` as the signed-in person
+/// Reads the patient `id` at the FHIR base `base` for the signed-in person
 /// of `pending`, or returns the page that says why it could not.
+///
+/// The person's own record is read by FerroSMART's Backend Services client
+/// on their behalf; any other patient is read again as the person.
 async fn read_patient(
     state: &AppState,
     pending: &Pending,
@@ -430,17 +454,27 @@ async fn read_patient(
 ) -> Result<Value, Box<Response>> {
     let url = patient_url(base, Some(id))
         .map_err(|error| Box::new(pages::server_error(state, &error)))?;
-    // NOTE: SMART App Launch 2.2.0, Scopes and Launch Context, `patient` is the
-    // id of a patient the person may see, so the choice is read again as them.
-    match as_person(state, pending, from, &fhir_ask(&url, base, Action::Read)).await {
+    let person = send::Person::of(pending)
+        .ok_or_else(|| Box::new(pages::server_error(state, &PickerError::Unreadable)))?;
+    let own = own_patient(state, &pending.audience, pending.fhir_user.as_deref()) == Some(id);
+    let read = if own {
+        // NOTE: SMART App Launch 2.2.0, Backend Services, no user authorization
+        // exists yet for the person's own record, so FerroSMART reads it itself.
+        let ask = fhir_ask(&url, base, Action::Read, crate::backend::SCOPE);
+        send::as_backend(state, &person, from, &ask).await
+    } else {
+        // NOTE: SMART App Launch 2.2.0, Scopes and Launch Context, `patient` is the
+        // id of a patient the person may see, so the choice is read again as them.
+        let ask = fhir_ask(&url, base, Action::Read, PICKER_SCOPE);
+        send::as_the(state, &person, from, &ask).await
+    };
+    match read {
         Ok(resource) if resource.get("id").and_then(Value::as_str) == Some(id) => Ok(resource),
         Ok(_) => Err(Box::new(pages::server_error(
             state,
             &PickerError::Unreadable,
         ))),
-        Err(PickerError::Refused(_))
-            if own_patient(state, &pending.audience, pending.fhir_user.as_deref()) == Some(id) =>
-        {
+        Err(PickerError::Refused(_)) if own => {
             Err(Box::new(pages::fault(state, Fault::NoOwnRecord)))
         }
         Err(PickerError::Refused(_)) => Err(Box::new(pages::fault(state, Fault::BadRequest))),
@@ -523,34 +557,6 @@ fn is_fhir_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'.')
 }
 
-/// The claims of the picker's token (RFC 9068 §2.2).
-#[derive(Debug, Serialize)]
-struct PickerClaims<'a> {
-    /// FerroSMART.
-    iss: &'a str,
-    /// The signed-in person.
-    sub: &'a str,
-    /// The resource server.
-    aud: &'a str,
-    /// The expiry.
-    exp: i64,
-    /// The issue time.
-    iat: i64,
-    /// The token id.
-    jti: &'a str,
-    /// FerroSMART itself, the client the token is issued to.
-    client_id: &'a str,
-    /// [`PICKER_SCOPE`], or [`openehr::EHR_SCOPE`] at an openEHR server.
-    scope: &'a str,
-    /// The person's `fhirUser`.
-    #[serde(rename = "fhirUser", skip_serializing_if = "Option::is_none")]
-    fhir_user: Option<&'a str>,
-    /// The person's mapped roles, as the access token of the same sign-in
-    /// carries them (RFC 9068 §2.2.3.1).
-    #[serde(skip_serializing_if = "<[String]>::is_empty")]
-    roles: &'a [String],
-}
-
 /// One request the picker sends as the signed-in person: where, with
 /// which scope, what it accepts, and how its access is recorded.
 struct Ask<'a> {
@@ -587,11 +593,11 @@ struct Access {
 }
 
 /// Returns the FHIR search or read of `url` at the base `audience`.
-fn fhir_ask<'a>(url: &'a Url, audience: &'a str, action: Action) -> Ask<'a> {
+fn fhir_ask<'a>(url: &'a Url, audience: &'a str, action: Action, scope: &'static str) -> Ask<'a> {
     Ask {
         url,
         audience,
-        scope: PICKER_SCOPE,
+        scope,
         accept: "application/fhir+json",
         describe: Box::new(move |fetched| {
             let delivered = match fetched {
@@ -654,296 +660,6 @@ fn entries<'a>(bundle: &'a Value, kind: &'a str) -> impl Iterator<Item = &'a Val
         .flatten()
         .filter_map(|entry| entry.get("resource"))
         .filter(move |resource| resource.get("resourceType").and_then(Value::as_str) == Some(kind))
-}
-
-/// The person a lookup is sent as: who logged in, for which client, at
-/// which resource server.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Person<'a> {
-    /// Their FerroSMART `sub`.
-    pub(crate) subject: &'a str,
-    /// Their `fhirUser`, when they have one.
-    pub(crate) fhir_user: Option<&'a str>,
-    /// Their mapped roles.
-    pub(crate) roles: &'a [String],
-    /// The client the lookup serves.
-    pub(crate) client_id: Option<&'a str>,
-    /// The name the record gives them.
-    pub(crate) display_name: Option<&'a str>,
-}
-
-impl<'a> Person<'a> {
-    /// Returns the person signed in for `pending`, none before the login.
-    fn of(pending: &'a Pending) -> Option<Self> {
-        Some(Self {
-            subject: pending.subject.as_deref()?,
-            fhir_user: pending.fhir_user.as_deref(),
-            roles: &pending.roles,
-            client_id: pending.client_id.as_deref(),
-            display_name: pending.display_name.as_deref(),
-        })
-    }
-}
-
-/// Sends `ask` as the signed-in person of `pending` with a token issued for
-/// this request alone, records the access, revokes the token and returns
-/// the answer.
-async fn as_person(
-    state: &AppState,
-    pending: &Pending,
-    from: IpAddr,
-    ask: &Ask<'_>,
-) -> Result<Value, PickerError> {
-    let person = Person::of(pending).ok_or(PickerError::Unreadable)?;
-    as_the(state, &person, from, ask).await
-}
-
-/// Sends `ask` as `person`, as [`as_person`] does.
-async fn as_the(
-    state: &AppState,
-    person: &Person<'_>,
-    from: IpAddr,
-    ask: &Ask<'_>,
-) -> Result<Value, PickerError> {
-    let subject = person.subject;
-    let settings = state.settings();
-    let jti = crate::authorize::random().map_err(PickerError::Random)?;
-    let issued_at = jiff::Timestamp::now().as_second();
-    let expires_at = issued_at.saturating_add(TOKEN_SECONDS);
-    let claims = PickerClaims {
-        iss: &settings.issuer,
-        sub: subject,
-        aud: ask.audience,
-        exp: expires_at,
-        iat: issued_at,
-        jti: &jti,
-        client_id: &settings.issuer,
-        scope: ask.scope,
-        fhir_user: person.fhir_user,
-        roles: person.roles,
-    };
-    // NOTE: RFC 9068 §2.1, typ at+jwt.
-    let token = settings
-        .keys
-        .ring()
-        .current()
-        .sign("at+jwt", &claims)
-        .map_err(PickerError::Sign)?;
-    let endpoint = settings.endpoint_url(PICKER_ROUTE);
-    let happening = |event, details| Happening {
-        event,
-        issuer: &settings.issuer,
-        client_id: person.client_id,
-        subject: Some(subject),
-        from,
-        endpoint: &endpoint,
-        details,
-    };
-    let mut tx = state
-        .store()
-        .begin()
-        .await
-        .map_err(|error| PickerError::Record(audit::RecordFailure::Store(error)))?;
-    tx.insert_token(&IssuedToken {
-        jti: &jti,
-        client_id: &settings.issuer,
-        subject,
-        audience: ask.audience,
-        scope: ask.scope,
-        issued_at,
-        expires_at,
-        grant_id: None,
-        code_hash: None,
-    })
-    .await
-    .map_err(|error| PickerError::Record(audit::RecordFailure::Store(error)))?;
-    state
-        .audit()
-        .commit_happening(
-            tx,
-            &happening(Event::PickerToken, vec![("jti", jti.clone())]),
-        )
-        .await
-        .map_err(PickerError::Record)?;
-    let fetched = fetch(state, ask, &token).await;
-    let asker = Asker {
-        person,
-        from,
-        audience: ask.audience,
-        purpose: ask.purpose,
-    };
-    let recorded = record_access(state, &asker, (ask.describe)(&fetched)).await;
-    let revoked = revoke(
-        state,
-        &jti,
-        happening(Event::TokenRevoked, vec![("jti", jti.clone())]),
-    )
-    .await;
-    recorded?;
-    revoked?;
-    fetched
-}
-
-/// Sends `ask` with the bearer `token`.
-async fn fetch(state: &AppState, ask: &Ask<'_>, token: &str) -> Result<Value, PickerError> {
-    let mut request = state
-        .fhir()
-        .get(ask.url.clone())
-        .bearer_auth(token)
-        .header(http::header::ACCEPT, ask.accept)
-        .timeout(REQUEST_TIMEOUT);
-    if let Some(declared) = ask.purpose {
-        request = request.header(declared.header, &declared.purpose.code);
-    }
-    let answer = request.send().await.map_err(PickerError::Fetch)?;
-    let status = answer.status();
-    if !status.is_success() {
-        return Err(PickerError::Refused(status));
-    }
-    answer.json::<Value>().await.map_err(PickerError::Fetch)
-}
-
-/// Revokes the picker's token `jti` with the record `happening`.
-async fn revoke(state: &AppState, jti: &str, happening: Happening<'_>) -> Result<(), PickerError> {
-    let mut tx = state
-        .store()
-        .begin()
-        .await
-        .map_err(|error| PickerError::Record(audit::RecordFailure::Store(error)))?;
-    tx.revoke_access_token(jti)
-        .await
-        .map_err(|error| PickerError::Record(audit::RecordFailure::Store(error)))?;
-    state
-        .audit()
-        .commit_happening(tx, &happening)
-        .await
-        .map_err(PickerError::Record)
-}
-
-/// Who sent one request of the picker, from where and to which server.
-struct Asker<'a> {
-    /// The person.
-    person: &'a Person<'a>,
-    /// The browser's address.
-    from: IpAddr,
-    /// The base of the resource server asked.
-    audience: &'a str,
-    /// The purpose of use the request declared.
-    purpose: Option<purpose::Declared<'a>>,
-}
-
-/// Stores the access record of one request `asker` sent, as `access`
-/// describes it (Regulation (EU) 2025/327 Annex II 3.2).
-async fn record_access(
-    state: &AppState,
-    asker: &Asker<'_>,
-    access: Access,
-) -> Result<(), PickerError> {
-    let Asker {
-        person,
-        from,
-        audience,
-        ..
-    } = *asker;
-    let settings = state.settings();
-    let recorded = jiff::Timestamp::now();
-    // NOTE: Regulation (EU) 2025/327 Art 14(1), a Patient's demographics and an
-    // EHR's id are none of the priority categories, so the access has no category.
-    let categories = CategoryMap::default().classify(&Evidence::no_category());
-    let origins = vec![Origin {
-        endpoint: Some(audience.to_owned()),
-        node: None,
-        system_id: None,
-        status: None,
-        rows: None,
-        version: None,
-        created_ehr: None,
-        categories: None,
-    }];
-    let keys = || origins.iter().filter_map(Origin::key);
-    let retention = RetentionPolicy::default().retain(recorded, &categories, keys());
-    let labels = LabelPolicy::default().label(&categories, keys());
-    let outcome = if access.delivered.is_some() {
-        Outcome::Success
-    } else {
-        Outcome::MinorFailure
-    };
-    let record = AccessRecord {
-        action: access.action,
-        recorded,
-        outcome,
-        outcome_description: None,
-        accessor: accessor(&settings.issuer, asker),
-        subject: access.subject,
-        categories,
-        delivered: access.delivered,
-        origins,
-        origin_count: None,
-        request: Request {
-            client_address: Some(from),
-            ..access.request
-        },
-        retention,
-        labels,
-        emergency: None,
-        inserted: None,
-        transformations: Vec::new(),
-    };
-    let endpoint = NetworkAddress::uri(&settings.endpoint_url(PICKER_ROUTE));
-    let exchange = ehds_logging::balp::exchange(&record, &endpoint);
-    let row = state
-        .audit()
-        .row(&exchange, "access", Some(person.subject), person.client_id)
-        .map_err(PickerError::Record)?;
-    state
-        .audit()
-        .record(state.store(), &row)
-        .await
-        .map_err(PickerError::Record)
-}
-
-/// Returns the person of `asker` under FerroSMART's `issuer`, as the
-/// access record names the accessor.
-fn accessor(issuer: &str, asker: &Asker<'_>) -> Accessor {
-    let person = asker.person;
-    Accessor {
-        issuer: Some(issuer.to_owned()),
-        subject: person.subject.to_owned(),
-        client_id: person.client_id.map(str::to_owned),
-        audience: Some(asker.audience.to_owned()),
-        provider: None,
-        acting: None,
-        roles: person
-            .roles
-            .iter()
-            .map(|role| Coded {
-                system: None,
-                code: role.clone(),
-            })
-            .collect(),
-        token_id: None,
-        assurance: None,
-        professional: Professional {
-            name: person.display_name.map(str::to_owned),
-            ..Professional::default()
-        },
-        alt_id: None,
-        purposes: asker
-            .purpose
-            .map(|declared| Purpose {
-                system: Some(declared.purpose.system.clone()),
-                code: declared.purpose.code.clone(),
-            })
-            .into_iter()
-            .collect(),
-        policies: Vec::new(),
-        relayed: None,
-        binding: None,
-        actors: Vec::new(),
-        represents: None,
-        acts_for: None,
-        facilities: Vec::new(),
-    }
 }
 
 /// Returns the patients of the search Bundle `bundle`, at most

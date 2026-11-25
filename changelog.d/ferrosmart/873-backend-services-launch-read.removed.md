@@ -1,0 +1,1 @@
+- The token FerroSMART issued itself for the signed-in person with no grant (`user/Patient.rs` or `user/composition-*.r`, `client_id` the issuer), and the self-signed "system" token the patient index was asked with, are gone with no replacement setting.

@@ -43,6 +43,12 @@ pub enum Error {
         #[source]
         source: ferrohealth_smart::metadata::DiscoveryError,
     },
+    /// `[ferrosmart.backend]` breaks a rule.
+    #[error("`ferrosmart.backend`: {rule}")]
+    Backend {
+        /// The rule broken.
+        rule: &'static str,
+    },
     /// An upstream provider's table breaks a rule.
     #[error("`ferrosmart.upstream`: {rule}")]
     Upstream {

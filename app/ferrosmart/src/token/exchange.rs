@@ -1,17 +1,18 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! The token exchange of a patient's own token for a token at the openEHR
+//! The token exchange of a person's own token for a token at the openEHR
 //! base paired with its FHIR base (RFC 8693 §2; `docs/architecture.md`
 //! §13.29).
 //!
-//! A product that serves a person at a FHIR base reads the person's own
-//! EHR at the paired openEHR base as them, so the CDR applies the person's
-//! own-access rules and names them in its access record. The issued token
-//! has the subject token's `sub`, `fhirUser`, `patient`, `acr` and
-//! `auth_time`, the patient's `ehrId` at the openEHR base, and the
-//! exchanging client as `client_id`, with no `act`: the product acts for
-//! the person, never as someone else (3.14).
+//! A product that serves a person at a FHIR base reads the CDR at the
+//! paired openEHR base as them, so the CDR applies the person's own rules
+//! and names them in its access record. A patient's own token becomes one
+//! with their `patient` and `ehrId` and the `patient/` reads; a
+//! professional's own token one with the `user/` reads and no patient. The
+//! issued token has the subject token's `sub`, `fhirUser`, `acr` and
+//! `auth_time`, and the exchanging client as `client_id`, with no `act`: the
+//! product acts for the person, never as someone else (3.14).
 
 use std::net::IpAddr;
 use std::time::Duration;
@@ -39,6 +40,11 @@ pub const ACCESS_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:access_tok
 /// master08 §Resource Scopes, the `patient` compartment).
 pub const EXCHANGE_CEILING: [&str; 2] = ["patient/composition-*.r", "patient/aql-*.s"];
 
+/// The widest scopes a professional's exchanged token carries: reading
+/// compositions and running a query within their own permissions (SMART on
+/// openEHR, master08 §Resource Scopes, the `user` compartment).
+pub const PROFESSIONAL_CEILING: [&str; 2] = ["user/composition-*.r", "user/aql-*.s"];
+
 /// The longest an exchanged token lives.
 ///
 /// It stays below `access_token_lifetime` and never passes its subject
@@ -65,42 +71,47 @@ pub(super) async fn token_exchange(
     may_use(&client, GrantType::TokenExchange)?;
     let subject_token = read_request(form)?;
     let (jti, record) = patient_token(state, subject_token).await?;
-    let grant = record
-        .grant
-        .as_ref()
-        .ok_or(Refusal::request("the subject token is not a patient's own"))?;
-    let patient = own_patient(&record.audience, grant)
-        .ok_or(Refusal::request("the subject token is not a patient's own"))?;
-    let scope = exchanged_scope(&client, &record.scope, form.get("scope"))?;
-    let person = crate::picker::Person {
+    let not_a_person = Refusal::request("the subject token is not a person's own");
+    let grant = record.grant.as_ref().ok_or(not_a_person.clone())?;
+    let subject = Subject::of(&record.audience, grant).ok_or(not_a_person)?;
+    let scope = exchanged_scope(&client, &record.scope, form.get("scope"), &subject)?;
+    let person = crate::picker::send::Person {
         subject: &record.subject,
         fhir_user: grant.fhir_user.as_deref(),
         roles: &grant.roles,
         client_id: Some(&client.client_id),
         display_name: None,
+        login: Authentication::of(grant),
     };
-    let (base, ehr_id) = crate::picker::paired_ehr(
-        state,
-        &person,
-        from,
-        &record.audience,
-        &patient.id,
-    )
-    .await
-    .map_err(|error| server_error("the patient's EHR could not be looked up", &error))?
-    .ok_or(Refusal {
-        error: "invalid_target",
-        description: "no openEHR base paired with the subject token's holds the patient's EHR",
-    })?;
+    let mut context = Map::new();
+    let (base, fhir_user) = match &subject {
+        Subject::Patient(patient) => {
+            let (base, ehr_id) =
+                crate::picker::paired_ehr(state, &person, from, &record.audience, &patient.id)
+                    .await
+                    .map_err(|error| server_error("the patient's EHR could not be looked up", &error))?
+                    .ok_or(Refusal {
+                        error: "invalid_target",
+                        description: "no openEHR base paired with the subject token's holds the patient's EHR",
+                    })?;
+            context.insert(String::from("patient"), Value::String(patient.id.clone()));
+            context.insert(String::from("ehrId"), Value::String(ehr_id));
+            (base, Some(patient.fhir_user.as_str()))
+        }
+        Subject::Professional => {
+            let base = crate::picker::paired_base(state, &record.audience).ok_or(Refusal {
+                error: "invalid_target",
+                description: "no openEHR base is paired with the subject token's",
+            })?;
+            (base.to_owned(), grant.fhir_user.as_deref())
+        }
+    };
     target(&client, &record.audience, &base, form)?;
     let now = jiff::Timestamp::now().as_second();
     let left = u64::try_from(record.expires_at.saturating_sub(now))
         .ok()
         .filter(|seconds| *seconds > 0)
         .ok_or(Refusal::request("the subject token has expired"))?;
-    let mut context = Map::new();
-    context.insert(String::from("patient"), Value::String(patient.id.clone()));
-    context.insert(String::from("ehrId"), Value::String(ehr_id));
     let issued = mint(
         state,
         &client,
@@ -108,7 +119,7 @@ pub(super) async fn token_exchange(
             subject: &record.subject,
             audience: &base,
             scope: &scope,
-            fhir_user: Some(&patient.fhir_user),
+            fhir_user,
             roles: &grant.roles,
             login: Some(Authentication::of(grant)),
             code_hash: None,
@@ -128,7 +139,7 @@ pub(super) async fn token_exchange(
         client_id = %client.client_id,
         subject_jti = %jti,
         issued_jti = %issued.jti,
-        "a patient's token was exchanged for their openEHR base"
+        "a person's token was exchanged for their openEHR base"
     );
     Ok(issued.exchanged())
 }
@@ -201,15 +212,7 @@ fn own_patient(base: &str, grant: &GrantRecord) -> Option<OwnPatient> {
         .unwrap_or(fhir_user);
     let id = relative.strip_prefix("Patient/")?;
     let patient = grant.context.get("patient").and_then(Value::as_str)?;
-    let clinical: Vec<&str> = grant
-        .scope
-        .split(' ')
-        .filter(|scope| {
-            ["patient/", "user/", "system/"]
-                .iter()
-                .any(|context| scope.starts_with(context))
-        })
-        .collect();
+    let clinical = clinical(&grant.scope);
     let own = id == patient
         && !id.is_empty()
         && !clinical.is_empty()
@@ -220,33 +223,93 @@ fn own_patient(base: &str, grant: &GrantRecord) -> Option<OwnPatient> {
     })
 }
 
+/// Whose own access a subject token is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Subject {
+    /// A patient's own access (`docs/architecture.md` §13.13).
+    Patient(OwnPatient),
+    /// A professional's own access: `user/` scopes alone, under a grant
+    /// whose `fhirUser` names no `Patient`.
+    Professional,
+}
+
+impl Subject {
+    /// Returns whose own access the token of `grant` at the FHIR `base` is.
+    fn of(base: &str, grant: &GrantRecord) -> Option<Self> {
+        if let Some(patient) = own_patient(base, grant) {
+            return Some(Self::Patient(patient));
+        }
+        professional(grant).then_some(Self::Professional)
+    }
+
+    /// Returns the scope context the subject reads in and the widest scopes
+    /// its exchanged token carries.
+    const fn ceiling(&self) -> (&'static str, &'static [&'static str]) {
+        match self {
+            Self::Patient(_) => ("patient/", &EXCHANGE_CEILING),
+            Self::Professional => ("user/", &PROFESSIONAL_CEILING),
+        }
+    }
+}
+
+/// Returns whether `grant` is a professional's own access: clinical scopes
+/// that are all `user/`, and a `fhirUser`, when it names one, that is no
+/// `Patient`.
+fn professional(grant: &GrantRecord) -> bool {
+    let names_patient = grant
+        .fhir_user
+        .as_deref()
+        .is_some_and(|fhir_user| fhir_user.rsplit('/').nth(1) == Some("Patient"));
+    let clinical = clinical(&grant.scope);
+    !names_patient
+        && !clinical.is_empty()
+        && clinical.iter().all(|scope| scope.starts_with("user/"))
+}
+
+/// Returns the clinical scopes of `scope`: those of the `patient/`, `user/`
+/// and `system/` contexts (SMART App Launch 2.2.0, Scopes for requesting
+/// clinical data).
+fn clinical(scope: &str) -> Vec<&str> {
+    scope
+        .split(' ')
+        .filter(|scope| {
+            ["patient/", "user/", "system/"]
+                .iter()
+                .any(|context| scope.starts_with(context))
+        })
+        .collect()
+}
+
 /// Returns the scope the exchanged token carries: the `requested` scopes,
-/// or those of [`EXCHANGE_CEILING`] the client's ceiling admits when none is
-/// named, each within both ceilings, and only while the subject token's
-/// `held` scope reads.
+/// or those of the `subject`'s ceiling the client's ceiling admits when none
+/// is named, each within both ceilings, and only while the subject token's
+/// `held` scope reads in the subject's context.
 fn exchanged_scope(
     client: &Client,
     held: &str,
     requested: Option<&str>,
+    subject: &Subject,
 ) -> Result<String, Refusal> {
     let invalid = |description| Refusal {
         error: "invalid_scope",
         description,
     };
+    let (context, ceiling) = subject.ceiling();
     // NOTE: RFC 8693 §2.1, the scope of the issued token is no wider than what the
-    // subject token lets its holder do: a patient read.
+    // subject token lets its holder do: a read in its own context.
     let reads = held.split(' ').any(|scope| {
-        scope.starts_with("patient/")
+        scope.starts_with(context)
             && scope.rsplit_once('.').is_some_and(|(_, permissions)| {
                 matches!(permissions, "read" | "*") || permissions.contains('r')
             })
     });
     if !reads {
-        return Err(invalid("the subject token reads nothing of the patient"));
+        return Err(invalid("the subject token reads nothing"));
     }
-    let ceiling = EXCHANGE_CEILING.map(String::from);
-    let defaults: Vec<&str> = EXCHANGE_CEILING
-        .into_iter()
+    let widest: Vec<String> = ceiling.iter().map(|scope| (*scope).to_owned()).collect();
+    let defaults: Vec<&str> = ceiling
+        .iter()
+        .copied()
         .filter(|scope| crate::scopes::admits(&client.scopes, scope))
         .collect();
     let asked: Vec<&str> = match requested {
@@ -259,7 +322,7 @@ fn exchanged_scope(
     let mut granted: Vec<&str> = Vec::new();
     for scope in asked {
         let admitted =
-            crate::scopes::admits(&ceiling, scope) && crate::scopes::admits(&client.scopes, scope);
+            crate::scopes::admits(&widest, scope) && crate::scopes::admits(&client.scopes, scope);
         if !admitted {
             return Err(invalid(
                 "a requested scope is wider than the exchange allows",
