@@ -18,7 +18,9 @@
 # Each label names the exact version it was tested against, and no label
 # claims more than a self-test: "certified", "compliant" and "conformant"
 # are refused, in a badge and in the README's badge text. Every badge, and
-# every static badge in the README, carries a logo from badge-logos/.
+# every static badge in the README, carries a logo from badge-logos/, and
+# the small caption under the README's conformance heading says once what the
+# badges count (owner decision, 2026-11-25).
 #
 #   scripts/checks/conformance.sh             rewrite the badges
 #   scripts/checks/conformance.sh --check     fail when a badge or a label
@@ -97,6 +99,7 @@ labels() {
   fi
   badge_logo_check "$tree"/conformance/badges/*.json || failures=$((failures + 1))
   badge_logo_readme "$tree/README.md" || failures=$((failures + 1))
+  badge_caption_check "$tree/README.md" || failures=$((failures + 1))
   [[ "$failures" -eq 0 ]]
 }
 
@@ -149,7 +152,8 @@ self_test() {
   printf '[{"test_id":"a","result":"pass"},{"test_id":"b","result":"omit"},{"test_group_id":"g","result":"pass"}]' \
     > "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
   printf '| Item | Pin |\n|---|---|\n| SMART App Launch | 2.2.0 (STU 2.2) |\n' > "$tree/docs/VERSIONS.md"
-  printf '[![x](https://img.shields.io/endpoint?url=conformance/badges/pid-rulebook.json)](x)\n' > "$tree/README.md"
+  printf '**Conformance**<br>\n%s<br>\n[![x](https://img.shields.io/endpoint?url=conformance/badges/pid-rulebook.json)](x)\n' \
+    "$badge_caption" > "$tree/README.md"
   run "$tree" update > /dev/null || fail "a clean tree is refused"
   [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "1/2 attributes mapped" ]] ||
     fail "the PID count"
@@ -188,6 +192,9 @@ self_test() {
   cp "$tree/README.md" "$work/badge"
   printf '[![x](https://img.shields.io/badge/x-y-blue)](x)\n' >> "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a static badge without a logo passes"; fi
+  cp "$work/badge" "$tree/README.md"
+  grep -vF "$badge_caption" "$work/badge" > "$tree/README.md"
+  if labels "$tree" 2> /dev/null; then fail "a README without the conformance caption passes"; fi
   cp "$work/badge" "$tree/README.md"
   printf '[![SMART certified](https://img.shields.io/endpoint?url=conformance/badges/x.json)](x)\n' >> "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a README badge text claiming certification passes"; fi
