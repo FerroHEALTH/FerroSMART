@@ -92,9 +92,17 @@ pub(crate) fn ec_key(dir: &Path, name: &str) -> PathBuf {
 /// Writes a fresh ML-DSA-65 key (RFC 9881 §6, the seed form) to
 /// `dir/name` and returns its path.
 pub(crate) fn ml_dsa_key(dir: &Path, name: &str) -> PathBuf {
-    let pair =
-        aws_lc_rs::signature::PqdsaKeyPair::generate(&aws_lc_rs::signature::ML_DSA_65_SIGNING)
-            .expect("a key pair");
+    ml_dsa_key_of(dir, name, &aws_lc_rs::signature::ML_DSA_65_SIGNING)
+}
+
+/// Writes a fresh ML-DSA key of `parameters` to `dir/name` and returns its
+/// path.
+pub(crate) fn ml_dsa_key_of(
+    dir: &Path,
+    name: &str,
+    parameters: &'static aws_lc_rs::signature::PqdsaSigningAlgorithm,
+) -> PathBuf {
+    let pair = aws_lc_rs::signature::PqdsaKeyPair::generate(parameters).expect("a key pair");
     let der = pair.to_pkcs8v1().expect("PKCS#8");
     let path = dir.join(name);
     std::fs::write(&path, pem(der.as_ref())).expect("the key is written");

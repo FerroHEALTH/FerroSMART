@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! ML-DSA-65 token signing keys beside the RSA ones (RFC 9964): both are
-//! published, discovery names both, and a client registered with
-//! `id_token_signed_response_alg` `ML-DSA-65` gets tokens a resource
-//! server verifies through ferrohealth-smart.
+//! ML-DSA (RFC 9964) at FerroSMART: ML-DSA-65 token signing keys beside
+//! the RSA ones, published and named in discovery, a client registered
+//! with `id_token_signed_response_alg` `ML-DSA-65` getting tokens a
+//! resource server verifies through ferrohealth-smart, and client
+//! assertions and signed launches by a client's `AKP` key.
 
 use std::sync::Arc;
 
@@ -42,10 +43,15 @@ fn both(keys: &Keys) -> String {
 }
 
 /// A running server whose client `export` has its tokens signed with
-/// `algorithm`.
+/// `algorithm`, and whose EHR client `ehr` signs launches with an
+/// ML-DSA-65 key.
 struct Server {
+    /// The state.
+    state: Arc<AppState>,
     /// The application.
     app: Router,
+    /// The EHR's ML-DSA-65 key.
+    ehr: AssertionKey,
     /// The client's assertion key.
     client: AssertionKey,
     /// The keys, kept for the case's length.
@@ -58,17 +64,34 @@ struct Server {
 
 impl Server {
     async fn start(algorithm: &str) -> Self {
+        Self::with_client(algorithm, ec_key).await
+    }
+
+    /// Starts the server of [`Server::start`] with `export`'s key written
+    /// by `write`.
+    async fn with_client(
+        algorithm: &str,
+        write: fn(&std::path::Path, &str) -> std::path::PathBuf,
+    ) -> Self {
         let keys = Keys::new();
-        let pem = std::fs::read(ec_key(keys.dir.path(), "client.pem")).expect("the key reads");
-        let client = AssertionKey::from_pem(&pem, None, Some(String::from("client-1")))
-            .expect("a client key");
+        let read = |path: std::path::PathBuf, kid: &str| {
+            let pem = std::fs::read(path).expect("the key reads");
+            AssertionKey::from_pem(&pem, None, Some(kid.to_owned())).expect("a client key")
+        };
+        let client = read(write(keys.dir.path(), "client.pem"), "client-1");
+        let ehr = read(ml_dsa_key(keys.dir.path(), "ehr.pem"), "ehr-1");
         let set = crate::support::inline(&json!({"keys": [client.public_jwk()]}));
+        let ehr_set = crate::support::inline(&json!({"keys": [ehr.public_jwk()]}));
         let database = Database::create().await;
         let text = format!(
             "[ferrosmart]\nissuer = {ISSUER:?}\n{}[ferrosmart.database]\nurl = {:?}\n\
              [[client]]\nclient_id = \"export\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
              scope = [\"system/Observation.rs\"]\ngrant_types = [\"client_credentials\"]\n\
-             id_token_signed_response_alg = {algorithm:?}",
+             id_token_signed_response_alg = {algorithm:?}\n\
+             [[client]]\nclient_id = \"ehr\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {ehr_set}\n\
+             scope = [\"system/launch.c\"]\ngrant_types = [\"client_credentials\"]\n\
+             [[client]]\nclient_id = \"app\"\ntoken_endpoint_auth_method = \"none\"\n\
+             redirect_uris = [\"https://app.example.org/callback\"]\ngrant_types = [\"authorization_code\"]",
             both(&keys),
             secrecy::ExposeSecret::expose_secret(&database.url)
         );
@@ -87,7 +110,9 @@ impl Server {
         let state = Arc::new(AppState::new(settings, store.clone(), audit));
         crate::support::apply(&state, &crate::support::clients(&text)).await;
         Self {
-            app: router(state),
+            app: router(Arc::clone(&state)),
+            state,
+            ehr,
             client,
             _keys: keys,
             database,
@@ -115,14 +140,27 @@ impl Server {
 
     /// Returns the access token the client credentials grant issues.
     async fn token(&self) -> String {
+        let (status, body) = self.grant(&Self::assertion(&self.client)).await;
+        assert_eq!(StatusCode::OK, status, "{body}");
+        body.get("access_token")
+            .and_then(Value::as_str)
+            .expect("a token")
+            .to_owned()
+    }
+
+    /// Returns a client assertion of `export` signed by `key`.
+    fn assertion(key: &AssertionKey) -> String {
         let now = jiff::Timestamp::now().as_second();
-        let assertion = self
-            .client
-            .sign(
-                "JWT",
-                &json!({"iss": "export", "sub": "export", "aud": TOKEN_URL, "exp": now + 60, "jti": now.to_string()}),
-            )
-            .expect("signs");
+        key.sign(
+            "JWT",
+            &json!({"iss": "export", "sub": "export", "aud": TOKEN_URL, "exp": now + 60, "jti": unique()}),
+        )
+        .expect("signs")
+    }
+
+    /// Posts the client credentials grant with `assertion` and returns the
+    /// status and the body.
+    async fn grant(&self, assertion: &str) -> (StatusCode, Value) {
         let body: String = url::form_urlencoded::Serializer::new(String::new())
             .extend_pairs([
                 ("grant_type", "client_credentials"),
@@ -131,7 +169,7 @@ impl Server {
                     "client_assertion_type",
                     "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
                 ),
-                ("client_assertion", assertion.as_str()),
+                ("client_assertion", assertion),
             ])
             .finish();
         let request = Request::post("/token")
@@ -139,12 +177,10 @@ impl Server {
             .body(Body::from(body))
             .expect("a request");
         let (status, bytes) = self.send(request).await;
-        let body: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-        assert_eq!(StatusCode::OK, status, "{body}");
-        body.get("access_token")
-            .and_then(Value::as_str)
-            .expect("a token")
-            .to_owned()
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
     }
 
     /// Returns the JWK Set FerroSMART publishes.
@@ -163,6 +199,72 @@ impl Server {
     async fn stop(self) {
         self.database.drop(self.store).await;
     }
+}
+
+/// Returns an id no other assertion of the run carries.
+fn unique() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    format!(
+        "jti-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+#[tokio::test]
+async fn an_ml_dsa_client_assertion_authenticates_and_a_disagreeing_alg_is_refused() {
+    let server = Server::with_client("RS256", ml_dsa_key).await;
+    assert_eq!(Algorithm::MlDsa65, server.client.algorithm());
+    let (status, body) = server.grant(&Server::assertion(&server.client)).await;
+    assert_eq!(StatusCode::OK, status, "RFC 9964 §5: {body}");
+    let dir = tempfile::tempdir().expect("a directory");
+    let forged = crate::support::ml_dsa_key_of(
+        dir.path(),
+        "forged.pem",
+        &aws_lc_rs::signature::ML_DSA_44_SIGNING,
+    );
+    let pem = std::fs::read(forged).expect("the key reads");
+    let other_set = AssertionKey::from_pem(&pem, None, Some(String::from("client-1")))
+        .expect("an ML-DSA-44 key");
+    let (status, body) = server.grant(&Server::assertion(&other_set)).await;
+    assert_eq!(
+        StatusCode::BAD_REQUEST,
+        status,
+        "an ML-DSA-44 assertion under the ML-DSA-65 key's kid: {body}"
+    );
+    assert_eq!("invalid_client", body["error"]);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn an_ml_dsa_signed_launch_is_redeemed() {
+    let server = Server::start("RS256").await;
+    let now = jiff::Timestamp::now().as_second();
+    let jwt = server
+        .ehr
+        .sign(
+            "launch+jwt",
+            &json!({
+                "iss": "ehr", "aud": ISSUER, "exp": now + 120, "iat": now, "jti": unique(),
+                "client_id": "app", "resource": RESOURCE, "patient": "123"
+            }),
+        )
+        .expect("signs");
+    assert_eq!(
+        Algorithm::MlDsa65,
+        ferrohealth_smart::jws::compact::decode(&jwt)
+            .expect("a JWS")
+            .header()
+            .alg
+    );
+    let from = crate::support::CLIENT_ADDRESS.parse().expect("an address");
+    let context =
+        ferrosmart::launch::redeem(&server.state, "app", &jwt, RESOURCE, "openid launch", from)
+            .await
+            .expect("the ML-DSA-65 launch is redeemed");
+    assert_eq!(Some("123"), context.patient.as_deref());
+    server.stop().await;
 }
 
 #[tokio::test]

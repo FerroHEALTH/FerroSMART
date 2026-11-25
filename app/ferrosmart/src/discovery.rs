@@ -41,11 +41,9 @@ pub const REVOKE_ROUTE: &str = "/revoke";
 /// (OpenID Connect Discovery 1.0 §4).
 pub const OPENID_CONFIGURATION_ROUTE: &str = "/.well-known/openid-configuration";
 
-/// The algorithms a client assertion may be signed with: the two of which
-/// "The FHIR authorization server SHALL be capable of validating signatures
-/// with at least one" (SMART App Launch 2.2.0, Client Authentication:
-/// Asymmetric, Registering a client).
-const ASSERTION_ALGORITHMS: [&str; 2] = ["RS384", "ES384"];
+/// The names of the algorithms a client assertion may be signed with
+/// ([`crate::token::assertion::ALGORITHMS`]).
+const ASSERTION_ALGORITHMS: [&str; 5] = ["RS384", "ES384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"];
 
 /// Returns the RFC 8414 §2 metadata of the server `settings` describe;
 /// with `login`, the authorization code flow and its endpoint too.

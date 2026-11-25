@@ -88,7 +88,7 @@ RFC 7591 §3.2.2 error `invalid_redirect_uri` or `invalid_client_metadata`:
 | `none` | `client-public` | PKCE alone; a browser or native app that keeps no secret |
 | `client_secret_basic` | `client-confidential-symmetric` | Its client secret by HTTP Basic |
 | `client_secret_post` | `client-confidential-symmetric` | Its client secret in the form |
-| `private_key_jwt` | `client-confidential-asymmetric` | A client assertion signed `RS384` or `ES384` with a key of its registered JWK Set |
+| `private_key_jwt` | `client-confidential-asymmetric` | A client assertion signed `RS384`, `ES384`, `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87` (RFC 9964, an `AKP` key) with a key of its registered JWK Set |
 
 A client authenticates only by the method it registered. SMART prefers
 asymmetric authentication for a client that can hold a key pair; a secret

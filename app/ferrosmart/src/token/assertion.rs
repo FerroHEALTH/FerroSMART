@@ -5,8 +5,10 @@
 //! SMART App Launch 2.2.0, Client Authentication: Asymmetric, Signature
 //! Verification, has it.
 
-use jsonwebtoken::{Algorithm, DecodingKey, Validation, jwk::Jwk};
-use serde_json::Value;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::compact::Unverified;
+use ferrohealth_smart::jws::jwk::Jwk;
+use serde_json::{Map, Value};
 
 use crate::clients::{Client, ClientKeys, ClientKind};
 use crate::discovery::TOKEN_ROUTE;
@@ -16,6 +18,19 @@ use crate::server::AppState;
 use super::{
     ASSERTION_TYPES, JWT_BEARER, LEEWAY_SECONDS, MAX_ASSERTION_SECONDS, Refusal, server_error,
 };
+
+/// The algorithms a client assertion and a signed launch may be signed
+/// with: RS384 and ES384, of which "The FHIR authorization server SHALL be
+/// capable of validating signatures with at least one" (SMART App Launch
+/// 2.2.0, Client Authentication: Asymmetric, Registering a client), and the
+/// three ML-DSA parameter sets (RFC 9964 §5).
+pub(crate) const ALGORITHMS: [Algorithm; 5] = [
+    Algorithm::Rs384,
+    Algorithm::Es384,
+    Algorithm::MlDsa44,
+    Algorithm::MlDsa65,
+    Algorithm::MlDsa87,
+];
 
 /// Authenticates the client of `form` by its JWT assertion.
 pub(crate) async fn authenticate(state: &AppState, form: &Params) -> Result<Client, Refusal> {
@@ -27,12 +42,15 @@ pub(crate) async fn authenticate(state: &AppState, form: &Params) -> Result<Clie
     let assertion = form
         .get("client_assertion")
         .ok_or(Refusal::client("the request carries no client_assertion"))?;
-    let header = jsonwebtoken::decode_header(assertion)
-        .map_err(|_unread| Refusal::client("the client_assertion is no JWT"))?;
+    let jws = ferrohealth_smart::jws::compact::decode(assertion).map_err(|error| match error {
+        ferrohealth_smart::jws::JwsError::Algorithm => {
+            Refusal::client("the client_assertion's algorithm is not admitted")
+        }
+        _ => Refusal::client("the client_assertion is no JWT"),
+    })?;
+    let header = jws.header();
     let algorithm = header.alg;
-    // NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric, the server
-    // validates RS384 or ES384, the two the metadata advertises.
-    if !matches!(algorithm, Algorithm::RS384 | Algorithm::ES384) {
+    if !ALGORITHMS.contains(&algorithm) {
         return Err(Refusal::client(
             "the client_assertion's algorithm is not admitted",
         ));
@@ -52,8 +70,8 @@ pub(crate) async fn authenticate(state: &AppState, form: &Params) -> Result<Clie
         .ok_or(Refusal::client("the client_assertion names no kid"))?;
     // NOTE: RFC 7523 §3 item 1, the issuer names the client; the claims are read
     // unverified only to find whose key verifies them.
-    let unverified: Value = jsonwebtoken::dangerous::insecure_decode_claims(assertion)
-        .map_err(|_unread| Refusal::client("the client_assertion's claims are no JSON"))?;
+    let unverified = unverified_claims(assertion)
+        .ok_or(Refusal::client("the client_assertion's claims are no JSON"))?;
     let issuer = unverified
         .get("iss")
         .and_then(Value::as_str)
@@ -77,14 +95,14 @@ pub(crate) async fn authenticate(state: &AppState, form: &Params) -> Result<Clie
     if client.kind() != ClientKind::ConfidentialAsymmetric {
         return Err(Refusal::client("the client authenticates with no key"));
     }
-    if let Some(jku) = header.jku.as_deref() {
+    if let Some(jku) = jku(&jws) {
         let listed = matches!(&client.keys, Some(ClientKeys::Uri(url)) if url.as_str() == jku);
         if !listed {
             return Err(Refusal::client("the jku is not the registered JWK Set URL"));
         }
     }
     let key = key_of(state, &client, kid, algorithm).await?;
-    let claims = verified(state, assertion, &key, algorithm)?;
+    let claims = verified(state, &jws, &key)?;
     if claims.get("sub").and_then(Value::as_str) != Some(client.client_id.as_str()) {
         return Err(Refusal::client("the client_assertion's sub is not its iss"));
     }
@@ -108,46 +126,51 @@ pub(crate) async fn authenticate(state: &AppState, form: &Params) -> Result<Clie
     Ok(client)
 }
 
-/// Returns the one key of `client`'s set whose `kid` is `kid` and whose
-/// `kty` fits `algorithm` (SMART App Launch 2.2.0, Client Authentication:
-/// Asymmetric, Signature Verification, step 3), reading the set again once
-/// when the cached set holds none.
+/// Returns the payload of the compact JWS `jwt` as a JSON object, read
+/// without checking its signature.
+pub(crate) fn unverified_claims(jwt: &str) -> Option<Map<String, Value>> {
+    let payload = jwt.split('.').nth(1)?;
+    let bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, payload).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Returns the `jku` the header of `jws` names, when it names one.
+pub(crate) fn jku<'a>(jws: &'a Unverified<'_>) -> Option<&'a str> {
+    jws.header_members().get("jku").and_then(Value::as_str)
+}
+
+/// Returns the one key of `client`'s set whose `kid` is `kid` and which may
+/// verify `algorithm`, its type, curve or parameter set and its `alg`,
+/// `use` and `key_ops` admitting it (SMART App Launch 2.2.0, Client
+/// Authentication: Asymmetric, Signature Verification, step 3; RFC 7517
+/// §4.4; RFC 9964 §5), reading the set again once when the cached set holds
+/// none.
 pub(crate) async fn key_of(
     state: &AppState,
     client: &Client,
     kid: &str,
     algorithm: Algorithm,
-) -> Result<DecodingKey, Refusal> {
-    let kty = if matches!(algorithm, Algorithm::RS384) {
-        "RSA"
-    } else {
-        "EC"
-    };
+) -> Result<Jwk, Refusal> {
     for refresh in [false, true] {
         let set = state
             .client_keys()
             .get(client, refresh)
             .await
             .map_err(|_unread| Refusal::client("the client's JWK Set cannot be read"))?;
-        let candidates: Vec<&Value> = set
+        // NOTE: RFC 7517 §5, a member that is no supported key is ignored.
+        let candidates: Vec<Jwk> = set
             .get("keys")
             .and_then(Value::as_array)
             .map(|keys| {
                 keys.iter()
-                    .filter(|key| {
-                        key.get("kid").and_then(Value::as_str) == Some(kid)
-                            && key.get("kty").and_then(Value::as_str) == Some(kty)
-                    })
+                    .filter_map(|key| Jwk::try_from(key).ok())
+                    .filter(|key| key.kid() == Some(kid) && key.verifies(algorithm))
                     .collect()
             })
             .unwrap_or_default();
         match candidates.as_slice() {
-            [key] => {
-                let jwk: Jwk = serde_json::from_value((*key).clone())
-                    .map_err(|_unread| Refusal::client("the client's key is no JWK"))?;
-                return DecodingKey::from_jwk(&jwk)
-                    .map_err(|_unread| Refusal::client("the client's key cannot verify"));
-            }
+            [key] => return Ok(key.clone()),
             [] => {}
             _ => return Err(Refusal::client("more than one key matches the kid")),
         }
@@ -155,24 +178,21 @@ pub(crate) async fn key_of(
     Err(Refusal::client("no key of the client matches the kid"))
 }
 
-/// Returns the claims of `assertion` once its signature, `exp`, `iss` and
-/// `aud` hold (RFC 7523 §3; `docs/architecture.md` §13.6 item 1).
-fn verified(
-    state: &AppState,
-    assertion: &str,
-    key: &DecodingKey,
-    algorithm: Algorithm,
-) -> Result<Value, Refusal> {
-    let mut validation = Validation::new(algorithm);
-    validation.leeway = LEEWAY_SECONDS;
-    validation.validate_aud = false;
-    // NOTE: RFC 7523 §3 item 4, `exp` is checked below on its own, so an expired
-    // assertion whose signature holds is told apart from one that does not verify.
-    validation.validate_exp = false;
-    validation.set_required_spec_claims(&["exp", "iss", "sub", "aud", "jti"]);
-    let claims: Value = jsonwebtoken::decode(assertion, key, &validation)
-        .map_err(|_refused| Refusal::client("the client_assertion does not verify"))?
-        .claims;
+/// Returns the claims of `jws` once its signature, `exp`, `iss` and `aud`
+/// hold (RFC 7523 §3; `docs/architecture.md` §13.6 item 1).
+fn verified(state: &AppState, jws: &Unverified<'_>, key: &Jwk) -> Result<Value, Refusal> {
+    let claims = jws
+        .verify_claims(key)
+        .map_err(|_refused| Refusal::client("the client_assertion does not verify"))?;
+    // NOTE: RFC 7523 §3 items 1 to 4 and 7: `iss`, `sub`, `aud`, `exp` and `jti`;
+    // `exp` is checked below on its own, so an expired assertion is told apart.
+    if ["exp", "iss", "sub", "aud", "jti"]
+        .iter()
+        .any(|name| !claims.contains_key(*name))
+    {
+        return Err(Refusal::client("the client_assertion does not verify"));
+    }
+    let claims = Value::Object(claims);
     let now = jiff::Timestamp::now().as_second();
     if claims
         .get("exp")
