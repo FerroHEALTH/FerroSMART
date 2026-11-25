@@ -47,7 +47,7 @@ ferrohealth-secret = "0.2.0"
 # 2026-11-09.
 ferrohealth-config = "0.4.0"
 # The TLS reader of every FerroHEALTH product, behind `server-tls`.
-ferrohealth-server = { version = "0.12.0", default-features = false, features = ["platform-verifier"] }
+ferrohealth-server = { version = "0.12.4", default-features = false, features = ["platform-verifier"] }
 # The JSON Schema of the configuration sections, behind `schema`.
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
 # ferrohealth-authz reads the subject ferrohealth-smart authenticates; the
