@@ -46,6 +46,13 @@ Actions Security Cheat Sheet, SLSA v1.0, OpenSSF Scorecard, and Sigstore.
   about 11 runner-minutes of work (#392). Add a step to one of the four
   before adding a job, and give a guard step `if: ${{ !cancelled() }}` so a
   run still reports every finding.
+
+  A merge-group run is light (owner, 2026-11-25), since the pull request
+  ran the full suite on the same change: the guards without the publish dry
+  run, rustfmt, cargo-deny and the advisory-exception check without clippy
+  and rustdoc, and the unit tests with every feature (`--lib --bins`), with
+  no lane. `cargo-semver-checks` and `quickstart` do not run there.
+  `conclusion` reads a skipped job as a pass.
 - `.github/workflows/ratchet-tighten.yml`: once a day on `main`, runs
   `scripts/checks/duplication.sh --update` and, when the count fell, pushes
   `chore/ratchet-tighten` with only the ratchet files, committed through the
