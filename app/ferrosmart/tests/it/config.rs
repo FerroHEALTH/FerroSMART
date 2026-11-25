@@ -772,10 +772,9 @@ fn backend_environment(kind: &str) -> std::collections::BTreeMap<String, String>
 }
 
 /// Returns the configuration of `text` over [`backend_environment`].
-fn with_backend(text: &str, kind: &str) -> Result<ferrosmart::config::settings::Settings, Error> {
+fn with_backend(text: &str, kind: &str) -> ferrosmart::config::Config {
     ferrosmart::config::Config::from_sources(Some(text), &backend_environment(kind))
         .expect("the configuration reads")
-        .resolve()
 }
 
 // NOTE: SMART App Launch 2.2.0, Backend Services; docs/architecture.md §13.33, a
@@ -785,13 +784,13 @@ fn a_login_at_a_fhir_base_needs_the_backend_client() {
     let keys = Keys::new();
     let text = private_key_jwt(&keys, "");
     assert!(matches!(
-        with_backend(&text, "fhir"),
+        with_backend(&text, "fhir").resolve(),
         Err(Error::Backend {
             rule: "people log in at a FHIR base, so `[ferrosmart.backend]` is set"
         })
     ));
     assert!(
-        with_backend(&text, "openehr").is_ok(),
+        with_backend(&text, "openehr").resolve().is_ok(),
         "no FHIR base, no backend client"
     );
     let key = ec_key(keys.dir.path(), "backend.pem");
@@ -799,7 +798,9 @@ fn a_login_at_a_fhir_base_needs_the_backend_client() {
         "[ferrosmart.backend.keys]\nprivate_key_file = {:?}\n",
         key.display().to_string()
     );
-    let settings = with_backend(&format!("{text}{backend}"), "fhir").expect("resolves");
+    let settings = with_backend(&format!("{text}{backend}"), "fhir")
+        .resolve()
+        .expect("resolves");
     let resolved = settings.backend.expect("the backend client");
     assert_eq!("ferrosmart", resolved.client_id);
 }
@@ -839,7 +840,8 @@ fn a_backend_client_outside_the_asymmetric_profile_is_refused() {
             Some("the assertion keys share no key with `[ferrosmart.keys]`"),
         ),
     ] {
-        let resolved = with_backend(&format!("{text}[ferrosmart.backend]\n{table}"), "fhir");
+        let resolved =
+            with_backend(&format!("{text}[ferrosmart.backend]\n{table}"), "fhir").resolve();
         match refused {
             None => assert!(resolved.is_ok(), "{table}"),
             Some(rule) => assert!(
