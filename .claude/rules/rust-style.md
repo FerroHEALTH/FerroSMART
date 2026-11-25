@@ -13,8 +13,11 @@ solved, never port one blindly.
 ## Build idiomatic, compiling, tested code
 
 - **Use proper crates; do not hand-roll** what the pinned set provides: the
-  JWT and JWK handling (`jsonwebtoken`), the password hashing (`argon2`), the
-  HTTP engine (`reqwest`), the secrets (`secrecy`). Add a dependency through
+  cryptography (`aws-lc-rs`), the password hashing (`argon2`), the HTTP
+  engine (`reqwest`), the secrets (`secrecy`). Every JWS of
+  `ferrohealth-smart` goes through its own `jws` module over `aws-lc-rs`
+  (owner decision 2026-11-25, #886), since no `jsonwebtoken` release signs
+  or verifies ML-DSA (RFC 9964). Add a dependency through
   the root `Cargo.toml [workspace.dependencies]` table (`dep.workspace =
   true`), and verify its version against crates.io or docs.rs the day it is
   added, never from memory. A new library dependency reaches every product,

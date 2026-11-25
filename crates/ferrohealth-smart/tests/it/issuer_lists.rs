@@ -10,10 +10,10 @@ use std::error::Error as StdError;
 use ferrohealth_smart::config::AuthSection;
 use ferrohealth_smart::config::ConfigError;
 use ferrohealth_smart::config::IssuerEntry;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::resource::IssuerSet;
 use ferrohealth_smart::resource::Verifier;
-use jsonwebtoken::Algorithm;
 
 use crate::support::AUDIENCE;
 use crate::support::Issuer;
@@ -111,8 +111,8 @@ async fn trusted(auth: &AuthSection) -> Result<IssuerSet, Box<dyn StdError>> {
 #[tokio::test]
 async fn roles_are_read_only_from_the_issuer_that_names_the_claim() -> Result<(), Box<dyn StdError>>
 {
-    let one_key = ec_key("k1", Algorithm::ES256);
-    let two_key = ec_key("k2", Algorithm::ES256);
+    let one_key = ec_key("k1", Algorithm::Es256);
+    let two_key = ec_key("k2", Algorithm::Es256);
     let one = Issuer::start(&[&one_key]).await;
     let two = Issuer::start(&[&two_key]).await;
     let auth = section(vec![entry(&one.uri(), &["roles"]), entry(&two.uri(), &[])]);

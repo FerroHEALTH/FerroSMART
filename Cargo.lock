@@ -1305,7 +1305,7 @@ dependencies = [
 
 [[package]]
 name = "ferrohealth-authz"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1401,7 +1401,7 @@ dependencies = [
 
 [[package]]
 name = "ferrohealth-session"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "aws-lc-rs",
  "axum",
@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "ferrohealth-smart"
-version = "0.34.0"
+version = "0.35.0"
 dependencies = [
  "argon2",
  "aws-lc-rs",
@@ -1444,7 +1444,6 @@ dependencies = [
  "http",
  "http-body-util",
  "jiff",
- "jsonwebtoken",
  "rcgen",
  "reqwest",
  "roxmltree",

@@ -97,10 +97,13 @@ fn a_section_that_breaks_a_rule_refuses_the_start() {
         table("clock_skew = \"301s\"").resolve(&[]),
         Err(ConfigError::Issuer { .. })
     ));
-    assert!(matches!(
-        table("algorithms = [\"HS256\"]").resolve(&[]),
-        Err(ConfigError::Issuer { .. })
-    ));
+    assert!(
+        toml::from_str::<AuthSection>(
+            "[issuer.i4]\nissuer = \"https://as.example.org\"\naudience = [\"a\"]\nalgorithms = [\"HS256\"]"
+        )
+        .is_err(),
+        "RFC 8725 §3.1: no issuer table can name a symmetric algorithm"
+    );
     let off: AuthSection = toml::from_str("enabled = false").expect("parses");
     assert_eq!(
         off.resolve(&[]).expect("resolves").issuers,

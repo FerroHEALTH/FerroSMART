@@ -12,7 +12,7 @@ use ferrohealth_smart::client::binding::IssuedToken;
 use ferrohealth_smart::client::dpop::DpopKey;
 use ferrohealth_smart::client::onward::OnwardError;
 use ferrohealth_smart::client::onward::exchange::Onward;
-use jsonwebtoken::Algorithm;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::Request;
@@ -33,7 +33,7 @@ use crate::support::ec_key;
 /// with a token of `token_type`, and returns it with the issued token.
 async fn endpoint_issuing(token_type: &str) -> (MockServer, String, serde_json::Value) {
     let server = MockServer::start().await;
-    let authority = ec_key("as-2026", Algorithm::ES256);
+    let authority = ec_key("as-2026", Algorithm::Es256);
     let subject = Flavor::Generic.subject_claims(jiff::Timestamp::now().as_second());
     let token = sign(
         &authority,
@@ -68,7 +68,7 @@ fn onward(server: &MockServer, key: &Arc<DpopKey>) -> Onward {
 }
 
 fn key() -> Arc<DpopKey> {
-    Arc::new(DpopKey::from_pem(&ec_key("dpop", Algorithm::ES256).pem).expect("the key reads"))
+    Arc::new(DpopKey::from_pem(&ec_key("dpop", Algorithm::Es256).pem).expect("the key reads"))
 }
 
 #[tokio::test]

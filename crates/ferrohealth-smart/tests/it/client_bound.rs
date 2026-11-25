@@ -24,9 +24,6 @@ use ferrohealth_smart::client::dpop::DpopKey;
 use ferrohealth_smart::config::ConfigError;
 use ferrohealth_smart::config::credentials::OauthSection;
 use http::Method;
-use jsonwebtoken::DecodingKey;
-use jsonwebtoken::Validation;
-use jsonwebtoken::jwk::Jwk;
 use secrecy::SecretString;
 use serde_json::Value;
 use serde_json::json;
@@ -53,7 +50,7 @@ const TOKEN: &str = "Kz~8mXK1EalYznwH-LC-1fBAo.4Ljp~zsPE_NeO.gxU";
 type TestResult = Result<(), Box<dyn StdError>>;
 
 /// Returns a `DPoP` key on the curve of `alg`.
-fn dpop_key(alg: jsonwebtoken::Algorithm) -> Arc<DpopKey> {
+fn dpop_key(alg: ferrohealth_smart::jws::algorithm::Algorithm) -> Arc<DpopKey> {
     Arc::new(DpopKey::from_pem(&ec_key("dpop", alg).pem).expect("the DPoP key reads"))
 }
 
@@ -78,22 +75,19 @@ fn issued(token: &str, token_type: &str) -> ResponseTemplate {
 
 /// Returns the verified header and claims of the `DPoP` proof `request`
 /// carries, its signature checked with the key its header names.
-fn proof_of(request: &Request) -> (jsonwebtoken::Header, Value) {
+fn proof_of(request: &Request) -> (ferrohealth_smart::jws::compact::Header, Value) {
     let proof = request
         .headers
         .get("dpop")
         .and_then(|value| value.to_str().ok())
         .expect("the request carries a DPoP proof");
-    let header = jsonwebtoken::decode_header(proof).expect("the proof header reads");
-    let jwk: &Jwk = header.jwk.as_ref().expect("the proof names its key");
-    let key = DecodingKey::from_jwk(jwk).expect("the key reads");
-    let mut validation = Validation::new(header.alg);
-    validation.required_spec_claims.clear();
-    validation.validate_exp = false;
-    let claims = jsonwebtoken::decode::<Value>(proof, &key, &validation)
-        .expect("the proof verifies with its own key")
-        .claims;
-    (header, claims)
+    let jws = ferrohealth_smart::jws::compact::decode(proof).expect("the proof reads");
+    let header = jws.header().clone();
+    let jwk = header.jwk.as_ref().expect("the proof names its key");
+    let claims = jws
+        .verify_claims(jwk)
+        .expect("the proof verifies with its own key");
+    (header, Value::Object(claims))
 }
 
 /// Returns the requests `server` received on `route`.
@@ -110,8 +104,8 @@ async fn on(server: &MockServer, route: &str) -> Vec<Request> {
 #[tokio::test]
 async fn every_token_request_carries_a_proof_and_takes_a_dpop_token() -> TestResult {
     for alg in [
-        jsonwebtoken::Algorithm::ES256,
-        jsonwebtoken::Algorithm::ES384,
+        ferrohealth_smart::jws::algorithm::Algorithm::Es256,
+        ferrohealth_smart::jws::algorithm::Algorithm::Es384,
     ] {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -142,7 +136,7 @@ async fn every_token_request_carries_a_proof_and_takes_a_dpop_token() -> TestRes
         assert!(claims.get("nonce").is_none());
         assert_eq!(
             key.thumbprint(),
-            ferrohealth_smart::client::assertion::thumbprint(header.jwk.as_ref().ok_or("a key")?)
+            header.jwk.as_ref().ok_or("a key")?.thumbprint()
         );
     }
     Ok(())
@@ -156,7 +150,10 @@ async fn a_resource_proof_carries_the_token_hash_and_no_query() -> TestResult {
         .respond_with(issued(TOKEN, "dpop"))
         .mount(&server)
         .await;
-    let source = TokenSource::new(grant(&server, &dpop_key(jsonwebtoken::Algorithm::ES256))?)?;
+    let source = TokenSource::new(grant(
+        &server,
+        &dpop_key(ferrohealth_smart::jws::algorithm::Algorithm::Es256),
+    )?)?;
     let token = source.token().await.map_err(|error| error.to_string())?;
     let url: Url = "https://resource.example.org/fhir/Patient?name=x#frag".parse()?;
     let issued: &IssuedToken = token.as_ref().as_ref();
@@ -206,12 +203,19 @@ async fn a_token_endpoint_nonce_demand_is_answered_once_with_a_fresh_assertion()
         .respond_with(issued(TOKEN, "DPoP"))
         .mount(&server)
         .await;
-    let key = dpop_key(jsonwebtoken::Algorithm::ES256);
-    let signing = ec_key("client", jsonwebtoken::Algorithm::ES256);
+    let key = dpop_key(ferrohealth_smart::jws::algorithm::Algorithm::Es256);
+    let signing = ec_key(
+        "client",
+        ferrohealth_smart::jws::algorithm::Algorithm::Es256,
+    );
     let mut config = ClientCredentials::with_private_key_jwt(
         Endpoint::Token(format!("{}{TOKEN_PATH}", server.uri()).parse()?),
         String::from("bridge"),
-        AssertionKey::from_pem(&signing.pem, Some(jsonwebtoken::Algorithm::ES256), None)?,
+        AssertionKey::from_pem(
+            &signing.pem,
+            Some(ferrohealth_smart::jws::algorithm::Algorithm::Es256),
+            None,
+        )?,
     )
     .with_dpop(Arc::clone(&key));
     config.timeout = Duration::from_secs(5);
@@ -251,7 +255,10 @@ async fn a_second_nonce_demand_is_the_refusal_it_is() -> TestResult {
         )
         .mount(&server)
         .await;
-    let source = TokenSource::new(grant(&server, &dpop_key(jsonwebtoken::Algorithm::ES256))?)?;
+    let source = TokenSource::new(grant(
+        &server,
+        &dpop_key(ferrohealth_smart::jws::algorithm::Algorithm::Es256),
+    )?)?;
     let error = source.token().await.expect_err("the second demand stands");
     assert!(matches!(
         error.as_ref(),
@@ -269,7 +276,10 @@ async fn a_bearer_token_is_refused_when_a_dpop_token_was_asked_for() -> TestResu
         .respond_with(issued(TOKEN, "Bearer"))
         .mount(&server)
         .await;
-    let source = TokenSource::new(grant(&server, &dpop_key(jsonwebtoken::Algorithm::ES256))?)?;
+    let source = TokenSource::new(grant(
+        &server,
+        &dpop_key(ferrohealth_smart::jws::algorithm::Algorithm::Es256),
+    )?)?;
     let error = source.token().await.expect_err("a bearer token is refused");
     assert!(matches!(
         error.as_ref(),
@@ -305,7 +315,10 @@ async fn a_resource_nonce_demand_is_answered_once_and_kept_apart_from_the_token_
         )
         .mount(&server)
         .await;
-    let source = TokenSource::new(grant(&server, &dpop_key(jsonwebtoken::Algorithm::ES256))?)?;
+    let source = TokenSource::new(grant(
+        &server,
+        &dpop_key(ferrohealth_smart::jws::algorithm::Algorithm::Es256),
+    )?)?;
     let url: Url = format!("{}{RESOURCE_PATH}", server.uri()).parse()?;
     let client = reqwest::Client::new();
     let answered = source
@@ -333,7 +346,10 @@ async fn a_resource_nonce_demand_is_answered_once_and_kept_apart_from_the_token_
 #[tokio::test]
 async fn a_dpop_bound_source_refuses_a_call_that_cannot_prove() -> TestResult {
     let server = MockServer::start().await;
-    let source = TokenSource::new(grant(&server, &dpop_key(jsonwebtoken::Algorithm::ES256))?)?;
+    let source = TokenSource::new(grant(
+        &server,
+        &dpop_key(ferrohealth_smart::jws::algorithm::Algorithm::Es256),
+    )?)?;
     let outcome = source
         .call(|_header| async { Ok::<_, std::io::Error>(http::Response::new(())) })
         .await;
@@ -455,7 +471,7 @@ fn a_certificate_binding_needs_a_presented_certificate() -> TestResult {
 fn the_oauth_table_binds_a_grant_to_a_dpop_key_or_its_certificate() -> TestResult {
     let key = temp_file(
         "dpop.pem",
-        &ec_key("dpop", jsonwebtoken::Algorithm::ES384).pem,
+        &ec_key("dpop", ferrohealth_smart::jws::algorithm::Algorithm::Es384).pem,
     );
     let section = |text: &str| -> Result<OauthSection, toml::de::Error> { toml::from_str(text) };
     let base = "token_endpoint = \"https://as.example.org/token\"\nclient_id = \"bridge\"\nclient_secret = \"synthetic-secret\"\n";
@@ -465,7 +481,10 @@ fn the_oauth_table_binds_a_grant_to_a_dpop_key_or_its_certificate() -> TestResul
     ))?
     .resolve()?;
     let dpop = bound.dpop_key().ok_or("a DPoP key")?;
-    assert_eq!(jsonwebtoken::Algorithm::ES384, dpop.algorithm());
+    assert_eq!(
+        ferrohealth_smart::jws::algorithm::Algorithm::Es384,
+        dpop.algorithm()
+    );
     let both = section(&format!(
         "{base}dpop_key_file = {:?}\ncertificate_bound = true\n",
         key.display().to_string()

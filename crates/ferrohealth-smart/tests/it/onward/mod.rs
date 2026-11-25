@@ -35,13 +35,11 @@ use ferrohealth_smart::client::assertion::ASSERTION_TYPE;
 use ferrohealth_smart::client::assertion::AssertionKey;
 use ferrohealth_smart::client::onward::SubjectToken;
 use ferrohealth_smart::client::onward::exchange::WallClock;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::claims::Validation;
+use ferrohealth_smart::jws::compact::Header;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::resource::Caller;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::DecodingKey;
-use jsonwebtoken::Header;
-use jsonwebtoken::Validation;
-use jsonwebtoken::jwk::Jwk;
 use secrecy::SecretString;
 use serde_json::Map;
 use serde_json::Value;
@@ -170,7 +168,7 @@ impl ClientKey {
     /// Returns a fresh ES384 client key.
     pub(crate) fn new() -> Self {
         Self {
-            key: ec_key("client-2026", Algorithm::ES384),
+            key: ec_key("client-2026", Algorithm::Es384),
         }
     }
 
@@ -178,7 +176,7 @@ impl ClientKey {
     pub(crate) fn credentials(&self, endpoint: Endpoint, client_id: &str) -> ClientCredentials {
         let key = AssertionKey::from_pem(
             &self.key.pem,
-            Some(Algorithm::ES384),
+            Some(Algorithm::Es384),
             Some(self.key.kid.clone()),
         )
         .expect("the client key reads");
@@ -194,17 +192,17 @@ impl ClientKey {
             "RFC 7523 §2.2 client_assertion_type"
         );
         let assertion = param(form, "client_assertion").expect("a client assertion");
-        let jwk: Jwk = serde_json::from_value(self.key.jwk.clone()).expect("the public JWK");
-        let mut validation = Validation::new(Algorithm::ES384);
-        validation.set_audience(&[audience]);
-        validation.set_issuer(&[client_id]);
-        let claims = jsonwebtoken::decode::<Value>(
-            assertion,
-            &DecodingKey::from_jwk(&jwk).expect("a decoding key"),
-            &validation,
-        )
-        .expect("the assertion verifies")
-        .claims;
+        assert_eq!(
+            Algorithm::Es384,
+            crate::support::header(assertion).alg,
+            "the client key signs ES384"
+        );
+        let claims = crate::support::verified(assertion, &self.key.jwk);
+        Validation::default()
+            .with_audiences([audience])
+            .with_issuer(client_id)
+            .check(&claims)
+            .expect("the assertion verifies");
         assert_eq!(
             Some(client_id),
             claims.get("sub").and_then(Value::as_str),

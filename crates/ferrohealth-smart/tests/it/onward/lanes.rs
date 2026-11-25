@@ -78,7 +78,10 @@ async fn a_standards_only_lane_loads_and_exchanges_at_its_token_endpoint() {
         &["https://ehr.example.org".to_owned()],
         lane.target.audiences()
     );
-    let key = ec_key("as-2026", jsonwebtoken::Algorithm::ES256);
+    let key = ec_key(
+        "as-2026",
+        ferrohealth_smart::jws::algorithm::Algorithm::Es256,
+    );
     let claims = Flavor::Generic.subject_claims(now());
     let issued = Flavor::Generic.issued_claims(&claims, now());
     answer(
@@ -117,7 +120,10 @@ async fn exchanges_for_two_calls(extra: &str) -> (bool, usize, Option<String>) {
         ),
     );
     let lane = resolved(&section).expect("the lane loads");
-    let key = ec_key("as-2026", jsonwebtoken::Algorithm::ES256);
+    let key = ec_key(
+        "as-2026",
+        ferrohealth_smart::jws::algorithm::Algorithm::Es256,
+    );
     let claims = Flavor::Generic.subject_claims(now());
     let issued = Flavor::Generic.issued_claims(&claims, now());
     answer(
@@ -219,7 +225,10 @@ async fn a_secret_or_mutual_tls_client_names_itself_the_actor_with_its_own_key()
         );
         let lane = resolved(&section).expect("the lane loads");
         assert!(lane.onward.asserts_actor(), "{client_auth}");
-        let key = ec_key("as-2026", jsonwebtoken::Algorithm::ES256);
+        let key = ec_key(
+            "as-2026",
+            ferrohealth_smart::jws::algorithm::Algorithm::Es256,
+        );
         let claims = Flavor::Generic.subject_claims(now());
         let issued = Flavor::Generic.issued_claims(&claims, now());
         answer(

@@ -213,8 +213,12 @@ fn client_key(keys: &Keys, client_id: &str, algorithm: Algorithm) -> AssertionKe
         rsa_key(keys.dir.path(), &name)
     };
     let pem = std::fs::read(path).expect("the key reads");
-    AssertionKey::from_pem(&pem, Some(algorithm), Some(format!("{client_id}-1")))
-        .expect("a client key")
+    AssertionKey::from_pem(
+        &pem,
+        Some(crate::support::jws_algorithm(algorithm)),
+        Some(format!("{client_id}-1")),
+    )
+    .expect("a client key")
 }
 
 /// Writes the JWK Set of `key` and returns its path.

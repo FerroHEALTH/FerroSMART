@@ -19,12 +19,14 @@
 //! (RFC 7517 §5) at a route of its own.
 
 use base64::Engine as _;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::EncodingKey;
-use jsonwebtoken::Header;
-use jsonwebtoken::jwk::AlgorithmParameters;
-use jsonwebtoken::jwk::Jwk;
 use serde::Serialize;
+
+use crate::jws::JwsError;
+use crate::jws::algorithm::Algorithm;
+use crate::jws::compact::Header;
+use crate::jws::key::KeyError;
+use crate::jws::key::PrivateKey;
+use crate::jws::key::SigningKey;
 
 /// How long a client assertion is valid: 60 seconds.
 ///
@@ -43,26 +45,19 @@ pub const ASSERTION_TYPE: &str = "urn:ietf:params:oauth:client-assertion-type:jw
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum AssertionError {
-    /// The PEM is no RSA, EC or Ed25519 private key `jsonwebtoken` reads.
-    #[error("the private key is not an RSA, EC or Ed25519 key in PEM form")]
+    /// The PEM is no RSA, EC, Ed25519 or ML-DSA private key.
+    #[error("the private key is not an RSA, EC, Ed25519 or ML-DSA key in PEM form")]
     Key {
         /// What the key reader reported.
         #[source]
-        source: jsonwebtoken::errors::Error,
+        source: KeyError,
     },
-    /// The algorithm is no asymmetric signature algorithm, or belongs to
-    /// another key type.
-    #[error("the algorithm {algorithm:?} cannot sign with this key")]
+    /// The algorithm belongs to another key type, curve or ML-DSA parameter
+    /// set.
+    #[error("the algorithm {algorithm} cannot sign with this key")]
     Algorithm {
         /// The algorithm.
         algorithm: Algorithm,
-    },
-    /// The public half could not be derived from the key.
-    #[error("the public key could not be derived from the private key")]
-    Public {
-        /// What the key reader reported.
-        #[source]
-        source: jsonwebtoken::errors::Error,
     },
     /// The random source for `jti` failed.
     #[error("the random source for the assertion id failed")]
@@ -72,16 +67,12 @@ pub enum AssertionError {
     Sign {
         /// What the signer reported.
         #[source]
-        source: jsonwebtoken::errors::Error,
+        source: JwsError,
     },
     /// The EC key is on neither P-256 nor P-384, the curves ES256 and ES384
-    /// sign with (RFC 7518 §3.4), and no algorithm was configured.
+    /// sign with (RFC 7518 §3.4).
     #[error("the EC key is on neither P-256 (ES256) nor P-384 (ES384)")]
-    Curve {
-        /// What the key reader reported for P-384, the last curve tried.
-        #[source]
-        source: jsonwebtoken::errors::Error,
-    },
+    Curve,
     /// The certificate is no X.509 certificate in PEM form.
     #[error("the certificate is not an X.509 certificate in PEM form")]
     Certificate,
@@ -94,14 +85,10 @@ pub enum AssertionError {
 /// half.
 #[derive(Clone)]
 pub struct AssertionKey {
-    /// The private half.
-    encoding: EncodingKey,
-    /// The algorithm the assertion is signed with.
-    algorithm: Algorithm,
+    /// The private half, with the algorithm the assertion is signed with.
+    signing: SigningKey,
     /// The `kid` the public half is published under.
     kid: String,
-    /// The public half.
-    public: Jwk,
     /// The `x5t#S256` of the key's certificate, for a party that knows the
     /// key by its certificate (RFC 7515 §4.1.8).
     certificate_thumbprint: Option<String>,
@@ -110,7 +97,7 @@ pub struct AssertionKey {
 impl std::fmt::Debug for AssertionKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AssertionKey")
-            .field("algorithm", &self.algorithm)
+            .field("algorithm", &self.signing.algorithm())
             .field("kid", &self.kid)
             .finish_non_exhaustive()
     }
@@ -121,62 +108,53 @@ impl AssertionKey {
     /// under `kid`.
     ///
     /// Without `algorithm`, an EC key signs with the algorithm of its curve,
-    /// ES256 for P-256 and ES384 for P-384 (RFC 7518 §3.4), an RSA key with
-    /// RS384, which SMART's asymmetric client profile has a client support,
-    /// and an Ed25519 key with `EdDSA`. Without `kid`, the key is
+    /// ES256 for P-256 and ES384 for P-384 (RFC 7518 §3.4), an Ed25519 key
+    /// with `EdDSA`, an ML-DSA key (RFC 9881 §6) with its parameter set
+    /// (RFC 9964 §5), and an RSA key with RS384, which SMART's asymmetric
+    /// client profile has a client support. Without `kid`, the key is
     /// published under its RFC 7638 SHA-256 thumbprint (the default is our
     /// own design; the thumbprint is the RFC's).
     ///
     /// # Errors
     ///
-    /// Returns [`AssertionError`] for a PEM that is no supported private
-    /// key, an algorithm of another key type or a symmetric one, an EC key
-    /// on another curve than P-256 or P-384 with no algorithm
-    /// ([`AssertionError::Curve`]), or a key whose public half cannot be
-    /// derived.
+    /// Returns [`AssertionError::Key`] for a PEM that is no supported private
+    /// key, [`AssertionError::Curve`] for an EC key on another curve than
+    /// P-256 or P-384, and [`AssertionError::Algorithm`] for an algorithm of
+    /// another key type, curve or parameter set.
     pub fn from_pem(
         pem: &[u8],
         algorithm: Option<Algorithm>,
         kid: Option<String>,
     ) -> Result<Self, AssertionError> {
-        let (encoding, algorithm, mut public) = match algorithm {
-            Some(algorithm) => {
-                let encoding = load(pem, algorithm)?;
-                let public = Jwk::from_encoding_key(&encoding, algorithm)
-                    .map_err(|source| AssertionError::Public { source })?;
-                (encoding, algorithm, public)
-            }
-            None => inferred(pem)?,
-        };
-        let kid = match kid {
-            Some(kid) => kid,
-            None => thumbprint(&public),
-        };
-        public.common.key_id = Some(kid.clone());
-        public.common.public_key_use = Some(jsonwebtoken::jwk::PublicKeyUse::Signature);
+        let private = PrivateKey::from_pem(pem).map_err(|source| match source {
+            KeyError::Curve => AssertionError::Curve,
+            source => AssertionError::Key { source },
+        })?;
+        let algorithm = algorithm
+            .or_else(|| private.algorithm())
+            .unwrap_or(Algorithm::Rs384);
+        let signing = SigningKey::new(private, algorithm)
+            .map_err(|_other| AssertionError::Algorithm { algorithm })?;
+        let kid = kid.unwrap_or_else(|| signing.public_jwk().thumbprint());
         Ok(Self {
-            encoding,
-            algorithm,
+            signing,
             kid,
-            public,
             certificate_thumbprint: None,
         })
     }
 
     /// Returns this key signing with `algorithm`, another algorithm of an
     /// RSA key's family (RS256 to PS512, RFC 7518 §3.3 and §3.5), as the
-    /// party it authenticates to names it. An EC or Ed25519 key signs with
-    /// the one algorithm of its curve.
+    /// party it authenticates to names it. An EC, Ed25519 or ML-DSA key
+    /// signs with the one algorithm of its curve or parameter set.
     ///
     /// # Errors
     ///
     /// Returns [`AssertionError::Algorithm`] for an algorithm of another key
-    /// type, or any other one for an EC or Ed25519 key.
+    /// type, or any other one for an EC, Ed25519 or ML-DSA key.
     pub fn with_algorithm(mut self, algorithm: Algorithm) -> Result<Self, AssertionError> {
-        if algorithm != self.algorithm && !(is_rsa(algorithm) && is_rsa(self.algorithm)) {
-            return Err(AssertionError::Algorithm { algorithm });
-        }
-        self.algorithm = algorithm;
+        self.signing = SigningKey::new(self.signing.private_key().clone(), algorithm)
+            .map_err(|_other| AssertionError::Algorithm { algorithm })?;
         Ok(self)
     }
 
@@ -196,11 +174,7 @@ impl AssertionKey {
             x509_parser::pem::parse_x509_pem(pem).map_err(|_unread| AssertionError::Certificate)?;
         let (_, certificate) = x509_parser::certificate::X509Certificate::from_der(&pem.contents)
             .map_err(|_unread| AssertionError::Certificate)?;
-        let key = certificate
-            .public_key()
-            .parsed()
-            .map_err(|_unread| AssertionError::Certificate)?;
-        if !self.holds(&key) {
+        if !self.holds(certificate.public_key()) {
             return Err(AssertionError::CertificateKey);
         }
         let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, &pem.contents);
@@ -209,26 +183,41 @@ impl AssertionKey {
         Ok(self)
     }
 
-    /// Whether `key`, a certificate's public key, is this key's public half.
+    /// Whether `key`, a certificate's subject public key, is this key's
+    /// public half.
     #[cfg(feature = "oidc")]
-    fn holds(&self, key: &x509_parser::public_key::PublicKey<'_>) -> bool {
+    fn holds(&self, key: &x509_parser::x509::SubjectPublicKeyInfo<'_>) -> bool {
         use x509_parser::public_key::PublicKey;
-        let decoded = |text: &str| {
-            base64::engine::general_purpose::URL_SAFE_NO_PAD
-                .decode(text)
+        let own = self.signing.public_jwk().to_value();
+        let decoded = |name: &str| {
+            own.get(name)
+                .and_then(serde_json::Value::as_str)
+                .and_then(|text| {
+                    base64::engine::general_purpose::URL_SAFE_NO_PAD
+                        .decode(text)
+                        .ok()
+                })
                 .unwrap_or_default()
         };
-        match (key, &self.public.algorithm) {
-            (PublicKey::RSA(rsa), AlgorithmParameters::RSA(own)) => {
-                significant(rsa.modulus) == significant(&decoded(&own.n))
-                    && significant(rsa.exponent) == significant(&decoded(&own.e))
-            }
-            (PublicKey::EC(point), AlgorithmParameters::EllipticCurve(own)) => {
+        let bits = key.subject_public_key.data.as_ref();
+        match own.get("kty").and_then(serde_json::Value::as_str) {
+            Some("RSA") => match key.parsed() {
+                Ok(PublicKey::RSA(rsa)) => {
+                    significant(rsa.modulus) == significant(&decoded("n"))
+                        && significant(rsa.exponent) == significant(&decoded("e"))
+                }
+                _ => false,
+            },
+            Some("EC") => {
                 let mut uncompressed = vec![0x04];
-                uncompressed.extend(decoded(&own.x));
-                uncompressed.extend(decoded(&own.y));
-                point.data() == uncompressed.as_slice()
+                uncompressed.extend(decoded("x"));
+                uncompressed.extend(decoded("y"));
+                bits == uncompressed.as_slice()
             }
+            // NOTE: RFC 8410 §4 and RFC 9881 §4, an Ed25519 or ML-DSA public key is the
+            // raw key in the subjectPublicKey bit string.
+            Some("OKP") => bits == decoded("x").as_slice(),
+            Some("AKP") => bits == decoded("pub").as_slice(),
             _ => false,
         }
     }
@@ -236,7 +225,7 @@ impl AssertionKey {
     /// Returns the algorithm the assertion is signed with.
     #[must_use]
     pub const fn algorithm(&self) -> Algorithm {
-        self.algorithm
+        self.signing.algorithm()
     }
 
     /// Returns the `kid` the public half is published under.
@@ -249,11 +238,17 @@ impl AssertionKey {
     /// §4), with its `kid`, `use` and `alg`.
     #[must_use]
     pub fn public_jwk(&self) -> serde_json::Value {
-        let mut jwk = serde_json::to_value(&self.public).unwrap_or(serde_json::Value::Null);
+        let mut jwk = self
+            .signing
+            .public_jwk()
+            .clone()
+            .with_kid(self.kid.as_str())
+            .with_signature_use()
+            .to_value();
         if let Some(members) = jwk.as_object_mut() {
             members.insert(
                 String::from("alg"),
-                serde_json::to_value(self.algorithm).unwrap_or(serde_json::Value::Null),
+                serde_json::Value::from(self.signing.algorithm().name()),
             );
         }
         jwk
@@ -271,11 +266,11 @@ impl AssertionKey {
     /// Returns [`AssertionError::Sign`] when the claims could not be
     /// serialized or the signature failed.
     pub fn sign(&self, typ: &str, claims: &impl Serialize) -> Result<String, AssertionError> {
-        let mut header = Header::new(self.algorithm);
+        let mut header = Header::new(self.signing.algorithm());
         header.kid = Some(self.kid.clone());
         header.typ = Some(typ.to_owned());
         header.x5t_s256.clone_from(&self.certificate_thumbprint);
-        jsonwebtoken::encode(&header, claims, &self.encoding)
+        crate::jws::compact::encode(&header, claims, &self.signing)
             .map_err(|source| AssertionError::Sign { source })
     }
 
@@ -309,19 +304,6 @@ impl AssertionKey {
     }
 }
 
-/// Whether `algorithm` signs with an RSA key (RFC 7518 §3.3, §3.5).
-const fn is_rsa(algorithm: Algorithm) -> bool {
-    matches!(
-        algorithm,
-        Algorithm::RS256
-            | Algorithm::RS384
-            | Algorithm::RS512
-            | Algorithm::PS256
-            | Algorithm::PS384
-            | Algorithm::PS512
-    )
-}
-
 /// Returns a big-endian integer without its leading zero octets, as a DER
 /// integer and a JWK member each write it differently (RFC 7518 §6.3.1).
 #[cfg(feature = "oidc")]
@@ -331,33 +313,6 @@ fn significant(octets: &[u8]) -> &[u8] {
         .position(|octet| *octet != 0)
         .unwrap_or(octets.len());
     octets.get(start..).unwrap_or_default()
-}
-
-/// Returns the key `pem` holds with the algorithm its type names, and its
-/// public half: an EC key's curve (RFC 7518 §3.4), RS384 for an RSA key, and
-/// `EdDSA` for an Ed25519 key.
-fn inferred(pem: &[u8]) -> Result<(EncodingKey, Algorithm, Jwk), AssertionError> {
-    if let Ok(encoding) = EncodingKey::from_ec_pem(pem) {
-        // NOTE: RFC 7518 §3.4; a key that derives no P-256 public half is
-        // legitimately read as P-384 next, the one other curve allowed.
-        if let Ok(public) = Jwk::from_encoding_key(&encoding, Algorithm::ES256) {
-            return Ok((encoding, Algorithm::ES256, public));
-        }
-        let public = Jwk::from_encoding_key(&encoding, Algorithm::ES384)
-            .map_err(|source| AssertionError::Curve { source })?;
-        return Ok((encoding, Algorithm::ES384, public));
-    }
-    let (encoding, algorithm) = if let Ok(encoding) = EncodingKey::from_rsa_pem(pem) {
-        (encoding, Algorithm::RS384)
-    } else {
-        (
-            EncodingKey::from_ed_pem(pem).map_err(|source| AssertionError::Key { source })?,
-            Algorithm::EdDSA,
-        )
-    };
-    let public = Jwk::from_encoding_key(&encoding, algorithm)
-        .map_err(|source| AssertionError::Public { source })?;
-    Ok((encoding, algorithm, public))
 }
 
 /// The claims of a client assertion (RFC 7523 §3; SMART App Launch 2.2.0,
@@ -385,86 +340,4 @@ pub fn jwk_set(keys: &[&AssertionKey]) -> serde_json::Value {
     serde_json::json!({
         "keys": keys.iter().map(|key| key.public_jwk()).collect::<Vec<_>>()
     })
-}
-
-/// Returns the RFC 7638 §3 SHA-256 thumbprint of `jwk`, base64url without
-/// padding.
-///
-/// The required members of the key type are serialized with no whitespace
-/// in lexicographic order (§3.2; RFC 8037 §2 for an Ed25519 key), which
-/// the hand-built strings below are.
-#[must_use]
-pub fn thumbprint(jwk: &Jwk) -> String {
-    let canonical = match &jwk.algorithm {
-        AlgorithmParameters::EllipticCurve(ec) => format!(
-            "{{\"crv\":{},\"kty\":\"EC\",\"x\":{},\"y\":{}}}",
-            json_string(&ec.curve),
-            json_string(&ec.x),
-            json_string(&ec.y)
-        ),
-        AlgorithmParameters::RSA(rsa) => format!(
-            "{{\"e\":{},\"kty\":\"RSA\",\"n\":{}}}",
-            json_string(&rsa.e),
-            json_string(&rsa.n)
-        ),
-        AlgorithmParameters::OctetKeyPair(okp) => format!(
-            "{{\"crv\":{},\"kty\":\"OKP\",\"x\":{}}}",
-            json_string(&okp.curve),
-            json_string(&okp.x)
-        ),
-        AlgorithmParameters::OctetKey(oct) => {
-            format!("{{\"k\":{},\"kty\":\"oct\"}}", json_string(&oct.value))
-        }
-        // NOTE: RFC 7638 §3.2 names the members per key type; a type this
-        // reader does not know has no thumbprint, and no such key signs an
-        // assertion here.
-        _ => String::new(),
-    };
-    let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, canonical.as_bytes());
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest.as_ref())
-}
-
-/// Returns `value` as a JSON string literal.
-fn json_string(value: &impl Serialize) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_never| String::from("\"\""))
-}
-
-/// Returns the encoding key `pem` holds for `algorithm`.
-fn load(pem: &[u8], algorithm: Algorithm) -> Result<EncodingKey, AssertionError> {
-    let loaded = match algorithm {
-        Algorithm::RS256
-        | Algorithm::RS384
-        | Algorithm::RS512
-        | Algorithm::PS256
-        | Algorithm::PS384
-        | Algorithm::PS512 => EncodingKey::from_rsa_pem(pem),
-        Algorithm::ES256 | Algorithm::ES384 => EncodingKey::from_ec_pem(pem),
-        Algorithm::EdDSA => EncodingKey::from_ed_pem(pem),
-        other => return Err(AssertionError::Algorithm { algorithm: other }),
-    };
-    loaded.map_err(|source| AssertionError::Key { source })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::thumbprint;
-    use jsonwebtoken::jwk::Jwk;
-
-    #[test]
-    fn the_thumbprint_is_the_rfc_7638_example() {
-        // NOTE: RFC 7638 §3.1, the example key and its thumbprint
-        // `NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs`.
-        let jwk: Jwk = serde_json::from_value(serde_json::json!({
-            "kty": "RSA",
-            "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
-            "e": "AQAB",
-            "alg": "RS256",
-            "kid": "2011-04-29"
-        }))
-        .expect("the example key parses");
-        assert_eq!(
-            "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs",
-            thumbprint(&jwk)
-        );
-    }
 }

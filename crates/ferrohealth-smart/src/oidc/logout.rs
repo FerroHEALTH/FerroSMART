@@ -90,14 +90,12 @@ impl RelyingParty {
     /// without the back-channel logout event, or with a `nonce`. Each is a
     /// `400` to the provider (§2.6, §2.8).
     pub async fn logout_token(&self, token: &str) -> Result<LogoutClaims, OidcError> {
-        let (header, key) = self.signing_key(token).await?;
+        let (jws, key) = self.signing_key(token).await?;
         // NOTE: Back-Channel Logout 1.0 §2.6 items 2 to 4: the signature, `alg`,
         // `iss`, `aud`, `iat` and `exp` are checked as they are for an ID Token.
-        let mut validation = self.validation(header.alg);
-        validation.set_required_spec_claims(&["exp", "iss", "aud"]);
-        let claims = jsonwebtoken::decode::<LogoutClaims>(token, &key, &validation)
-            .map_err(|source| OidcError::LogoutToken { source })?
-            .claims;
+        let claims: LogoutClaims = self
+            .verified(&jws, &key, &["exp", "iat"])
+            .map_err(|source| OidcError::LogoutToken { source })?;
         if !claims
             .audience
             .is_trusted(&self.client_id, &self.trusted_audiences)

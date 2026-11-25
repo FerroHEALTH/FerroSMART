@@ -17,15 +17,19 @@ use aws_lc_rs::signature::ECDSA_P384_SHA384_FIXED_SIGNING;
 use aws_lc_rs::signature::ECDSA_P521_SHA512_FIXED_SIGNING;
 use aws_lc_rs::signature::EcdsaKeyPair;
 use aws_lc_rs::signature::Ed25519KeyPair;
+use aws_lc_rs::signature::ML_DSA_44_SIGNING;
+use aws_lc_rs::signature::ML_DSA_65_SIGNING;
+use aws_lc_rs::signature::ML_DSA_87_SIGNING;
+use aws_lc_rs::signature::PqdsaKeyPair;
 use aws_lc_rs::signature::RsaKeyPair;
 use base64::Engine as _;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::compact::Header;
+use ferrohealth_smart::jws::jwk::Jwk;
+use ferrohealth_smart::jws::key::PrivateKey;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::resource::ResourceServer;
 use ferrohealth_smart::resource::Settings;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::EncodingKey;
-use jsonwebtoken::Header;
-use jsonwebtoken::jwk::Jwk;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
@@ -50,7 +54,7 @@ pub(crate) struct SigningKey {
     /// The algorithm it signs with.
     pub(crate) alg: Algorithm,
     /// The private half.
-    pub(crate) encoding: EncodingKey,
+    pub(crate) signing: ferrohealth_smart::jws::key::SigningKey,
     /// The public half as a JWK.
     pub(crate) jwk: serde_json::Value,
     /// The private half as PKCS#8 PEM, for a client assertion key.
@@ -60,16 +64,11 @@ pub(crate) struct SigningKey {
 /// Returns a fresh ECDSA key for `alg` (ES256 or ES384) published as `kid`.
 pub(crate) fn ec_key(kid: &str, alg: Algorithm) -> SigningKey {
     let curve = match alg {
-        Algorithm::ES384 => &ECDSA_P384_SHA384_FIXED_SIGNING,
+        Algorithm::Es384 => &ECDSA_P384_SHA384_FIXED_SIGNING,
         _ => &ECDSA_P256_SHA256_FIXED_SIGNING,
     };
     let pkcs8 = EcdsaKeyPair::generate_pkcs8(curve, &SystemRandom::new()).expect("a key pair");
-    key(
-        kid,
-        alg,
-        EncodingKey::from_ec_der(pkcs8.as_ref()),
-        pkcs8.as_ref(),
-    )
+    key(kid, alg, pkcs8.as_ref())
 }
 
 /// Returns a fresh P-521 private key in PKCS#8 PEM, a curve no ES256 or
@@ -81,44 +80,47 @@ pub(crate) fn p521_pem() -> Vec<u8> {
     pem(pkcs8.as_ref())
 }
 
-/// Returns a fresh RSA key for `alg` (RS256, RS384, PS256 or PS384)
-/// published as `kid`.
+/// Returns a fresh RSA key for `alg` (RS256 to PS512) published as `kid`.
 pub(crate) fn rsa_key(kid: &str, alg: Algorithm) -> SigningKey {
     let pair = RsaKeyPair::generate(KeySize::Rsa2048).expect("a key pair");
     let pkcs8 = pair.as_der().expect("PKCS#8");
-    // NOTE: jsonwebtoken reads an RSA private key as PKCS#1 DER, which its
-    // PEM reader extracts from the PKCS#8 document.
-    let encoding = EncodingKey::from_rsa_pem(&pem(pkcs8.as_ref())).expect("the PEM reads");
-    key(kid, alg, encoding, pkcs8.as_ref())
+    key(kid, alg, pkcs8.as_ref())
 }
 
 /// Returns a fresh Ed25519 key published as `kid`.
 pub(crate) fn ed_key(kid: &str) -> SigningKey {
-    // NOTE: jsonwebtoken derives the Ed25519 public half from the 48-byte
-    // PKCS#8 v1 document alone, so the v2 form with the public key is not
-    // generated here.
     let pkcs8 = Ed25519KeyPair::generate_pkcs8v1(&SystemRandom::new()).expect("a key pair");
-    key(
-        kid,
-        Algorithm::EdDSA,
-        EncodingKey::from_ed_der(pkcs8.as_ref()),
-        pkcs8.as_ref(),
-    )
+    key(kid, Algorithm::EdDsa, pkcs8.as_ref())
 }
 
-/// Returns `encoding` as a signing key with its public JWK.
-fn key(kid: &str, alg: Algorithm, encoding: EncodingKey, pkcs8: &[u8]) -> SigningKey {
-    let mut jwk =
-        serde_json::to_value(Jwk::from_encoding_key(&encoding, alg).expect("a public JWK"))
-            .expect("the JWK serializes");
-    if let Some(members) = jwk.as_object_mut() {
-        members.insert(String::from("kid"), serde_json::json!(kid));
-        members.insert(String::from("use"), serde_json::json!("sig"));
-    }
+/// Returns a fresh ML-DSA key of `alg`'s parameter set (RFC 9964 §5)
+/// published as `kid`, its PEM the PKCS#8 form of RFC 9881 §6.
+pub(crate) fn ml_dsa_key(kid: &str, alg: Algorithm) -> SigningKey {
+    let parameters = match alg {
+        Algorithm::MlDsa44 => &ML_DSA_44_SIGNING,
+        Algorithm::MlDsa87 => &ML_DSA_87_SIGNING,
+        _ => &ML_DSA_65_SIGNING,
+    };
+    let pair = PqdsaKeyPair::generate(parameters).expect("a key pair");
+    let pkcs8 = pair.to_pkcs8v1().expect("PKCS#8");
+    key(kid, alg, pkcs8.as_ref())
+}
+
+/// Returns the PKCS#8 key `pkcs8` signing with `alg`, with its public JWK.
+fn key(kid: &str, alg: Algorithm, pkcs8: &[u8]) -> SigningKey {
+    let private = PrivateKey::from_pkcs8(pkcs8).expect("the key reads");
+    let signing =
+        ferrohealth_smart::jws::key::SigningKey::new(private, alg).expect("the key signs alg");
+    let jwk = signing
+        .public_jwk()
+        .clone()
+        .with_kid(kid)
+        .with_signature_use()
+        .to_value();
     SigningKey {
         kid: kid.to_owned(),
         alg,
-        encoding,
+        signing,
         jwk,
         pem: pem(pkcs8),
     }
@@ -134,6 +136,27 @@ fn pem(der: &[u8]) -> Vec<u8> {
     }
     text.push_str("-----END PRIVATE KEY-----\n");
     text.into_bytes()
+}
+
+/// Returns the header of the compact JWS `token`.
+pub(crate) fn header(token: &str) -> Header {
+    ferrohealth_smart::jws::compact::decode(token)
+        .expect("the JWS reads")
+        .header()
+        .clone()
+}
+
+/// Returns the claims of the compact JWS `token` once its signature
+/// verifies with the public JWK `jwk` under the header's algorithm.
+pub(crate) fn verified(
+    token: &str,
+    jwk: &serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    let key = Jwk::try_from(jwk).expect("the JWK reads");
+    ferrohealth_smart::jws::compact::decode(token)
+        .expect("the JWS reads")
+        .verify_claims(&key)
+        .expect("the signature verifies")
 }
 
 /// The stub authorization server.
@@ -275,7 +298,7 @@ pub(crate) fn mint(key: &SigningKey, claims: &serde_json::Value) -> String {
 
 /// Returns `claims` signed by `key` under `header`.
 pub(crate) fn mint_with(key: &SigningKey, header: &Header, claims: &serde_json::Value) -> String {
-    jsonwebtoken::encode(header, claims, &key.encoding).expect("the token signs")
+    ferrohealth_smart::jws::compact::encode(header, claims, &key.signing).expect("the token signs")
 }
 
 /// Returns the resource server `settings` describe.

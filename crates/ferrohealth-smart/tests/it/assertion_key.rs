@@ -11,16 +11,17 @@ use std::time::Duration;
 use ferrohealth_smart::client::assertion::AssertionError;
 use ferrohealth_smart::client::assertion::AssertionKey;
 use ferrohealth_smart::client::keys::KeyRing;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::DecodingKey;
-use jsonwebtoken::Validation;
-use jsonwebtoken::jwk::Jwk;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::claims::Validation;
 use serde::Serialize;
 
 use crate::support::ec_key;
 use crate::support::ed_key;
+use crate::support::header;
+use crate::support::ml_dsa_key;
 use crate::support::p521_pem;
 use crate::support::rsa_key;
+use crate::support::verified;
 
 /// The claims of a product's own token.
 #[derive(Serialize)]
@@ -33,8 +34,8 @@ struct Own<'a> {
 #[test]
 fn an_ec_key_signs_the_algorithm_of_its_curve() -> Result<(), Box<dyn StdError>> {
     for (generated, expected) in [
-        (Algorithm::ES256, Algorithm::ES256),
-        (Algorithm::ES384, Algorithm::ES384),
+        (Algorithm::Es256, Algorithm::Es256),
+        (Algorithm::Es384, Algorithm::Es384),
     ] {
         let key = AssertionKey::from_pem(&ec_key("unused", generated).pem, None, None)?;
         assert_eq!(expected, key.algorithm(), "RFC 7518 §3.4");
@@ -49,12 +50,60 @@ fn an_ec_key_signs_the_algorithm_of_its_curve() -> Result<(), Box<dyn StdError>>
         );
     }
     assert_eq!(
-        Algorithm::RS384,
-        AssertionKey::from_pem(&rsa_key("unused", Algorithm::RS256).pem, None, None)?.algorithm()
+        Algorithm::Rs384,
+        AssertionKey::from_pem(&rsa_key("unused", Algorithm::Rs256).pem, None, None)?.algorithm()
     );
     assert_eq!(
-        Algorithm::EdDSA,
+        Algorithm::EdDsa,
         AssertionKey::from_pem(&ed_key("unused").pem, None, None)?.algorithm()
+    );
+    Ok(())
+}
+
+#[test]
+fn an_ml_dsa_key_signs_its_parameter_set_and_publishes_an_akp_key() -> Result<(), Box<dyn StdError>>
+{
+    for algorithm in [Algorithm::MlDsa44, Algorithm::MlDsa65, Algorithm::MlDsa87] {
+        let key = AssertionKey::from_pem(&ml_dsa_key("unused", algorithm).pem, None, None)?;
+        assert_eq!(algorithm, key.algorithm(), "RFC 9964 §5");
+        let public = key.public_jwk();
+        assert_eq!("AKP", public["kty"], "RFC 9964 §3");
+        assert_eq!(
+            algorithm.name(),
+            public["alg"],
+            "RFC 9964 §3: alg is REQUIRED"
+        );
+        assert_eq!(key.kid(), public["kid"]);
+        assert!(
+            public.get("priv").is_none(),
+            "RFC 9964 §3: no priv in a public key"
+        );
+        let assertion = key.assertion("synthetic-client", "https://as.example.org/token", "JWT")?;
+        assert_eq!(algorithm, header(&assertion).alg);
+        let claims = verified(&assertion, &public);
+        assert_eq!(
+            Some(&serde_json::json!("synthetic-client")),
+            claims.get("sub")
+        );
+        for other in [Algorithm::Es256, Algorithm::Rs256] {
+            assert!(
+                matches!(
+                    key.clone().with_algorithm(other),
+                    Err(AssertionError::Algorithm { .. })
+                ),
+                "{algorithm} signs nothing else"
+            );
+        }
+    }
+    let other_set = ml_dsa_key("unused", Algorithm::MlDsa44);
+    assert!(
+        matches!(
+            AssertionKey::from_pem(&other_set.pem, Some(Algorithm::MlDsa65), None),
+            Err(AssertionError::Algorithm {
+                algorithm: Algorithm::MlDsa65
+            })
+        ),
+        "an ML-DSA-44 key signs no ML-DSA-65"
     );
     Ok(())
 }
@@ -63,26 +112,26 @@ fn an_ec_key_signs_the_algorithm_of_its_curve() -> Result<(), Box<dyn StdError>>
 fn an_ec_key_on_another_curve_is_refused_without_an_algorithm() {
     let refused = AssertionKey::from_pem(&p521_pem(), None, None);
     assert!(
-        matches!(refused, Err(AssertionError::Curve { .. })),
+        matches!(refused, Err(AssertionError::Curve)),
         "a P-521 key signs neither ES256 nor ES384: {refused:?}"
     );
 }
 
 #[test]
 fn a_configured_algorithm_still_overrides_the_curve() {
-    let p256 = ec_key("unused", Algorithm::ES256);
+    let p256 = ec_key("unused", Algorithm::Es256);
     assert!(
-        AssertionKey::from_pem(&p256.pem, Some(Algorithm::ES384), None).is_err(),
+        AssertionKey::from_pem(&p256.pem, Some(Algorithm::Es384), None).is_err(),
         "a P-256 key cannot sign ES384"
     );
-    assert!(AssertionKey::from_pem(&p256.pem, Some(Algorithm::ES256), None).is_ok());
+    assert!(AssertionKey::from_pem(&p256.pem, Some(Algorithm::Es256), None).is_ok());
 }
 
 #[test]
 fn the_rings_current_key_signs_a_products_own_claims_under_its_type()
 -> Result<(), Box<dyn StdError>> {
-    let current = AssertionKey::from_pem(&ec_key("unused", Algorithm::ES256).pem, None, None)?;
-    let previous = AssertionKey::from_pem(&ec_key("unused", Algorithm::ES384).pem, None, None)?;
+    let current = AssertionKey::from_pem(&ec_key("unused", Algorithm::Es256).pem, None, None)?;
+    let previous = AssertionKey::from_pem(&ec_key("unused", Algorithm::Es384).pem, None, None)?;
     let ring = KeyRing::new(current).with_previous_for(previous, Duration::from_secs(60))?;
     let key = ring.current();
     let claims = Own {
@@ -92,24 +141,19 @@ fn the_rings_current_key_signs_a_products_own_claims_under_its_type()
     };
     let token = key.sign("example+jwt", &claims)?;
 
-    let header = jsonwebtoken::decode_header(&token)?;
-    assert_eq!(Algorithm::ES256, header.alg);
+    let header = header(&token);
+    assert_eq!(Algorithm::Es256, header.alg);
     assert_eq!(
         Some(String::from("example+jwt")),
         header.typ,
         "RFC 8725 §3.11"
     );
     assert_eq!(Some(key.kid().to_owned()), header.kid);
-    let public: Jwk = serde_json::from_value(key.public_jwk())?;
-    let mut validation = Validation::new(Algorithm::ES256);
-    validation.set_issuer(&["urn:example:product"]);
-    validation.set_required_spec_claims(&["exp", "iss", "sub"]);
-    let read = jsonwebtoken::decode::<serde_json::Map<String, serde_json::Value>>(
-        &token,
-        &DecodingKey::from_jwk(&public)?,
-        &validation,
-    )?
-    .claims;
+    let read = verified(&token, &key.public_jwk());
+    Validation::default()
+        .with_issuer("urn:example:product")
+        .with_required(&["exp", "sub"])
+        .check(&read)?;
     assert_eq!(
         Some(&serde_json::json!("synthetic-subject")),
         read.get("sub")
@@ -128,19 +172,14 @@ fn the_rings_current_key_signs_a_products_own_claims_under_its_type()
 
 #[test]
 fn a_client_assertion_lives_sixty_seconds() -> Result<(), Box<dyn StdError>> {
-    let key = AssertionKey::from_pem(&ec_key("unused", Algorithm::ES256).pem, None, None)?;
+    let key = AssertionKey::from_pem(&ec_key("unused", Algorithm::Es256).pem, None, None)?;
     let assertion = key.assertion("synthetic-client", "https://as.example.org/token", "JWT")?;
 
-    let public: Jwk = serde_json::from_value(key.public_jwk())?;
-    let mut validation = Validation::new(Algorithm::ES256);
-    validation.set_audience(&["https://as.example.org/token"]);
-    validation.set_required_spec_claims(&["exp", "iat", "aud"]);
-    let claims = jsonwebtoken::decode::<serde_json::Map<String, serde_json::Value>>(
-        &assertion,
-        &DecodingKey::from_jwk(&public)?,
-        &validation,
-    )?
-    .claims;
+    let claims = verified(&assertion, &key.public_jwk());
+    Validation::default()
+        .with_audiences(["https://as.example.org/token"])
+        .with_required(&["exp", "iat"])
+        .check(&claims)?;
     let iat = claims
         .get("iat")
         .and_then(serde_json::Value::as_i64)
@@ -161,16 +200,16 @@ fn a_client_assertion_lives_sixty_seconds() -> Result<(), Box<dyn StdError>> {
 fn an_rsa_key_signs_any_rsa_algorithm_and_an_ec_key_only_its_own() -> Result<(), Box<dyn StdError>>
 {
     let rsa = AssertionKey::from_pem(
-        &rsa_key("unused", Algorithm::RS256).pem,
-        Some(Algorithm::RS256),
+        &rsa_key("unused", Algorithm::Rs256).pem,
+        Some(Algorithm::Rs256),
         None,
     )?;
     assert_eq!(
-        Algorithm::PS256,
-        rsa.with_algorithm(Algorithm::PS256)?.algorithm()
+        Algorithm::Ps256,
+        rsa.with_algorithm(Algorithm::Ps256)?.algorithm()
     );
-    let ec = AssertionKey::from_pem(&ec_key("unused", Algorithm::ES256).pem, None, None)?;
-    for other in [Algorithm::ES384, Algorithm::RS256] {
+    let ec = AssertionKey::from_pem(&ec_key("unused", Algorithm::Es256).pem, None, None)?;
+    for other in [Algorithm::Es384, Algorithm::Rs256] {
         assert!(
             matches!(
                 ec.clone().with_algorithm(other),
@@ -209,9 +248,6 @@ fn a_certificate_of_another_key_or_no_certificate_is_refused() -> Result<(), Box
             exp: 1,
         },
     )?;
-    assert!(
-        jsonwebtoken::decode_header(&token)?.x5t_s256.is_some(),
-        "RFC 7515 §4.1.8"
-    );
+    assert!(header(&token).x5t_s256.is_some(), "RFC 7515 §4.1.8");
     Ok(())
 }

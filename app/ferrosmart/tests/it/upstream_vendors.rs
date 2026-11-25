@@ -771,9 +771,10 @@ async fn assertion_sent(smart: &Smart, contract: &Contract) -> (Header, Value) {
         .expect("a client assertion");
     let header = jsonwebtoken::decode_header(&assertion).expect("a header");
     let pem = std::fs::read(smart.keys.dir.path().join("assertion.pem")).expect("the key");
-    let public = AssertionKey::from_pem(&pem, Some(header.alg), None)
-        .expect("the key")
-        .public_jwk();
+    let public =
+        AssertionKey::from_pem(&pem, Some(crate::support::jws_algorithm(header.alg)), None)
+            .expect("the key")
+            .public_jwk();
     let decoding =
         DecodingKey::from_jwk(&serde_json::from_value(public).expect("a JWK")).expect("a key");
     let mut validation = Validation::new(header.alg);

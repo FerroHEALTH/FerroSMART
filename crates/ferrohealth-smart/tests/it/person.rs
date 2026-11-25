@@ -8,10 +8,10 @@
 
 use std::error::Error as StdError;
 
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::resource::PatientClaim;
 use ferrohealth_smart::resource::ResourceServer;
-use jsonwebtoken::Algorithm;
 
 use crate::support::Issuer;
 use crate::support::ec_key;
@@ -32,7 +32,7 @@ fn own(issuer: &Issuer) -> serde_json::Value {
 
 #[tokio::test]
 async fn a_patients_token_carries_the_attached_patient_claim() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = ResourceServer::discover(issuer.settings())
         .await?
@@ -48,7 +48,7 @@ async fn a_patients_token_carries_the_attached_patient_claim() -> Result<(), Box
 
 #[tokio::test]
 async fn a_lazy_server_carries_the_patient_claim_too() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server =
         ResourceServer::lazy(issuer.settings())?.with_extension(PatientClaim::new("patient_id")?);
@@ -63,7 +63,7 @@ async fn a_lazy_server_carries_the_patient_claim_too() -> Result<(), Box<dyn Std
 // scope reaches, not who asks, so a professional's token is never the person's.
 #[tokio::test]
 async fn a_professionals_token_is_never_the_persons_own_access() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = ResourceServer::discover(issuer.settings())
         .await?

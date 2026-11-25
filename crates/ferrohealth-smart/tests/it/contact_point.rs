@@ -18,6 +18,8 @@ use ferrohealth_smart::federation::Source;
 use ferrohealth_smart::federation::contact::AUTHENTICATION_CLASSES;
 use ferrohealth_smart::federation::contact::EhdsiCode;
 use ferrohealth_smart::federation::contact::NameIdFormat;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::compact::Header;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::kind::Unclassified;
@@ -30,8 +32,6 @@ use ferrohealth_smart::resource::Settings;
 use ferrohealth_smart::sender::Binding;
 use ferrohealth_smart::sender::ClientCertificate;
 use ferrohealth_smart::sender::SenderConstraint;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::Header;
 use serde_json::Value;
 use serde_json::json;
 
@@ -121,7 +121,7 @@ struct Harness {
 impl Harness {
     fn new() -> Self {
         Self {
-            key: ec_key("cp", Algorithm::ES256),
+            key: ec_key("cp", Algorithm::Es256),
         }
     }
 
@@ -150,7 +150,7 @@ impl Harness {
         let server = ResourceServer::discover(self.settings(section))
             .await
             .expect("the key set file reads");
-        let mut header = Header::new(Algorithm::ES256);
+        let mut header = Header::new(Algorithm::Es256);
         header.kid = Some(String::from("cp"));
         header.typ = Some(String::from("at+jwt"));
         let binding = Binding::bearer().with_certificate(&ClientCertificate::from_der(CERTIFICATE));
@@ -729,14 +729,14 @@ mod gate {
 
     use ferrohealth_smart::federation::contact::EhdsiCode;
     use ferrohealth_smart::guard::Gate;
+    use ferrohealth_smart::jws::algorithm::Algorithm;
+    use ferrohealth_smart::jws::compact::Header;
     use ferrohealth_smart::refusal::Denied;
     use ferrohealth_smart::refusal::Refusal;
     use ferrohealth_smart::resource::ResourceServer;
     use ferrohealth_smart::sender::ClientCertificate;
     use http::Request;
     use http::header;
-    use jsonwebtoken::Algorithm;
-    use jsonwebtoken::Header;
     use serde_json::Value;
 
     use super::CERTIFICATE;
@@ -768,7 +768,7 @@ mod gate {
 
     /// Returns `claims` signed by the contact point's key.
     fn signed(h: &Harness, claims: &Value) -> String {
-        let mut header = Header::new(Algorithm::ES256);
+        let mut header = Header::new(Algorithm::Es256);
         header.kid = Some(String::from("cp"));
         header.typ = Some(String::from("at+jwt"));
         mint_with(&h.key, &header, claims)

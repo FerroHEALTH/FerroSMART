@@ -6,13 +6,13 @@
 
 use std::error::Error as StdError;
 
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::metadata::DiscoveryError;
 use ferrohealth_smart::metadata::MtlsEndpointAliases;
 use ferrohealth_smart::metadata::ServerMetadata;
 use ferrohealth_smart::resource::ResourceError;
 use ferrohealth_smart::resource::ResourceServer;
 use ferrohealth_smart::resource::configuration::SmartOptions;
-use jsonwebtoken::Algorithm;
 
 use crate::support::ec_key;
 use crate::support::mint;
@@ -24,7 +24,7 @@ const ISSUER: &str = "https://as.example.org";
 
 #[tokio::test]
 async fn a_key_set_file_verifies_without_reading_the_issuer() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let set = serde_json::json!({ "keys": [key.jwk.clone()] }).to_string();
     let path = temp_file("offline-jwks.json", set.as_bytes());
     let mut settings = crate::support::persons(ISSUER, "https://fhir.example.org");
@@ -74,7 +74,7 @@ async fn a_missing_key_set_file_refuses_the_start() {
 async fn offline_server(
     name: &str,
 ) -> Result<(ResourceServer, std::path::PathBuf), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let set = serde_json::json!({ "keys": [key.jwk.clone()] }).to_string();
     let path = temp_file(name, set.as_bytes());
     let mut settings = crate::support::persons(ISSUER, "https://fhir.example.org");
@@ -170,7 +170,7 @@ async fn supplied_metadata_is_held_to_the_issuer_and_the_https_rule()
 
 #[tokio::test]
 async fn a_key_set_that_repeats_a_member_name_refuses_the_start() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let jwk = key.jwk.to_string();
     let inner = jwk.replacen('{', r#"{"kid": "k2", "#, 1);
     for (name, set) in [

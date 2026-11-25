@@ -16,6 +16,7 @@ use ferrohealth_smart::guard::AuthLayer;
 use ferrohealth_smart::guard::Gate;
 use ferrohealth_smart::guard::Requirement;
 use ferrohealth_smart::guard::Target;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::party::Markers;
 use ferrohealth_smart::party::Membership;
 use ferrohealth_smart::party::PartyRef;
@@ -33,7 +34,6 @@ use http::StatusCode;
 use http::Uri;
 use http::header;
 use http_body_util::BodyExt as _;
-use jsonwebtoken::Algorithm;
 use tower::ServiceExt as _;
 
 use super::FakeSource;
@@ -78,7 +78,7 @@ struct Case {
 
 impl Case {
     async fn new(source: Arc<FakeSource>) -> Self {
-        let key = ec_key("k1", Algorithm::ES256);
+        let key = ec_key("k1", Algorithm::Es256);
         let issuer = Issuer::start(&[&key]).await;
         Self {
             issuer,

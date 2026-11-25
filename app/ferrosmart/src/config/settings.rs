@@ -14,9 +14,9 @@ use ferrohealth_smart::client::assertion::AssertionKey;
 use ferrohealth_smart::client::keys::KeyRing;
 use ferrohealth_smart::client::outbound::OutboundClient;
 use ferrohealth_smart::config::ServerTls;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ihe_atna::atna::feed::FeedRepository;
 use ihe_atna::balp::{NetworkAddress, Observer, SOURCE_SECURITY_SERVER};
-use jsonwebtoken::Algorithm;
 use secrecy::SecretString;
 use url::Url;
 
@@ -323,8 +323,8 @@ fn backend(
     // NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric, the server
     // validates RS384 and ES384.
     let algorithm = match backend.algorithm.as_str() {
-        "ES384" => Algorithm::ES384,
-        "RS384" => Algorithm::RS384,
+        "ES384" => Algorithm::Es384,
+        "RS384" => Algorithm::Rs384,
         _ => return Err(rule("`algorithm` is `ES384` or `RS384`")),
     };
     let ring = key_ring(&backend.keys, &BACKEND_KEYS, algorithm)?;
@@ -450,7 +450,7 @@ fn signing_keys(
     const KEY: &str = "ferrosmart.keys.private_key_files";
     let mut pool: Vec<AssertionKey> = Vec::with_capacity(section.private_key_files.len());
     for path in &section.private_key_files {
-        let key = read_key(KEY, path, None, Algorithm::RS256)?;
+        let key = read_key(KEY, path, None, Algorithm::Rs256)?;
         if pool.iter().any(|other| other.kid() == key.kid()) {
             return Err(Error::RepeatedKey {
                 kid: key.kid().to_owned(),

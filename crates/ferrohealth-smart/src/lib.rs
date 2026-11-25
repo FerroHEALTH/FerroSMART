@@ -16,6 +16,9 @@
 //!   signature with an asymmetric algorithm only, `iss`, `aud`, `exp` and
 //!   `nbf` within a clock skew). A refused token is one generic `401` that
 //!   names no claim ([`refusal`]).
+//! - [`jws`]: every JWS the crate signs or verifies (RFC 7515), over
+//!   `aws-lc-rs`: RSA, ECDSA, `EdDSA` and ML-DSA (RFC 9964), with the JWK
+//!   types they use, `AKP` among them, and the registered claim checks.
 //! - [`scope`]: the SMART App Launch 2.x scopes, `patient/`, `user/` and
 //!   `system/` with the `cruds` permissions, and the patient compartment the
 //!   token's launch context names; a missing permission is a `403` that names
@@ -91,7 +94,7 @@ pub mod guard;
 #[cfg(resource_server)]
 pub mod json;
 #[cfg(resource_server)]
-mod jws;
+pub mod jws;
 #[cfg(resource_server)]
 pub mod kind;
 #[cfg(resource_server)]

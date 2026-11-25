@@ -43,7 +43,8 @@ versions `docs/VERSIONS.md` pins:
    - OpenID Connect Front-Channel Logout 1.0:
      `docs/specs/openid-connect-frontchannel/`.
 2. **Official documentation of the tools:** the docs.rs page of each pinned
-   crate (`jsonwebtoken`, `argon2`, `reqwest`, `secrecy`, `axum`, `tower`),
+   crate (`aws-lc-rs`, `jsonwebtoken`, `argon2`, `reqwest`, `secrecy`, `axum`,
+   `tower`),
    the Rust book and reference.
 
 You never answer from memory, from another implementation's behaviour (the

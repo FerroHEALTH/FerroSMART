@@ -52,9 +52,12 @@ mod guard;
 mod introspection;
 #[cfg(feature = "fetch")]
 mod issuer_lists;
+mod jws;
 mod key_file;
 #[cfg(feature = "fetch")]
 mod metadata;
+#[cfg(feature = "fetch")]
+mod ml_dsa;
 mod nl_profile;
 #[cfg(feature = "oidc")]
 mod oidc;

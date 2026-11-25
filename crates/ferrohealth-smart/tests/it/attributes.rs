@@ -18,6 +18,8 @@ use ferrohealth_smart::federation::Field;
 use ferrohealth_smart::federation::Mapping;
 use ferrohealth_smart::federation::Source;
 use ferrohealth_smart::federation::person::AttributesSection;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::compact::Header;
 use ferrohealth_smart::kind::Actor;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
@@ -27,8 +29,6 @@ use ferrohealth_smart::resource::Rejection;
 use ferrohealth_smart::resource::ResourceError;
 use ferrohealth_smart::resource::ResourceServer;
 use ferrohealth_smart::resource::Settings;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::Header;
 use serde_json::Value;
 use serde_json::json;
 
@@ -50,7 +50,7 @@ async fn admit(
     tweak: impl FnOnce(&mut Settings),
     claims: &Value,
 ) -> Result<Caller, Rejection> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let set = json!({ "keys": [key.jwk.clone()] }).to_string();
     let mut settings = Settings::new(ISSUER, AUDIENCE, kind);
     settings.jwks_file = Some(temp_file("attributes-jwks.json", set.as_bytes()));
@@ -58,7 +58,7 @@ async fn admit(
     let server = ResourceServer::discover(settings)
         .await
         .expect("the settings hold and the key set file reads");
-    let mut header = Header::new(Algorithm::ES256);
+    let mut header = Header::new(Algorithm::Es256);
     header.kid = Some(String::from("k1"));
     header.typ = Some(String::from("at+jwt"));
     server.authenticate(&mint_with(&key, &header, claims)).await

@@ -23,6 +23,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use base64::Engine as _;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::key::SigningKey as JwsKey;
 use ferrohealth_smart::refusal::Reason;
 use ferrohealth_smart::resource::Caller;
 use ferrohealth_smart::resource::Rejection;
@@ -35,9 +37,6 @@ use ferrohealth_smart::sender::replay::MemoryReplayStore;
 use ferrohealth_smart::sender::replay::ReplayStore;
 use http::HeaderMap;
 use http::HeaderValue;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::EncodingKey;
-use jsonwebtoken::jwk::Jwk;
 use serde_json::Value;
 use serde_json::json;
 
@@ -55,7 +54,7 @@ pub(crate) const EXTERNAL: &str = "https://resource.example.org";
 /// A client's `DPoP` key, generated for the case.
 pub(crate) struct DpopKey {
     /// The private half.
-    encoding: EncodingKey,
+    encoding: JwsKey,
     /// The public half, the proof's `jwk` header.
     jwk: Value,
     /// Its RFC 7638 SHA-256 thumbprint, the `cnf.jkt` a bound token names.
@@ -64,17 +63,17 @@ pub(crate) struct DpopKey {
 
 /// Returns a fresh ES256 `DPoP` key.
 pub(crate) fn dpop_key() -> DpopKey {
-    let key = ec_key("dpop", Algorithm::ES256);
-    let public = Jwk::from_encoding_key(&key.encoding, Algorithm::ES256).expect("a public JWK");
-    let jkt = ferrohealth_smart::client::assertion::thumbprint(&public);
-    let mut jwk = serde_json::to_value(&public).expect("the JWK serializes");
+    let key = ec_key("dpop", Algorithm::Es256);
+    let public = key.signing.public_jwk();
+    let jkt = public.thumbprint();
+    let mut jwk = public.to_value();
     // NOTE: RFC 9449 §4.2 puts the public key alone in `jwk`; the members a
     // key set adds are left out.
     if let Some(members) = jwk.as_object_mut() {
         members.retain(|name, _| matches!(name.as_str(), "kty" | "crv" | "x" | "y"));
     }
     DpopKey {
-        encoding: key.encoding,
+        encoding: key.signing,
         jwk,
         jkt,
     }
@@ -82,20 +81,22 @@ pub(crate) fn dpop_key() -> DpopKey {
 
 /// Returns `header` and `claims` signed by `encoding` under `alg`, the
 /// compact JWS assembled by hand so a case controls every header member.
-pub(crate) fn signed(
-    header: &Value,
-    claims: &Value,
-    encoding: &EncodingKey,
-    alg: Algorithm,
-) -> String {
+pub(crate) fn signed(header: &Value, claims: &Value, encoding: &JwsKey, alg: Algorithm) -> String {
+    assert_eq!(
+        alg,
+        encoding.algorithm(),
+        "the key signs the case's algorithm"
+    );
     let encode = |value: &Value| {
         base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(serde_json::to_vec(value).expect("the JSON serializes"))
     };
     let input = format!("{}.{}", encode(header), encode(claims));
-    let signature =
-        jsonwebtoken::crypto::sign(input.as_bytes(), encoding, alg).expect("the input signs");
-    format!("{input}.{signature}")
+    let signature = encoding.sign(input.as_bytes()).expect("the input signs");
+    format!(
+        "{input}.{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature)
+    )
 }
 
 /// Returns the proof header RFC 9449 §4.2 requires, for `key`.
@@ -105,7 +106,7 @@ pub(crate) fn proof_header(key: &DpopKey) -> Value {
 
 /// Returns `claims` signed by `key` as a `DPoP` proof.
 pub(crate) fn proof(key: &DpopKey, claims: &Value) -> String {
-    signed(&proof_header(key), claims, &key.encoding, Algorithm::ES256)
+    signed(&proof_header(key), claims, &key.encoding, Algorithm::Es256)
 }
 
 /// Returns a `jti` no other proof of the run carries.
@@ -166,7 +167,7 @@ pub(crate) struct Bound {
 impl Bound {
     /// Starts an issuer with a fresh ES256 key.
     pub(crate) async fn start() -> Self {
-        let key = ec_key("issuer", Algorithm::ES256);
+        let key = ec_key("issuer", Algorithm::Es256);
         let issuer = Issuer::start(&[&key]).await;
         Self { issuer, key }
     }

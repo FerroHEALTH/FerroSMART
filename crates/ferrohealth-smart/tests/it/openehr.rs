@@ -8,6 +8,7 @@
 use std::error::Error as StdError;
 use std::sync::Arc;
 
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::openehr::granted;
 use ferrohealth_smart::openehr::patient_grant;
 use ferrohealth_smart::openehr::smart_scopes::Permission;
@@ -17,7 +18,6 @@ use ferrohealth_smart::resource::Compartment;
 use ferrohealth_smart::resource::Honoured;
 use ferrohealth_smart::resource::configuration::SmartOptions;
 use ferrohealth_smart::scope::Permission as FhirPermission;
-use jsonwebtoken::Algorithm;
 
 use crate::support::Issuer;
 use crate::support::ec_key;
@@ -305,7 +305,7 @@ fn the_fhir_v1_suffixes_grant_nothing_under_the_openehr_grammar() {
 #[tokio::test]
 async fn both_grammars_coexist_in_one_claim_and_the_ehr_id_is_read() -> Result<(), Box<dyn StdError>>
 {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     let mut claims =
@@ -364,7 +364,7 @@ async fn the_discovery_document_of_a_platform_names_its_services() -> Result<(),
     // NOTE: master04 §Services, `org.openehr.rest` is required and
     // `org.fhir.rest` recommended; §Capabilities names the three openEHR
     // capabilities.
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = server(issuer.settings()).await;
     let options = SmartOptions::default().with_openehr(

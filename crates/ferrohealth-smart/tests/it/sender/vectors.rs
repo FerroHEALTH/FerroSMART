@@ -9,13 +9,13 @@
 use std::error::Error as StdError;
 
 use base64::Engine as _;
+use ferrohealth_smart::jws::jwk::Jwk;
 use ferrohealth_smart::sender::Binding;
 use ferrohealth_smart::sender::Check;
 use ferrohealth_smart::sender::ClientCertificate;
 use ferrohealth_smart::sender::SenderConstraint;
 use ferrohealth_smart::sender::proof::Presented;
 use http::Method;
-use jsonwebtoken::jwk::Jwk;
 use serde_json::json;
 
 use super::Bound;
@@ -68,10 +68,7 @@ fn the_figure_4_key_has_the_figure_9_thumbprint() -> Result<(), Box<dyn StdError
         "y": "9VE4jf_Ok_o64zbTTlcuNJajHmt6v9TDVrU0CdvGRDA",
         "crv": "P-256"
     }))?;
-    assert_eq!(
-        FIGURE_9_JKT,
-        ferrohealth_smart::client::assertion::thumbprint(&jwk)
-    );
+    assert_eq!(FIGURE_9_JKT, jwk.thumbprint());
     Ok(())
 }
 

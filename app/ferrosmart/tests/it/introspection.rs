@@ -19,7 +19,6 @@ use ferrosmart::store::grant::{Access, NewGrant};
 use ferrosmart::store::{IssuedToken, Store};
 use http::{Request, StatusCode, header};
 use http_body_util::BodyExt as _;
-use jsonwebtoken::Algorithm;
 use serde_json::{Value, json};
 use tower::ServiceExt as _;
 
@@ -74,13 +73,20 @@ impl Server {
     pub(crate) async fn start_with(extra: &str) -> Self {
         let keys = Keys::new();
         let pem = std::fs::read(ec_key(keys.dir.path(), "client.pem")).expect("the key reads");
-        let client_key =
-            AssertionKey::from_pem(&pem, Some(Algorithm::ES384), Some(String::from("client-1")))
-                .expect("a client key");
+        let client_key = AssertionKey::from_pem(
+            &pem,
+            Some(ferrohealth_smart::jws::algorithm::Algorithm::Es384),
+            Some(String::from("client-1")),
+        )
+        .expect("a client key");
         let set = crate::support::inline(&json!({"keys": [client_key.public_jwk()]}));
         let own = std::fs::read(&keys.current).expect("the server key reads");
-        let signing_key =
-            AssertionKey::from_pem(&own, Some(Algorithm::RS256), None).expect("the server's key");
+        let signing_key = AssertionKey::from_pem(
+            &own,
+            Some(ferrohealth_smart::jws::algorithm::Algorithm::Rs256),
+            None,
+        )
+        .expect("the server's key");
         let database = Database::create().await;
         let text = format!(
             "[ferrosmart]\nissuer = {ISSUER:?}\n[ferrosmart.database]\nurl = {:?}\n\
@@ -510,7 +516,7 @@ async fn an_unknown_or_forged_token_is_inactive() {
     let other = Keys::new();
     let foreign_key = AssertionKey::from_pem(
         &std::fs::read(rsa_key(other.dir.path(), "forger.pem")).expect("reads"),
-        Some(Algorithm::RS256),
+        Some(ferrohealth_smart::jws::algorithm::Algorithm::Rs256),
         Some(String::from(server.signing_key.kid())),
     )
     .expect("a key");

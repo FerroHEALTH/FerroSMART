@@ -14,13 +14,13 @@ use ferrohealth_smart::federation::FederationSection;
 use ferrohealth_smart::federation::Field;
 use ferrohealth_smart::federation::Mapping;
 use ferrohealth_smart::federation::Source;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::compact::Header;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::resource::Caller;
 use ferrohealth_smart::resource::ResourceServer;
 use ferrohealth_smart::resource::Settings;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::Header;
 use serde_json::Value;
 use serde_json::json;
 
@@ -107,7 +107,7 @@ fn organisation() -> Value {
 /// Returns an external professional and an external organisation, each
 /// classified from a signed token.
 pub(super) async fn externals() -> Result<Vec<Caller>, Box<dyn StdError>> {
-    let key = ec_key("fed", Algorithm::ES256);
+    let key = ec_key("fed", Algorithm::Es256);
     let set = json!({ "keys": [key.jwk.clone()] }).to_string();
     let mut settings = Settings::new(ISSUER, AUDIENCE, IssuerKind::Federation);
     settings.jwks_file = Some(temp_file("party-federation-jwks.json", set.as_bytes()));
@@ -122,7 +122,7 @@ pub(super) async fn externals() -> Result<Vec<Caller>, Box<dyn StdError>> {
         Field::ProviderFacilityType,
         vec![Source::AuthorizationDetails(String::from("ura"))],
     )]);
-    let mut header = Header::new(Algorithm::ES256);
+    let mut header = Header::new(Algorithm::Es256);
     header.kid = Some(String::from("fed"));
     header.typ = Some(String::from("IUA-JWT"));
     let mut callers = Vec::new();

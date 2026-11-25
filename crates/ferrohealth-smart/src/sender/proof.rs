@@ -17,14 +17,13 @@ use std::time::SystemTime;
 
 use http::HeaderMap;
 use http::Method;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::DecodingKey;
-use jsonwebtoken::Validation;
-use jsonwebtoken::jwk::Jwk;
-use serde_json::Map;
 use serde_json::Value;
 use url::Url;
 
+use crate::jws::JwsError;
+use crate::jws::algorithm::Algorithm;
+use crate::jws::compact::Unverified;
+use crate::jws::compact::decode;
 use crate::uri::normalized;
 
 use crate::refusal::Reason;
@@ -81,7 +80,7 @@ impl ProofSettings {
 
     /// Checks the settings: an `http` or `https` base URL with a host and
     /// no query or fragment, a window within its bound, and at least one
-    /// algorithm and none symmetric.
+    /// algorithm.
     ///
     /// # Errors
     ///
@@ -102,7 +101,7 @@ impl ProofSettings {
 }
 
 /// Checks a proof window within its bound, a clock skew within its bound,
-/// and at least one algorithm and none symmetric.
+/// and at least one algorithm.
 fn check_window(
     max_age: Duration,
     clock_skew: Duration,
@@ -116,16 +115,6 @@ fn check_window(
     }
     if algorithms.is_empty() {
         return Err(ProofSettingsError::NoAlgorithm);
-    }
-    if let Some(algorithm) = algorithms.iter().find(|algorithm| {
-        matches!(
-            algorithm,
-            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512
-        )
-    }) {
-        return Err(ProofSettingsError::SymmetricAlgorithm {
-            algorithm: *algorithm,
-        });
     }
     Ok(())
 }
@@ -157,12 +146,12 @@ impl Default for DpopSection {
             max_age: ferrohealth_config::units::Duration::from_secs(60),
             clock_skew: ferrohealth_config::units::Duration::from_secs(10),
             algorithms: vec![
-                Algorithm::RS256,
-                Algorithm::RS384,
-                Algorithm::PS256,
-                Algorithm::PS384,
-                Algorithm::ES256,
-                Algorithm::ES384,
+                Algorithm::Rs256,
+                Algorithm::Rs384,
+                Algorithm::Ps256,
+                Algorithm::Ps384,
+                Algorithm::Es256,
+                Algorithm::Es384,
             ],
         }
     }
@@ -170,7 +159,7 @@ impl Default for DpopSection {
 
 impl DpopSection {
     /// Checks the table: a window within its bound, a clock skew within its
-    /// bound, and at least one algorithm and none symmetric.
+    /// bound, and at least one algorithm.
     ///
     /// # Errors
     ///
@@ -218,12 +207,6 @@ pub enum ProofSettingsError {
     /// No algorithm is admitted.
     #[error("the DPoP settings admit no signature algorithm")]
     NoAlgorithm,
-    /// A symmetric algorithm is admitted, which RFC 9449 §4.2 forbids.
-    #[error("the DPoP settings admit the symmetric algorithm {algorithm:?}")]
-    SymmetricAlgorithm {
-        /// The algorithm admitted.
-        algorithm: Algorithm,
-    },
 }
 
 /// What a request presents to a `DPoP`-protected resource.
@@ -393,32 +376,19 @@ impl ProofCheck {
         let jwt = value
             .to_str()
             .map_err(|_opaque| sender(Check::ProofMalformed))?;
-        let header = read_header(jwt)?;
+        let proof = read(jwt)?;
+        let header = proof.header();
         // NOTE: RFC 9449 §4.3 check 5, the algorithm is "supported by the
         // application, and is acceptable per local policy".
         if !self.settings.algorithms.contains(&header.alg) {
             return Err(sender(Check::ProofAlgorithm));
         }
-        let decoding =
-            DecodingKey::from_jwk(&header.jwk).map_err(|_key| sender(Check::ProofKey))?;
-        let mut validation = Validation::new(header.alg);
-        validation.required_spec_claims.clear();
-        validation.validate_exp = false;
-        validation.validate_nbf = false;
-        validation.validate_aud = false;
-        let claims = jsonwebtoken::decode::<Map<String, Value>>(jwt, &decoding, &validation)
-            .map_err(|error| match error.kind() {
-                jsonwebtoken::errors::ErrorKind::InvalidSignature => sender(Check::ProofSignature),
-                jsonwebtoken::errors::ErrorKind::InvalidAlgorithm
-                | jsonwebtoken::errors::ErrorKind::InvalidAlgorithmName => {
-                    sender(Check::ProofAlgorithm)
-                }
-                jsonwebtoken::errors::ErrorKind::InvalidKeyFormat
-                | jsonwebtoken::errors::ErrorKind::InvalidEcdsaKey
-                | jsonwebtoken::errors::ErrorKind::InvalidRsaKey(_) => sender(Check::ProofKey),
-                _ => sender(Check::ProofMalformed),
-            })?
-            .claims;
+        let jwk = header.jwk.as_ref().ok_or_else(|| sender(Check::ProofKey))?;
+        let claims = proof.verify_claims(jwk).map_err(|error| match error {
+            JwsError::Signature => sender(Check::ProofSignature),
+            JwsError::KeyAlgorithm { .. } => sender(Check::ProofAlgorithm),
+            _ => sender(Check::ProofMalformed),
+        })?;
         let text = |name: &str| claims.get(name).and_then(Value::as_str);
         let (Some(jti), Some(htm), Some(htu), Some(iat)) = (
             text("jti"),
@@ -456,7 +426,7 @@ impl ProofCheck {
         let until = self.window(iat)?;
         Ok(Proof {
             key: ProvenKey {
-                jkt: crate::client::assertion::thumbprint(&header.jwk),
+                jkt: jwk.thumbprint(),
             },
             id: ProofId::of(jti),
             until,
@@ -519,16 +489,9 @@ impl ProofCheck {
     }
 }
 
-/// The header of a `DPoP` proof, after checks 2, 4, 5 and 7 of RFC 9449 §4.3.
-struct ProofHeader {
-    /// The signature algorithm.
-    alg: Algorithm,
-    /// The public key the proof is signed with.
-    jwk: Jwk,
-}
-
-/// Returns the header of the proof `jwt`.
-fn read_header(jwt: &str) -> Result<ProofHeader, Rejection> {
+/// Returns the proof `jwt` read into its parts, after checks 2, 4 and 7 of
+/// RFC 9449 §4.3: a well-formed JWT, typed `dpop+jwt`, with a public `jwk`.
+fn read(jwt: &str) -> Result<Unverified<'_>, Rejection> {
     // NOTE: RFC 9449 §4.1, the header value is `token68`, and §4.3 check 2
     // has it a single well-formed JWT: three segments, a JWS.
     let body = jwt.trim_end_matches('=');
@@ -536,55 +499,29 @@ fn read_header(jwt: &str) -> Result<ProofHeader, Rejection> {
         && body.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'+' | b'/')
         });
-    if !token68 || jwt.split('.').count() != 3 {
+    if !token68 {
         return Err(sender(Check::ProofMalformed));
     }
-    let raw = jwt
-        .split('.')
-        .next()
-        .and_then(crate::jws::object)
-        .ok_or_else(|| sender(Check::ProofMalformed))?;
-    // NOTE: RFC 9449 §4.3 check 5, an `alg` the JOSE reader knows no
-    // asymmetric algorithm by (`none` among them) is refused as the algorithm.
-    let header = jsonwebtoken::decode_header(jwt).map_err(|_malformed| {
-        match raw.get("alg").and_then(Value::as_str) {
-            Some(alg) if alg.parse::<Algorithm>().is_err() => sender(Check::ProofAlgorithm),
-            _ => sender(Check::ProofMalformed),
-        }
+    // NOTE: RFC 9449 §4.3 check 5, an `alg` that names no asymmetric algorithm
+    // (`none` among them) is refused as the algorithm; §4.2, the `jwk` "MUST NOT
+    // contain a private key", and the JWK reader refuses one.
+    let proof = decode(jwt).map_err(|error| match error {
+        JwsError::Algorithm => sender(Check::ProofAlgorithm),
+        JwsError::HeaderKey { .. } => sender(Check::ProofKey),
+        _ => sender(Check::ProofMalformed),
     })?;
     // NOTE: RFC 7515 §4.1.9 reads a `typ` without a `/` as if `application/`
     // led it, and media types compare without regard to case.
-    let typed = header.typ.as_deref().is_some_and(|typ| {
+    let typed = proof.header().typ.as_deref().is_some_and(|typ| {
         typ.eq_ignore_ascii_case("dpop+jwt") || typ.eq_ignore_ascii_case("application/dpop+jwt")
     });
     if !typed {
         return Err(sender(Check::ProofType));
     }
-    let Some(jwk) = header.jwk else {
-        return Err(sender(Check::ProofKey));
-    };
-    // NOTE: RFC 9449 §4.2, the `jwk` "MUST NOT contain a private key"; the
-    // members are those of the RFC 7517 Appendix A.2 private keys, and an
-    // `oct` key is symmetric.
-    let private = raw
-        .get("jwk")
-        .and_then(Value::as_object)
-        .is_none_or(|members| {
-            ["d", "p", "q", "dp", "dq", "qi", "oth", "k"]
-                .iter()
-                .any(|name| members.contains_key(*name))
-                || !matches!(
-                    members.get("kty").and_then(Value::as_str),
-                    Some("EC" | "RSA" | "OKP")
-                )
-        });
-    if private {
+    if proof.header().jwk.is_none() {
         return Err(sender(Check::ProofKey));
     }
-    Ok(ProofHeader {
-        alg: header.alg,
-        jwk,
-    })
+    Ok(proof)
 }
 
 /// Returns the rejection of a request that fails `check`.

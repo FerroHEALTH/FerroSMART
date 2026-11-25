@@ -13,10 +13,10 @@ use ferrohealth_smart::config::ConfigError;
 use ferrohealth_smart::config::IntrospectionSection;
 use ferrohealth_smart::config::IssuerEntry;
 use ferrohealth_smart::config::credentials::OauthSection;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::resource::ResourceServer;
 use ferrohealth_smart::resource::introspection::Introspector;
-use jsonwebtoken::Algorithm;
 use secrecy::SecretString;
 
 use crate::support::AUDIENCE;
@@ -54,7 +54,7 @@ fn entry(issuer: &str) -> IssuerEntry {
 
 #[tokio::test]
 async fn an_issuer_behind_a_private_authority_is_read_over_the_built_tls() {
-    let key = ec_key("auth-tls", Algorithm::ES256);
+    let key = ec_key("auth-tls", Algorithm::Es256);
     let issuer = start_issuer(key.jwk.clone()).await;
     let ca = temp_file("ca.pem", issuer.ca_pem.as_bytes());
 
@@ -141,7 +141,7 @@ fn introspecting(
 
 #[tokio::test]
 async fn introspection_reads_an_issuer_behind_a_private_authority_over_the_grant_s_tls() {
-    let key = ec_key("auth-tls-introspection", Algorithm::ES256);
+    let key = ec_key("auth-tls-introspection", Algorithm::Es256);
     let issuer = start_issuer(key.jwk.clone()).await;
     let other = start_issuer(key.jwk.clone()).await;
     let ca = temp_file("introspection-ca.pem", issuer.ca_pem.as_bytes());

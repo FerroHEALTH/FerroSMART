@@ -636,7 +636,7 @@ fn introspection_mode_reads_the_entries_of_its_issuer() -> Result<(), Box<dyn St
 #[tokio::test]
 async fn one_jwt_issuer_and_one_introspection_issuer_verify_both() -> Result<(), Box<dyn StdError>>
 {
-    let key = crate::support::ec_key("k1", jsonwebtoken::Algorithm::ES256);
+    let key = crate::support::ec_key("k1", ferrohealth_smart::jws::algorithm::Algorithm::Es256);
     let jwt = Issuer::start(&[&key]).await;
     let introspected = issuer().await;
     answer(&introspected, json(&active(&introspected, 300)), 1).await;

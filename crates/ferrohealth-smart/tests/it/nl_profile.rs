@@ -15,6 +15,8 @@ use ferrohealth_smart::federation::Attribute;
 use ferrohealth_smart::federation::Code;
 use ferrohealth_smart::federation::FederationError;
 use ferrohealth_smart::federation::Field;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::compact::Header;
 use ferrohealth_smart::kind::CallerKind;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::kind::Unclassified;
@@ -26,8 +28,6 @@ use ferrohealth_smart::resource::ResourceError;
 use ferrohealth_smart::resource::ResourceServer;
 use ferrohealth_smart::sender::Binding;
 use ferrohealth_smart::sender::ClientCertificate;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::Header;
 use serde_json::Value;
 use serde_json::json;
 
@@ -125,7 +125,7 @@ struct Harness {
 
 impl Harness {
     fn new() -> Self {
-        let key = ec_key("nl", Algorithm::ES256);
+        let key = ec_key("nl", Algorithm::Es256);
         let set = json!({ "keys": [key.jwk.clone()] }).to_string();
         let jwks = temp_file("nl-jwks.json", set.as_bytes())
             .display()
@@ -184,7 +184,7 @@ impl Harness {
             .next()
             .ok_or("one issuer")?;
         let server = ResourceServer::discover(settings).await?;
-        let mut header = Header::new(Algorithm::ES256);
+        let mut header = Header::new(Algorithm::Es256);
         header.kid = Some(String::from("nl"));
         header.typ = Some(String::from("at+jwt"));
         let binding = Binding::bearer().with_certificate(&ClientCertificate::from_der(CERTIFICATE));

@@ -10,11 +10,13 @@ use std::time::Duration;
 
 use ferrohealth_secret::secret::Secret;
 use ferrohealth_smart::client::assertion::AssertionKey;
+use ferrohealth_smart::jws::algorithm::Algorithm;
+use ferrohealth_smart::jws::claims::Validation;
+use ferrohealth_smart::jws::compact::Header;
 use ferrohealth_smart::metadata::Http;
 use ferrohealth_smart::oidc::{
     Callback, OidcError, PendingSignIn, Provider, RelyingParty, TokenTypeHint, challenge,
 };
-use jsonwebtoken::{Algorithm, DecodingKey, Header, Validation};
 use secrecy::SecretString;
 use url::Url;
 use wiremock::matchers;
@@ -149,7 +151,7 @@ async fn mount_invalid_grant(issuer: &Issuer) {
 
 #[tokio::test]
 async fn the_authorization_request_carries_state_nonce_and_an_s256_challenge() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (_issuer, client) = provider(&key).await;
     let request = client.authorization_request().expect("a sign-in is minted");
     let sent = query(&request.url);
@@ -193,7 +195,7 @@ async fn the_authorization_request_carries_state_nonce_and_an_s256_challenge() {
 
 #[tokio::test]
 async fn offline_access_asks_for_consent() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (_issuer, client) = provider(&key).await;
     let request = client
         .with_offline_access()
@@ -209,7 +211,7 @@ async fn offline_access_asks_for_consent() {
 
 #[tokio::test]
 async fn the_code_is_exchanged_and_the_id_token_checked() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     let request = client.authorization_request().expect("a sign-in is minted");
     let pending = request.pending;
@@ -243,8 +245,37 @@ async fn the_code_is_exchanged_and_the_id_token_checked() {
 }
 
 #[tokio::test]
+async fn an_ml_dsa_id_token_verifies_when_the_client_accepts_its_algorithm() {
+    for algorithm in [Algorithm::MlDsa44, Algorithm::MlDsa65, Algorithm::MlDsa87] {
+        let key = crate::support::ml_dsa_key("op-pq", algorithm);
+        let (issuer, client) = provider(&key).await;
+        let request = client.authorization_request().expect("a sign-in is minted");
+        let pending = request.pending;
+        let token = id_token(&issuer, &key, pending.nonce());
+        mount_exchange(&issuer, pending.verifier().expose(), &token).await;
+        let callback = Callback::granted("synthetic-code", pending.state());
+        assert!(
+            matches!(
+                client.exchange(&pending, &callback).await,
+                Err(OidcError::Key)
+            ),
+            "{algorithm} outside the default set"
+        );
+        let client = client.with_algorithms([Algorithm::Es256, algorithm]);
+        let signed_in = client
+            .exchange(&pending, &callback)
+            .await
+            .expect("the ML-DSA ID Token verifies (RFC 9964)");
+        assert_eq!(
+            "synthetic-operator", signed_in.claims.subject,
+            "{algorithm}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_state_mismatch_is_refused_before_the_token_endpoint_is_called() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     let pending = client.authorization_request().expect("a sign-in").pending;
     mount_invalid_grant(&issuer).await;
@@ -265,7 +296,7 @@ async fn a_state_mismatch_is_refused_before_the_token_endpoint_is_called() {
 
 #[tokio::test]
 async fn a_pkce_mismatch_is_refused_with_the_providers_error_code() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     let pending = client.authorization_request().expect("a sign-in").pending;
     mount_exchange(&issuer, pending.verifier().expose(), "unused").await;
@@ -288,7 +319,7 @@ async fn a_pkce_mismatch_is_refused_with_the_providers_error_code() {
 
 #[tokio::test]
 async fn a_refused_authorization_carries_the_error_code() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     let pending = client.authorization_request().expect("a sign-in").pending;
     let refused = client
@@ -308,7 +339,7 @@ async fn a_refused_authorization_carries_the_error_code() {
 
 #[tokio::test]
 async fn an_id_token_with_another_nonce_audience_or_key_is_refused() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     let pending = client.authorization_request().expect("a sign-in").pending;
     let callback = Callback::granted("synthetic-code", pending.state());
@@ -320,7 +351,7 @@ async fn an_id_token_with_another_nonce_audience_or_key_is_refused() {
 
     issuer.server.reset().await;
     issuer.mount_keys(&[&key], None).await;
-    let stranger = ec_key("op-2", Algorithm::ES256);
+    let stranger = ec_key("op-2", Algorithm::Es256);
     let unknown = id_token(&issuer, &stranger, pending.nonce());
     mount_exchange(&issuer, pending.verifier().expose(), &unknown).await;
     let refused = client.exchange(&pending, &callback).await;
@@ -372,7 +403,7 @@ fn id_token_with(
 // NOTE: OpenID Connect Core 1.0 §2: `iat` is REQUIRED in an ID Token, a NumericDate.
 #[tokio::test]
 async fn an_id_token_without_a_numeric_iat_is_refused() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     let pending = client.authorization_request().expect("a sign-in").pending;
     let callback = Callback::granted("synthetic-code", pending.state());
@@ -412,27 +443,27 @@ async fn an_id_token_without_a_numeric_iat_is_refused() {
 // for one among several keys: without it, the set's one key that fits the algorithm.
 #[tokio::test]
 async fn without_a_kid_the_one_key_that_fits_the_algorithm_verifies() {
-    let signer = rsa_key("op-rsa", Algorithm::RS256);
+    let signer = rsa_key("op-rsa", Algorithm::Rs256);
     let (issuer, client) = provider(&signer).await;
     let pending = client.authorization_request().expect("a sign-in").pending;
     let callback = Callback::granted("synthetic-code", pending.state());
     let token = id_token_with(&issuer, &signer, None, pending.nonce(), Some(now().into()));
 
-    let p256 = ec_key("op-p256", Algorithm::ES256);
+    let p256 = ec_key("op-p256", Algorithm::Es256);
     let ed25519 = ed_key("op-ed25519");
-    let mut encryption = rsa_key("op-rsa-enc", Algorithm::RS256);
+    let mut encryption = rsa_key("op-rsa-enc", Algorithm::Rs256);
     encryption
         .jwk
         .as_object_mut()
         .expect("a JWK is an object")
         .insert("use".to_owned(), serde_json::json!("enc"));
-    let mut wrapping = rsa_key("op-rsa-wrap", Algorithm::RS256);
+    let mut wrapping = rsa_key("op-rsa-wrap", Algorithm::Rs256);
     wrapping
         .jwk
         .as_object_mut()
         .expect("a JWK is an object")
         .insert("key_ops".to_owned(), serde_json::json!(["wrapKey"]));
-    let mut other_alg = rsa_key("op-rsa-384", Algorithm::RS384);
+    let mut other_alg = rsa_key("op-rsa-384", Algorithm::Rs384);
     other_alg
         .jwk
         .as_object_mut()
@@ -452,7 +483,7 @@ async fn without_a_kid_the_one_key_that_fits_the_algorithm_verifies() {
         .expect("the one RS256 signing key verifies the token");
     assert_eq!("synthetic-operator", signed_in.claims.subject);
 
-    let second = rsa_key("op-rsa-2", Algorithm::RS256);
+    let second = rsa_key("op-rsa-2", Algorithm::Rs256);
     issuer.server.reset().await;
     issuer.mount_keys(&[&signer, &second, &p256], None).await;
     mount_exchange(&issuer, pending.verifier().expose(), &token).await;
@@ -462,7 +493,7 @@ async fn without_a_kid_the_one_key_that_fits_the_algorithm_verifies() {
         "two keys fit: {refused:?}"
     );
 
-    let p384 = ec_key("op-p384", Algorithm::ES384);
+    let p384 = ec_key("op-p384", Algorithm::Es384);
     let on_p384 = id_token_with(&issuer, &p384, None, pending.nonce(), Some(now().into()));
     issuer.server.reset().await;
     issuer.mount_keys(&[&signer, &p256], None).await;
@@ -478,7 +509,7 @@ async fn without_a_kid_the_one_key_that_fits_the_algorithm_verifies() {
 // beside itself is accepted, and several audiences need an `azp` naming the client.
 #[tokio::test]
 async fn a_trusted_audience_is_accepted_with_an_azp_naming_the_client() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     let client = client.with_trusted_audiences(["synthetic-project"]);
     let pending = client.authorization_request().expect("a sign-in").pending;
@@ -519,7 +550,7 @@ async fn a_trusted_audience_is_accepted_with_an_azp_naming_the_client() {
 
 #[tokio::test]
 async fn the_refresh_grant_rotates_the_tokens_and_a_refusal_carries_its_code() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     Mock::given(matchers::method("POST"))
         .and(matchers::path(TOKEN_PATH))
@@ -566,7 +597,7 @@ async fn the_refresh_grant_rotates_the_tokens_and_a_refusal_carries_its_code() {
 
 #[tokio::test]
 async fn a_refresh_for_a_resource_names_it_and_a_refused_target_carries_its_code() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     // NOTE: RFC 8707 §2.2, `resource` on a refresh_token request names the target.
     Mock::given(matchers::method("POST"))
@@ -620,7 +651,7 @@ async fn a_refresh_for_a_resource_names_it_and_a_refused_target_carries_its_code
 
 #[tokio::test]
 async fn a_provider_failing_on_its_side_is_no_answered_refusal() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     Mock::given(matchers::method("POST"))
         .and(matchers::path(TOKEN_PATH))
@@ -641,7 +672,7 @@ async fn a_provider_failing_on_its_side_is_no_answered_refusal() {
 
 #[tokio::test]
 async fn logout_names_the_hint_and_the_redirect_and_revocation_posts_the_token() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     let hint = Secret::new("synthetic-id-token");
     let url = client
@@ -703,7 +734,7 @@ async fn logout_names_the_hint_and_the_redirect_and_revocation_posts_the_token()
 
 #[tokio::test]
 async fn a_provider_without_an_end_session_endpoint_has_no_logout_url() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let http = Http::new(Duration::from_secs(5)).expect("the engine builds");
     let discovered = Provider::discover(&http, &issuer.uri())
@@ -756,7 +787,7 @@ fn logout_token(issuer: &Issuer, key: &SigningKey, claims: &serde_json::Value) -
 
 #[tokio::test]
 async fn a_logout_token_is_checked_and_its_session_returned() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     let token = logout_token(&issuer, &key, &serde_json::json!({}));
     let claims = client.logout_token(&token).await.expect("a valid token");
@@ -773,7 +804,7 @@ async fn a_logout_token_is_checked_and_its_session_returned() {
 
 #[tokio::test]
 async fn a_logout_token_breaking_section_2_6_is_refused() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = provider(&key).await;
     let now = now();
     // NOTE: Back-Channel Logout 1.0 §2.6: each check refuses the token.
@@ -820,7 +851,7 @@ async fn a_logout_token_breaking_section_2_6_is_refused() {
             "{case}"
         );
     }
-    let stranger = ec_key("op-1", Algorithm::ES256);
+    let stranger = ec_key("op-1", Algorithm::Es256);
     let forged = logout_token(&issuer, &stranger, &serde_json::json!({}));
     assert!(
         matches!(
@@ -849,9 +880,23 @@ async fn forms(issuer: &Issuer, path: &str) -> Vec<BTreeMap<String, String>> {
 }
 
 // NOTE: OpenID Connect Core 1.0 §9, private_key_jwt; RFC 10070 §4; RFC 7515 §4.1.8.
+/// Returns the P-256 public JWK of the uncompressed point `point` (SEC 1
+/// §2.3.3, RFC 7518 §6.2.1).
+fn p256_jwk(point: &[u8]) -> serde_json::Value {
+    let coordinate = |range: std::ops::Range<usize>| {
+        base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            point.get(range).expect("an uncompressed P-256 point"),
+        )
+    };
+    serde_json::json!({
+        "kty": "EC", "crv": "P-256", "x": coordinate(1..33), "y": coordinate(33..65)
+    })
+}
+
 #[tokio::test]
 async fn a_private_key_jwt_client_sends_a_fresh_assertion_at_every_call() {
-    let key = ec_key("op-1", Algorithm::ES256);
+    let key = ec_key("op-1", Algorithm::Es256);
     let (issuer, client) = unauthenticated(&key).await;
     let pair = rcgen::KeyPair::generate().expect("a key");
     let certificate = rcgen::CertificateParams::new(vec![String::from("smart.example.org")])
@@ -862,7 +907,7 @@ async fn a_private_key_jwt_client_sends_a_fresh_assertion_at_every_call() {
         .expect("a key")
         .with_certificate(certificate.pem().as_bytes())
         .expect("the certificate names the key");
-    let public = DecodingKey::from_ec_der(pair.public_key_raw());
+    let public = p256_jwk(pair.public_key_raw());
     let client = client.with_private_key_jwt(signer);
     let request = client.authorization_request().expect("a sign-in is minted");
     let pending = request.pending;
@@ -907,7 +952,7 @@ async fn a_private_key_jwt_client_sends_a_fresh_assertion_at_every_call() {
     for form in &sent {
         assert_eq!(Some(CLIENT), form.get("client_id").map(String::as_str));
         let assertion = form.get("client_assertion").expect("an assertion");
-        let header = jsonwebtoken::decode_header(assertion).expect("a header");
+        let header = crate::support::header(assertion);
         assert_eq!(Some("client-authentication+jwt"), header.typ.as_deref());
         let thumbprint = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, certificate.der());
         assert_eq!(
@@ -917,13 +962,14 @@ async fn a_private_key_jwt_client_sends_a_fresh_assertion_at_every_call() {
             )),
             header.x5t_s256
         );
-        let mut validation = Validation::new(Algorithm::ES256);
-        validation.set_audience(&[issuer.uri()]);
-        validation.set_issuer(&[CLIENT]);
-        validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
-        let claims = jsonwebtoken::decode::<serde_json::Value>(assertion, &public, &validation)
-            .expect("the assertion verifies, for the issuer")
-            .claims;
+        assert_eq!(Algorithm::Es256, header.alg);
+        let claims = crate::support::verified(assertion, &public);
+        Validation::default()
+            .with_audiences([issuer.uri()])
+            .with_issuer(CLIENT)
+            .with_required(&["exp", "sub"])
+            .check(&claims)
+            .expect("the assertion verifies, for the issuer");
         assert_eq!(
             serde_json::json!(issuer.uri()),
             claims["aud"],

@@ -64,7 +64,7 @@ fn oidc_of(upstream: &Upstream) -> (Vec<String>, Vec<String>) {
 }
 
 /// The algorithm the provider's client assertions are signed with.
-fn algorithm_of(upstream: &Upstream) -> jsonwebtoken::Algorithm {
+fn algorithm_of(upstream: &Upstream) -> ferrohealth_smart::jws::algorithm::Algorithm {
     match &oidc_upstream(upstream).authentication {
         Authentication::PrivateKeyJwt(keys) => Some(keys.signer.algorithm()),
         Authentication::ClientSecretBasic(_) => None,
@@ -118,28 +118,28 @@ fn each_preset_fills_what_the_table_leaves_out() {
             &["openid"][..],
             "fhir_user",
             "roles",
-            jsonwebtoken::Algorithm::RS256,
+            ferrohealth_smart::jws::algorithm::Algorithm::Rs256,
         ),
         (
             "entra",
             &["openid", "profile"][..],
             "extn.fhirUser",
             "roles",
-            jsonwebtoken::Algorithm::PS256,
+            ferrohealth_smart::jws::algorithm::Algorithm::Ps256,
         ),
         (
             "okta",
             &["openid", "profile"][..],
             "fhir_user",
             "groups",
-            jsonwebtoken::Algorithm::RS256,
+            ferrohealth_smart::jws::algorithm::Algorithm::Rs256,
         ),
         (
             "zitadel",
             &["openid", "profile"][..],
             "fhirUser",
             "urn:zitadel:iam:org:project:roles",
-            jsonwebtoken::Algorithm::RS256,
+            ferrohealth_smart::jws::algorithm::Algorithm::Rs256,
         ),
     ] {
         let upstream = resolved(&oidc(&keys, &format!("preset = {preset:?}"), ""), &keys);
@@ -160,7 +160,10 @@ fn each_preset_fills_what_the_table_leaves_out() {
     assert_eq!((strings(&["openid"]), Vec::new()), oidc_of(&none));
     assert_eq!(None, none.fhir_user_claim);
     assert_eq!(ferrohealth_smart::roles::default_claims(), none.role_claims);
-    assert_eq!(jsonwebtoken::Algorithm::RS256, algorithm_of(&none));
+    assert_eq!(
+        ferrohealth_smart::jws::algorithm::Algorithm::Rs256,
+        algorithm_of(&none)
+    );
 }
 
 #[test]
@@ -184,7 +187,10 @@ fn a_key_the_table_sets_wins_over_the_preset() {
     );
     assert_eq!(None, upstream.fhir_user_claim, "an empty claim names none");
     assert_eq!(strings(&["wids"]), upstream.role_claims);
-    assert_eq!(jsonwebtoken::Algorithm::RS384, algorithm_of(&upstream));
+    assert_eq!(
+        ferrohealth_smart::jws::algorithm::Algorithm::Rs384,
+        algorithm_of(&upstream)
+    );
 }
 
 #[test]

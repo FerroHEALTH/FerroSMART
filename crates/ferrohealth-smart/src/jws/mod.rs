@@ -1,14 +1,76 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! The segments of a JWS in compact serialization (RFC 7515 §7.1), read
-//! without checking its signature: by a caller that selects a key by the
-//! payload's `iss` (RFC 7519 §7.2), reads a value an upstream verified, or
-//! verifies the signature itself afterwards.
+//! JSON Web Signature (RFC 7515) over `aws-lc-rs`: the one place the crate
+//! signs and verifies a JWS, for every [`algorithm::Algorithm`] the family
+//! uses, ML-DSA (RFC 9964) among them.
+//!
+//! A verifier names the algorithms it accepts, reads the header's `alg`
+//! against them, and verifies with a key that may be used for that
+//! algorithm alone ([`jwk::Jwk::verifies`]), so neither `none` nor an
+//! algorithm confusion verifies a token (RFC 8725 §3.1, §3.2). The
+//! segments of a JWS can also be read without checking its signature
+//! by a caller that selects a key by the payload's `iss`
+//! (RFC 7519 §7.2), or reads a value an upstream verified.
+
+pub mod algorithm;
+pub mod claims;
+pub mod compact;
+pub mod jwk;
+pub mod key;
 
 use base64::Engine as _;
 use serde_json::Map;
 use serde_json::Value;
+
+/// A JWS that cannot be read, signed or verified.
+///
+/// No variant carries the token, a key or a claim value.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum JwsError {
+    /// The token is not three base64url segments, or its header is no JSON
+    /// object of members of their form.
+    #[error("the JWS is not a compact serialization with a JSON header")]
+    Malformed,
+    /// The header's `alg` is no [`algorithm::Algorithm`]: `none`, a symmetric
+    /// algorithm or an unknown one.
+    #[error("the JWS names an algorithm this crate does not verify")]
+    Algorithm,
+    /// The header lists `crit` extensions, none of which this reader
+    /// understands (RFC 7515 §4.1.11).
+    #[error("the JWS header lists critical extensions")]
+    Critical,
+    /// The header's `jwk` is no public key of a supported type.
+    #[error("the JWS header's jwk is not a supported public key")]
+    HeaderKey {
+        /// Why the key was refused.
+        #[source]
+        source: jwk::JwkError,
+    },
+    /// The key may not sign or verify under the algorithm.
+    #[error("the key may not be used with {algorithm}")]
+    KeyAlgorithm {
+        /// The algorithm.
+        algorithm: algorithm::Algorithm,
+    },
+    /// The signature does not verify.
+    #[error("the JWS signature does not verify")]
+    Signature,
+    /// The verified payload is no JSON object, or repeats a name.
+    #[error("the JWS payload is not a JSON object")]
+    Payload,
+    /// The claims could not be serialized.
+    #[error("the claims could not be serialized")]
+    Claims {
+        /// What the serializer reported.
+        #[source]
+        source: serde_json::Error,
+    },
+    /// The signer failed.
+    #[error("the JWS could not be signed")]
+    Sign,
+}
 
 /// Returns the JSON object one `segment` of a compact JWS encodes, its
 /// header or its payload, each base64url without padding (RFC 7515 §2,

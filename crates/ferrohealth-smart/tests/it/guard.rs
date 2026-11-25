@@ -33,6 +33,7 @@ use ferrohealth_smart::guard::CredentialHeader;
 use ferrohealth_smart::guard::Gate;
 use ferrohealth_smart::guard::Requirement;
 use ferrohealth_smart::guard::Target;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::refusal::Denied;
 use ferrohealth_smart::refusal::Reason;
 use ferrohealth_smart::refusal::Refusal;
@@ -52,7 +53,6 @@ use http::Uri;
 use http::header;
 use http::request::Parts;
 use http_body_util::BodyExt as _;
-use jsonwebtoken::Algorithm;
 use secrecy::SecretString;
 use tower::ServiceExt as _;
 
@@ -294,7 +294,7 @@ struct Case {
 impl Case {
     /// Returns a case admitting the issuer's tokens.
     async fn bearer() -> Self {
-        let key = ec_key("k1", Algorithm::ES256);
+        let key = ec_key("k1", Algorithm::Es256);
         let issuer = Issuer::start(&[&key]).await;
         let verifier: Arc<dyn Verifier> = server(issuer.settings()).await;
         let gate = Gate::open().with_bearer(verifier).with_realm("ferro");
@@ -541,7 +541,7 @@ async fn an_invalid_token_is_401_with_its_reason_code() -> Result<(), Box<dyn St
     // NOTE: RFC 6750 §3, the challenge's `error_description` carries the
     // stable reason code; the body stays the one generic refusal.
     let case = Case::bearer().await;
-    let forger = ec_key("k1", Algorithm::ES256);
+    let forger = ec_key("k1", Algorithm::Es256);
     let mut foreign = case.issuer.claims("system/Condition.r");
     foreign["aud"] = serde_json::json!("https://another-server.invalid/fhir");
     for (name, token, code) in [
@@ -737,8 +737,8 @@ async fn the_handler_names_the_interaction_it_answered() -> Result<(), Box<dyn S
 
 #[tokio::test]
 async fn a_key_set_that_cannot_be_read_again_is_503() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
-    let stranger = ec_key("stranger", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
+    let stranger = ec_key("stranger", Algorithm::Es256);
     let issuer = Issuer::bare().await;
     issuer
         .mount_metadata("/.well-known/oauth-authorization-server")
@@ -767,7 +767,7 @@ async fn a_key_set_that_cannot_be_read_again_is_503() -> Result<(), Box<dyn StdE
 
 #[tokio::test]
 async fn an_open_gate_admits_everyone_and_still_audits() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let case = Case {
         issuer,
@@ -792,7 +792,7 @@ async fn a_basic_credential_is_admitted_beside_a_token_with_its_scopes()
     let store = PasswordStore::new()
         .with_user("alice", SecretString::from(hash))?
         .with_scope("alice", "user/Condition.c")?;
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let verifier: Arc<dyn Verifier> = server(issuer.settings()).await;
     let case = Case {
@@ -870,7 +870,7 @@ async fn a_basic_credential_is_admitted_beside_a_token_with_its_scopes()
 
 #[tokio::test]
 async fn the_default_renderer_sends_the_challenge_with_no_body() -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let verifier: Arc<dyn Verifier> = server(issuer.settings()).await;
     let gate = Gate::open().with_bearer(verifier).with_realm("ferro");
@@ -1067,7 +1067,7 @@ async fn the_gate_refuses_a_blank_subject_from_any_verifier() -> Result<(), Box<
 #[tokio::test]
 async fn a_basic_only_gate_admits_basic_and_challenges_a_token_with_basic_alone()
 -> Result<(), Box<dyn StdError>> {
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let case = Case {
         gate: Gate::open()
@@ -1354,7 +1354,7 @@ async fn a_basic_users_requirement_admits_its_users_alone() -> Result<(), Box<dy
 async fn an_issuers_extension_reaches_the_handlers_access() -> Result<(), Box<dyn StdError>> {
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct Trust(&'static str);
-    let key = ec_key("k1", Algorithm::ES256);
+    let key = ec_key("k1", Algorithm::Es256);
     let issuer = Issuer::start(&[&key]).await;
     let server = ferrohealth_smart::resource::ResourceServer::discover(issuer.settings())
         .await?

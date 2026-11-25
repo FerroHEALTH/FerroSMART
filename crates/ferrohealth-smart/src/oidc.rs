@@ -22,22 +22,22 @@
 pub mod logout;
 
 use std::fmt;
-use std::str::FromStr as _;
 use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ferrohealth_secret::secret::Secret;
 use http::StatusCode;
-use jsonwebtoken::errors::ErrorKind;
-use jsonwebtoken::jwk::{
-    AlgorithmParameters, EllipticCurve, Jwk, JwkSet, KeyOperations, PublicKeyUse,
-};
-use jsonwebtoken::{Algorithm, AlgorithmFamily, DecodingKey, Validation};
 use secrecy::ExposeSecret as _;
 use secrecy::SecretString;
 use serde::Deserialize;
 use url::Url;
+
+use crate::jws::algorithm::Algorithm;
+use crate::jws::claims::JwtError;
+use crate::jws::claims::Validation;
+use crate::jws::compact::Unverified;
+use crate::jws::jwk::Jwk;
 
 use crate::client::OAuthError;
 use crate::client::assertion::{ASSERTION_TYPE, AssertionError, AssertionKey};
@@ -152,7 +152,7 @@ pub enum OidcError {
     IdToken {
         /// What the verifier reported.
         #[source]
-        source: jsonwebtoken::errors::Error,
+        source: JwtError,
     },
     /// The ID Token names an audience beyond this client.
     #[error("the ID Token names an audience beyond this client")]
@@ -176,7 +176,7 @@ pub enum OidcError {
     LogoutToken {
         /// What the verifier reported.
         #[source]
-        source: jsonwebtoken::errors::Error,
+        source: JwtError,
     },
     /// The Logout Token breaks a rule of OpenID Connect Back-Channel Logout
     /// 1.0 §2.4 that §2.6 checks.
@@ -429,15 +429,15 @@ impl RelyingParty {
             offline_access: false,
             post_logout_redirect_uri: None,
             algorithms: vec![
-                Algorithm::RS256,
-                Algorithm::RS384,
-                Algorithm::RS512,
-                Algorithm::PS256,
-                Algorithm::PS384,
-                Algorithm::PS512,
-                Algorithm::ES256,
-                Algorithm::ES384,
-                Algorithm::EdDSA,
+                Algorithm::Rs256,
+                Algorithm::Rs384,
+                Algorithm::Rs512,
+                Algorithm::Ps256,
+                Algorithm::Ps384,
+                Algorithm::Ps512,
+                Algorithm::Es256,
+                Algorithm::Es384,
+                Algorithm::EdDsa,
             ],
             clock_skew: Duration::from_secs(60),
             trusted_audiences: Vec::new(),
@@ -504,19 +504,11 @@ impl RelyingParty {
         self
     }
 
-    /// Accepts an ID Token signed with one of `algorithms`; a symmetric one
-    /// is never accepted, since only the provider's own key may verify it.
+    /// Accepts an ID Token signed with one of `algorithms`, an ML-DSA
+    /// parameter set (RFC 9964) among them when named.
     #[must_use]
     pub fn with_algorithms(mut self, algorithms: impl IntoIterator<Item = Algorithm>) -> Self {
-        self.algorithms = algorithms
-            .into_iter()
-            .filter(|algorithm| {
-                !matches!(
-                    algorithm,
-                    Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512
-                )
-            })
-            .collect();
+        self.algorithms = algorithms.into_iter().collect();
         self
     }
 
@@ -872,25 +864,12 @@ impl RelyingParty {
         id_token: &str,
         nonce: &str,
     ) -> Result<IdTokenClaims, OidcError> {
-        let (header, key) = self.signing_key(id_token).await?;
-        // NOTE: OpenID Connect Core 1.0 §3.1.3.7 items 2, 3, 6 and 9: the `iss`
-        // match, this client in `aud`, the signature by the issuer's key and `exp`.
-        let mut validation = self.validation(header.alg);
-        validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
-        let claims = jsonwebtoken::decode::<IdTokenClaims>(id_token, &key, &validation)
-            .map_err(|source| OidcError::IdToken { source })?
-            .claims;
-        // NOTE: OpenID Connect Core 1.0 §2: `iat` is REQUIRED, a NumericDate, which the
-        // verifier above does not check, so a token without one is no ID Token.
-        if !claims
-            .other
-            .get("iat")
-            .is_some_and(serde_json::Value::is_number)
-        {
-            return Err(OidcError::IdToken {
-                source: ErrorKind::MissingRequiredClaim("iat".to_owned()).into(),
-            });
-        }
+        let (jws, key) = self.signing_key(id_token).await?;
+        // NOTE: OpenID Connect Core 1.0 §3.1.3.7 items 2, 3, 6, 9 and 10: the `iss`
+        // match, this client in `aud`, the signature by the issuer's key, `exp` and `iat`.
+        let claims: IdTokenClaims = self
+            .verified(&jws, &key, &["exp", "sub", "iat"])
+            .map_err(|source| OidcError::IdToken { source })?;
         // NOTE: OpenID Connect Core 1.0 §3.1.3.7 item 3: an audience the client
         // does not trust refuses the token; it trusts itself and its trusted audiences.
         if !claims
@@ -919,85 +898,64 @@ impl RelyingParty {
 }
 
 impl RelyingParty {
-    /// Returns the header of the JWT `token` and the provider's key that
-    /// signed it: the key its `kid` names, or the set's one key that fits
-    /// its algorithm when it names none, under an algorithm the client
+    /// Returns the JWT `token` read into its parts and the provider's key
+    /// that signed it: the key its `kid` names, or the set's one key that
+    /// fits its algorithm when it names none, under an algorithm the client
     /// accepts.
-    async fn signing_key(
-        &self,
-        token: &str,
-    ) -> Result<(jsonwebtoken::Header, DecodingKey), OidcError> {
-        let header = jsonwebtoken::decode_header(token).map_err(|_unreadable| OidcError::Key)?;
-        if !self.algorithms.contains(&header.alg) {
+    async fn signing_key<'t>(&self, token: &'t str) -> Result<(Unverified<'t>, Jwk), OidcError> {
+        let jws = crate::jws::compact::decode(token).map_err(|_unreadable| OidcError::Key)?;
+        let alg = jws.header().alg;
+        if !self.algorithms.contains(&alg) {
             return Err(OidcError::Key);
         }
         let (_url, status, body) = self.http.get(self.provider.jwks_uri.clone()).await?;
         if status != StatusCode::OK {
             return Err(OidcError::KeySet { status });
         }
-        let keys: JwkSet = serde_json::from_str(&body).map_err(|source| OidcError::KeySetBody {
+        let set: KeySet = serde_json::from_str(&body).map_err(|source| OidcError::KeySetBody {
             source: source.into(),
         })?;
-        let jwk = match header.kid.as_deref() {
-            Some(kid) => keys.find(kid),
-            // NOTE: RFC 7515 §4.1.4 makes `kid` OPTIONAL, and OpenID Connect Core 1.0 §10.1
-            // asks for one among several keys: without it, the one key that can verify `alg`.
-            None => sole_fit(&keys, header.alg),
-        }
-        .ok_or(OidcError::Key)?;
-        let key = DecodingKey::from_jwk(jwk).map_err(|_unusable| OidcError::Key)?;
-        Ok((header, key))
+        // NOTE: RFC 7517 §5, a member the reader does not understand is ignored,
+        // so a member that is no supported public key is legitimately left out.
+        let keys: Vec<Jwk> = set
+            .keys
+            .iter()
+            .filter_map(|member| Jwk::try_from(member).ok())
+            .collect();
+        // NOTE: RFC 7515 §4.1.4 makes `kid` OPTIONAL, and OpenID Connect Core 1.0 §10.1
+        // asks for one among several keys: without it, the one key that can verify `alg`.
+        let key = crate::jws::jwk::select(&keys, jws.header().kid.as_deref(), alg)
+            .ok_or(OidcError::Key)?
+            .clone();
+        Ok((jws, key))
     }
 
-    /// Returns the check of a JWT the provider signed under `alg` for this
-    /// client: that algorithm alone, the clock skew, the provider as `iss`
-    /// and this client in `aud`.
-    fn validation(&self, alg: Algorithm) -> Validation {
-        let mut validation = Validation::new(alg);
-        validation.algorithms = vec![alg];
-        validation.leeway = self.clock_skew.as_secs();
-        validation.set_issuer(&[self.provider.issuer.as_str()]);
-        validation.set_audience(&[self.client_id.as_str()]);
-        validation
+    /// Returns the claims of `jws`, which the provider signed with `key` for
+    /// this client: the signature, the provider as `iss`, this client in
+    /// `aud`, `exp` and `nbf` within the clock skew, and `required` present.
+    fn verified<T: serde::de::DeserializeOwned>(
+        &self,
+        jws: &Unverified<'_>,
+        key: &Jwk,
+        required: &[&'static str],
+    ) -> Result<T, JwtError> {
+        let claims = jws.verify_claims(key)?;
+        Validation::default()
+            .with_issuer(self.provider.issuer.as_str())
+            .with_audiences([self.client_id.as_str()])
+            .with_required(required)
+            .with_leeway(self.clock_skew)
+            .check(&claims)?;
+        serde_json::from_value(serde_json::Value::Object(claims))
+            .map_err(|source| JwtError::Shape { source })
     }
 }
 
-/// The one key of `keys` that can verify a signature under `alg`, or `None`
-/// when no key or several can.
-fn sole_fit(keys: &JwkSet, alg: Algorithm) -> Option<&Jwk> {
-    let mut fitting = keys.keys.iter().filter(|jwk| fits(jwk, alg));
-    let only = fitting.next()?;
-    fitting.next().is_none().then_some(only)
-}
-
-/// Whether `jwk` may verify a signature under `alg`: its `use`, `key_ops` and
-/// `alg`, where present, allow it (RFC 7517 §4.2 to §4.4), and its key type
-/// and curve are those of `alg` (RFC 7518 §3.1).
-fn fits(jwk: &Jwk, alg: Algorithm) -> bool {
-    let common = &jwk.common;
-    let usable = common
-        .public_key_use
-        .as_ref()
-        .is_none_or(|key_use| *key_use == PublicKeyUse::Signature)
-        && common
-            .key_operations
-            .as_ref()
-            .is_none_or(|operations| operations.contains(&KeyOperations::Verify))
-        && common.key_algorithm.is_none_or(|named| {
-            Algorithm::from_str(&named.to_string()).is_ok_and(|named| named == alg)
-        });
-    usable
-        && match (&jwk.algorithm, alg.family()) {
-            (AlgorithmParameters::RSA(_), AlgorithmFamily::Rsa) => true,
-            (AlgorithmParameters::EllipticCurve(params), AlgorithmFamily::Ec) => matches!(
-                (&params.curve, alg),
-                (EllipticCurve::P256, Algorithm::ES256) | (EllipticCurve::P384, Algorithm::ES384)
-            ),
-            (AlgorithmParameters::OctetKeyPair(params), AlgorithmFamily::Ed) => {
-                params.curve == EllipticCurve::Ed25519
-            }
-            _ => false,
-        }
+/// A JWK Set document (RFC 7517 §5), each member read on its own.
+#[derive(Deserialize)]
+struct KeySet {
+    /// The keys, as JSON objects.
+    keys: Vec<serde_json::Value>,
 }
 
 /// Whether `a` and `b` are equal, compared in constant time.

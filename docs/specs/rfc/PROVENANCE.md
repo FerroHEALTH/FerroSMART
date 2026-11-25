@@ -7,10 +7,10 @@ Vendored verbatim by `scripts/vendor/rfcs.sh` from the RFC Editor
 (<https://www.rfc-editor.org/rfc/>), the text form of each, as published. Never edit a file here:
 change the pin in docs/VERSIONS.md and re-run the script.
 
-- Fetched: 2026-11-24
-- Files: 44
+- Fetched: 2026-11-25
+- Files: 47
 - Tree digest (sha256 over the sorted per-file `sha256  path` listing,
-  `PROVENANCE.md` excluded): `09af981628ed22fe863063764cbdacbde3ec968ba501af5652832af19926424a`
+  `PROVENANCE.md` excluded): `45df20aee78e74abf4abdc934d318fda5280b7a1020a916bc23644ad29b88a1b`
 - Upstream licence: each RFC but RFC 3986 is "Copyright (c) <year> IETF Trust and the
   persons identified as the document authors. All rights reserved." and is
   "subject to BCP 78 and the IETF Trust's Legal Provisions Relating to IETF
@@ -77,6 +77,9 @@ change the pin in docs/VERSIONS.md and re-run the script.
 | RFC 9126 | OAuth 2.0 Pushed Authorization Requests | September 2021 | PROPOSED STANDARD | RFC10070 | `a79d0e30fcc24a22b79c8e18aa82362f6e63a7b8a5d58b480e746360e97388db` |
 | RFC 9207 | OAuth 2.0 Authorization Server Issuer Identification | March 2022 | PROPOSED STANDARD | none | `c9c17b9824315aca9bda5c0b5e3627cb24aa28d54324292f3761006209b705fd` |
 | RFC 9864 | Fully-Specified Algorithms for JSON Object Signing and Encryption (JOSE) and CBOR Object Signing and Encryption (COSE) | October 2025 | PROPOSED STANDARD | none | `0f9b6dd26b3285fd9fe7f7e0a82e684d06512dee642703d51c6f88a7b0edaa2b` |
+| RFC 8037 | CFRG Elliptic Curve Diffie-Hellman (ECDH) and Signatures in JSON Object Signing and Encryption (JOSE) | January 2017 | PROPOSED STANDARD | RFC9864 | `f14347f9d8eead78ef6e7a1ea3d795d35d664033095a76a80fcd567904aaedaa` |
+| RFC 9964 | ML-DSA for JSON Object Signing and Encryption (JOSE) and CBOR Object Signing and Encryption (COSE) | May 2026 | PROPOSED STANDARD | none | `8c42035b948301b197d431de8b3f40019bdaa3bb40150dc523306923948f34cf` |
+| RFC 9881 | Internet X.509 Public Key Infrastructure -- Algorithm Identifiers for the Module-Lattice-Based Digital Signature Algorithm (ML-DSA) | October 2025 | PROPOSED STANDARD | none | `20ae3b519bc69e32989fa6e625ab8746453eddf457e20ddbfd79d841a44237a2` |
 | RFC 10070 | Updates to OAuth 2.0 JSON Web Token (JWT) Client Authentication and Assertion-Based Authorization Grants | November 2026 | PROPOSED STANDARD | none | `bca193c44b10f864396706e29192a091256d9c15a66c1549b01e75866165e163` |
 | RFC 8949 | Concise Binary Object Representation (CBOR) | December 2020 | INTERNET STANDARD | none | `f1164a5b31a39350ad46abe29b83575eb933ca6c45366989c118b6b1058a214a` |
 | RFC 8943 | Concise Binary Object Representation (CBOR) Tags for Date | November 2020 | PROPOSED STANDARD | none | `bb3a62834af19f6d5d15e5a7faca922e2eab58541050f5bddf9cf477af3b7850` |
