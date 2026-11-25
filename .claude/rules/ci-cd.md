@@ -50,8 +50,9 @@ Actions Security Cheat Sheet, SLSA v1.0, OpenSSF Scorecard, and Sigstore.
   A merge-group run is light (owner, 2026-11-25), since the pull request
   ran the full suite on the same change: the guards without the publish dry
   run, rustfmt, cargo-deny and the advisory-exception check without clippy
-  and rustdoc, and the unit tests with every feature (`--lib --bins`), with
-  no lane. `cargo-semver-checks` and `quickstart` do not run there.
+  and rustdoc, and every test target compiled with every feature with only
+  the unit tests (`--lib --bins`) run and no lane, since two pull requests
+  that each passed alone can break a test binary together. `cargo-semver-checks` and `quickstart` do not run there.
   `conclusion` reads a skipped job as a pass.
 - `.github/workflows/ratchet-tighten.yml`: once a day on `main`, runs
   `scripts/checks/duplication.sh --update` and, when the count fell, pushes

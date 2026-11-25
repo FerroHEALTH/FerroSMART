@@ -26,8 +26,8 @@
 # so a run still reports every finding.
 #
 # A merge group runs the light set: the guards without the publish dry run,
-# rustfmt, cargo-deny and the advisory-exception check, and the unit tests
-# with every feature. The pull request ran the full suite on the same change,
+# rustfmt, cargo-deny and the advisory-exception check, and every test target
+# compiled with every feature and the unit tests run. The pull request ran the full suite on the same change,
 # so clippy, rustdoc, the other test runs, the lanes, cargo-semver-checks
 # and the quickstart do not run there.
 #
@@ -399,9 +399,13 @@ jobs:
       - if: github.event_name != 'merge_group'
         run: cargo test --doc --workspace --all-features --locked
       # The merge group's smoke set: the pull request ran every suite, so the
-      # queue builds every feature once and runs the unit tests only.
+      # queue compiles every test target with every feature and runs only the
+      # unit tests.
       - if: github.event_name == 'merge_group'
-        run: cargo nextest run --workspace --lib --bins --all-features --locked --no-tests=pass
+        run: |
+          set -euo pipefail
+          cargo nextest run --workspace --all-features --no-run --locked
+          cargo nextest run --workspace --lib --bins --all-features --locked --no-tests=pass
       # FerroSMART with Keycloak upstream (#522): a SMART standalone launch
       # through the example's realm to a token with the mapped fhirUser
       # (scripts/idp/keycloak-launch.sh).
