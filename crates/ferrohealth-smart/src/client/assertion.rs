@@ -203,6 +203,7 @@ impl AssertionKey {
         match own.get("kty").and_then(serde_json::Value::as_str) {
             Some("RSA") => match key.parsed() {
                 Ok(PublicKey::RSA(rsa)) => {
+                    let significant = crate::jws::key::significant;
                     significant(rsa.modulus) == significant(&decoded("n"))
                         && significant(rsa.exponent) == significant(&decoded("e"))
                 }
@@ -302,17 +303,6 @@ impl AssertionKey {
         };
         self.sign(typ, &claims)
     }
-}
-
-/// Returns a big-endian integer without its leading zero octets, as a DER
-/// integer and a JWK member each write it differently (RFC 7518 §6.3.1).
-#[cfg(feature = "oidc")]
-fn significant(octets: &[u8]) -> &[u8] {
-    let start = octets
-        .iter()
-        .position(|octet| *octet != 0)
-        .unwrap_or(octets.len());
-    octets.get(start..).unwrap_or_default()
 }
 
 /// The claims of a client assertion (RFC 7523 §3; SMART App Launch 2.2.0,

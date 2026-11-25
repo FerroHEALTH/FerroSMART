@@ -174,16 +174,7 @@ impl Validation {
                 return Err(ClaimError::Issuer);
             }
         }
-        let audience = match claims.get("aud") {
-            None => Vec::new(),
-            Some(Value::String(one)) => vec![one.as_str()],
-            Some(Value::Array(items)) => items
-                .iter()
-                .map(Value::as_str)
-                .collect::<Option<Vec<_>>>()
-                .ok_or(ClaimError::Format { name: "aud" })?,
-            Some(_) => return Err(ClaimError::Format { name: "aud" }),
-        };
+        let audience = audience(claims)?.unwrap_or_default();
         // NOTE: RFC 7519 §4.1.3, a recipient that does not identify itself with a value of `aud` rejects the JWT.
         if let Some(audiences) = &self.audiences
             && !audience
@@ -193,6 +184,27 @@ impl Validation {
             return Err(ClaimError::Audience);
         }
         Ok(())
+    }
+}
+
+/// Returns the values of the `aud` claim of `claims`, one string or an
+/// array of strings (RFC 7519 §4.1.3), `None` when it is absent.
+///
+/// # Errors
+///
+/// Returns [`ClaimError::Format`] for an `aud` of another form.
+pub(crate) fn audience(claims: &Map<String, Value>) -> Result<Option<Vec<&str>>, ClaimError> {
+    let malformed = ClaimError::Format { name: "aud" };
+    match claims.get("aud") {
+        None => Ok(None),
+        Some(Value::String(one)) => Ok(Some(vec![one.as_str()])),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(Value::as_str)
+            .collect::<Option<Vec<_>>>()
+            .map(Some)
+            .ok_or(malformed),
+        Some(_) => Err(malformed),
     }
 }
 

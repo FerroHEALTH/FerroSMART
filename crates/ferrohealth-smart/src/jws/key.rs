@@ -92,8 +92,8 @@ impl Jwk {
 }
 
 /// Returns a big-endian integer without its leading zero octets, the form
-/// the RSA verifier reads.
-fn significant(octets: &[u8]) -> &[u8] {
+/// the RSA verifier reads and a certificate's DER integer is compared in.
+pub(crate) fn significant(octets: &[u8]) -> &[u8] {
     let start = octets
         .iter()
         .position(|octet| *octet != 0)

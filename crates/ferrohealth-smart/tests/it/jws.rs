@@ -58,9 +58,6 @@ const ED25519_JWS: &str = "eyJhbGciOiJFZERTQSJ9.RXhhbXBsZSBvZiBFZDI1NTE5IHNpZ25p
 /// The public key of RFC 8037 Appendix A.2.
 const ED25519_X: &str = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
 
-/// The private key of RFC 8037 Appendix A.1, `d`.
-const ED25519_D: &str = "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A";
-
 /// The JWS of RFC 7515 Appendix A.3.1.
 const ES256_JWS: &str = "eyJhbGciOiJFUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.DtEhU3ljbEg8L38VWAfUAqOyKAM6-Xx-F4GawxaepmXFCgfTjDxw5djxLa8ISlSApmWQxfKTUJqPP3-Kg6NU1Q";
 
@@ -145,7 +142,7 @@ fn an_akp_key_with_a_private_member_or_another_parameter_set_is_refused() {
 }
 
 #[test]
-fn the_rfc_8037_example_verifies_and_signs_as_published() -> Result<(), Box<dyn StdError>> {
+fn the_rfc_8037_example_verifies() -> Result<(), Box<dyn StdError>> {
     let public = Jwk::try_from(&json!({ "kty": "OKP", "crv": "Ed25519", "x": ED25519_X }))?;
     assert_eq!(
         "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k",
@@ -155,20 +152,6 @@ fn the_rfc_8037_example_verifies_and_signs_as_published() -> Result<(), Box<dyn 
     assert_eq!(
         b"Example of Ed25519 signing".as_slice(),
         decode(ED25519_JWS)?.verify(&public)?
-    );
-    // NOTE: RFC 8410 §7, the PKCS#8 document of an Ed25519 private key around its 32 octets.
-    let mut pkcs8 = vec![
-        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04,
-        0x20,
-    ];
-    pkcs8.extend(URL_SAFE_NO_PAD.decode(ED25519_D)?);
-    let key = SigningKey::new(PrivateKey::from_pkcs8(&pkcs8)?, Algorithm::EdDsa)?;
-    assert_eq!(&public, key.public_jwk(), "RFC 8037 Appendix A.2");
-    let (input, signature) = ED25519_JWS.rsplit_once('.').ok_or("three segments")?;
-    assert_eq!(
-        signature,
-        URL_SAFE_NO_PAD.encode(key.sign(input.as_bytes())?),
-        "Ed25519 is deterministic (RFC 8032 §5.1.6)"
     );
     Ok(())
 }

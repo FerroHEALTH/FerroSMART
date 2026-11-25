@@ -85,14 +85,8 @@ pub(crate) fn check(
 fn audience(issued: &Map<String, Value>, target: &Target) -> Result<(), Rejected> {
     // NOTE: RFC 7519 §4.1.3, `aud` is one string or an array of strings; RFC
     // 8707 §2 has a token for one target never reach another.
-    let named: Vec<&str> = match issued.get("aud") {
-        Some(Value::String(one)) => vec![one.as_str()],
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(Value::as_str)
-            .collect::<Option<Vec<_>>>()
-            .ok_or(Rejected::Audience)?,
-        _ => return Err(Rejected::Audience),
+    let Ok(Some(named)) = crate::jws::claims::audience(issued) else {
+        return Err(Rejected::Audience);
     };
     let inside = named
         .iter()
