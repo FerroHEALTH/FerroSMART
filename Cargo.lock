@@ -699,11 +699,11 @@ dependencies = [
 
 [[package]]
 name = "chumsky"
-version = "0.13.0"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0d2bfadce76f963d776feff99db6dc33783829539258314776383b33e2a00f8"
+checksum = "6313a87def838ae23848f344d38799e6370342efd0ec0229b15469d3b6459923"
 dependencies = [
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "regex-automata",
  "serde",
  "stacker",
@@ -1249,9 +1249,9 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferrobridge-fhirpath"
-version = "0.1.136"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "925b313d5f79fd73ef3e9ed40ef2cf778550f4c28318b340abceb576641aa1e4"
+checksum = "f689974211c438e208886435a330575835bb78cbb558808f59824f3fa32c65f4"
 dependencies = [
  "base64 0.23.1",
  "chumsky",
@@ -1268,9 +1268,9 @@ dependencies = [
 
 [[package]]
 name = "ferrobridge-term"
-version = "0.17.1"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "403abc5cf83141b99a569a565280c555859e5aa873ee561ada8b2a650748d317"
+checksum = "a24a171bf4b6a8b5d8f2a7813853b16590efb17922a5eac892790170e6d2979c"
 dependencies = [
  "async-trait",
  "backon",
@@ -1286,9 +1286,9 @@ dependencies = [
 
 [[package]]
 name = "ferrobridge-validator"
-version = "0.17.1"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07816019bf6ead3b65dde9b614abf38a82d41c8e4e84a078a208665bf1ce73ef"
+checksum = "8a8bc731bab217278673412a984e62dedc6f58c837b09ccafa449a1704c6df5b"
 dependencies = [
  "ferrobridge-fhirpath",
  "ferrobridge-term",
@@ -1354,9 +1354,9 @@ dependencies = [
 
 [[package]]
 name = "ferrohealth-secret"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fff81811fa608ab1d92b9124969ffc4cf9a8a0159ba0a303fb186f0b8c37ca9"
+checksum = "19300614da2ee96deb154c40ff231a1d8296147e8194f7ab5472e21245095d87"
 dependencies = [
  "schemars 1.2.3",
  "secrecy",
@@ -1367,9 +1367,9 @@ dependencies = [
 
 [[package]]
 name = "ferrohealth-server"
-version = "0.12.1"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b81adde7764e4b10b55c7bd4579ad0dd60b584320df0ba9a8d09f2c52f2dcb1"
+checksum = "26080981973ace77a850adbbba06131f6408d9e4ddc4e3e87903b6a7e6238d34"
 dependencies = [
  "axum",
  "clap",
@@ -1697,12 +1697,6 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "foldhash"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
-
-[[package]]
-name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
@@ -1942,24 +1936,13 @@ checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 
 [[package]]
 name = "hashbrown"
-version = "0.15.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
-dependencies = [
- "allocator-api2",
- "equivalent",
- "foldhash 0.1.5",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
  "allocator-api2",
  "equivalent",
- "foldhash 0.2.0",
+ "foldhash",
 ]
 
 [[package]]
@@ -1970,7 +1953,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "allocator-api2",
  "equivalent",
- "foldhash 0.2.0",
+ "foldhash",
 ]
 
 [[package]]
@@ -3870,7 +3853,7 @@ version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
- "foldhash 0.2.0",
+ "foldhash",
  "indexmap 2.14.2",
  "itoa",
  "memchr",
