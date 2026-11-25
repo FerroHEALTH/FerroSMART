@@ -8,10 +8,10 @@
 //! cross-referenced at the index of the request's FHIR server, a PIXm 3.1.0
 //! Manager by ITI-83 or a PDQm 3.2.0 Supplier by ITI-78, to the person's
 //! identifier in that server's own system, and that identifier is searched
-//! there as the person (FHIR R4 search, token parameters). Exactly one
-//! patient at each step is the `fhirUser`; none or several refuse the launch.
-//! No demographic is ever matched. FerroSMART asks the index as itself, a
-//! client credentials token with `system/Patient.rs`. The two-step lookup
+//! there (FHIR R4 search, token parameters). Exactly one patient at each step
+//! is the `fhirUser`; none or several refuse the launch. No demographic is
+//! ever matched. FerroSMART asks both as its SMART Backend Services client,
+//! on the person's behalf (`docs/architecture.md` §13.33). The two-step lookup
 //! and its refusals are our own design: no specification says how a PID
 //! becomes a SMART patient context.
 
@@ -21,20 +21,12 @@ use ehds_logging::record::{Action, DataSubject, Request};
 use serde_json::Value;
 use url::Url;
 
-use super::{
-    Access, Ask, Person, PickerError, as_person, as_the, entries, fhir_request, is_fhir_id,
-};
+use super::send::{Person, as_backend};
+use super::{Access, Ask, PickerError, entries, fhir_request, is_fhir_id};
 use crate::config::{IndexTransaction, PatientIndexSection};
 use crate::server::AppState;
 use crate::store::Pending;
 use crate::wallet::pid::PidIdentifier;
-
-/// The one scope of FerroSMART's token at the index (SMART App Launch
-/// 2.2.0, Scopes for requesting clinical data).
-pub const INDEX_SCOPE: &str = "system/Patient.rs";
-
-/// The one scope of the person's token at the resource server.
-const SEARCH_SCOPE: &str = "user/Patient.rs";
 
 /// Why no patient is put in the launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -103,24 +95,15 @@ pub(crate) async fn resolve(
     // NOTE: FHIR R4 search, token parameter `identifier=[system]|[code]`.
     url.query_pairs_mut()
         .append_pair("identifier", &format!("{}|{local}", index.system));
-    let asked = &url;
-    let ask = Ask {
-        url: asked,
-        audience: base,
-        scope: SEARCH_SCOPE,
-        accept: "application/fhir+json",
-        describe: Box::new(move |fetched| Access {
-            action: Action::Query,
-            delivered: fetched
-                .as_ref()
-                .ok()
-                .map(|bundle| entries(bundle, "Patient").count()),
-            subject: DataSubject::default(),
-            request: fhir_request(asked, Action::Query, "Patient"),
-        }),
-        purpose: None,
-    };
-    let bundle = as_person(state, pending, from, &ask)
+    let person = Person::of(pending).ok_or(IndexRefusal::Failed)?;
+    let request = fhir_request(&url, Action::Query, "Patient");
+    let ask = query(
+        &url,
+        base,
+        |bundle| entries(bundle, "Patient").count(),
+        request,
+    );
+    let bundle = as_backend(state, &person, from, &ask)
         .await
         .map_err(|_failed| IndexRefusal::Failed)?;
     let id = one_of(
@@ -137,6 +120,29 @@ pub(crate) async fn resolve(
     })
 }
 
+/// Returns the Backend Services query of `url` at `audience`, recorded as
+/// `request` with what `count` finds in the answer delivered.
+fn query<'a>(
+    url: &'a Url,
+    audience: &'a str,
+    count: fn(&Value) -> usize,
+    request: Request,
+) -> Ask<'a> {
+    Ask {
+        url,
+        audience,
+        scope: crate::backend::SCOPE,
+        accept: "application/fhir+json",
+        describe: Box::new(move |fetched| Access {
+            action: Action::Query,
+            delivered: fetched.as_ref().ok().map(count),
+            subject: DataSubject::default(),
+            request: request.clone(),
+        }),
+        purpose: None,
+    }
+}
+
 /// Returns the person's identifier value in `index.system`, as the index
 /// cross-references `identifier`.
 async fn cross_referenced(
@@ -146,31 +152,11 @@ async fn cross_referenced(
     index: &PatientIndexSection,
     identifier: &PidIdentifier,
 ) -> Result<String, IndexRefusal> {
-    let settings = state.settings();
-    let system = Person {
-        subject: &settings.issuer,
-        fhir_user: None,
-        roles: &[],
-        client_id: pending.client_id.as_deref(),
-        display_name: None,
-    };
+    let person = Person::of(pending).ok_or(IndexRefusal::Failed)?;
     let url = index_url(index, identifier)?;
-    let asked = &url;
-    let transaction = index.transaction;
-    let ask = Ask {
-        url: asked,
-        audience: &index.base,
-        scope: INDEX_SCOPE,
-        accept: "application/fhir+json",
-        describe: Box::new(move |fetched| Access {
-            action: Action::Query,
-            delivered: fetched.as_ref().ok().map(|_| 1),
-            subject: DataSubject::default(),
-            request: index_request(asked, transaction),
-        }),
-        purpose: None,
-    };
-    let answer = match as_the(state, &system, from, &ask).await {
+    let request = index_request(&url, index.transaction);
+    let ask = query(&url, &index.base, |_| 1, request);
+    let answer = match as_backend(state, &person, from, &ask).await {
         Ok(answer) => answer,
         // NOTE: PIXm 3.1.0 §2:3.83.4.2.2.2, an unknown identifier answers 404.
         Err(PickerError::Refused(status)) if status == http::StatusCode::NOT_FOUND => {

@@ -297,12 +297,12 @@ fn granted_scope(client: &Client, requested: Option<&str>) -> Result<String, Ref
     Ok(granted.join(" "))
 }
 
-/// Returns the token's audience: the resource server the request names in
-/// `resource` (RFC 8707 §2), or the one the client's `resources` lists
-/// when it lists one alone (RFC 9068 §3, a default audience). The issuer is
-/// a resource too, the introspection endpoint's (`docs/architecture.md`
-/// §13.6 item 8); any other base the client's `resources` does not list is
-/// `invalid_target` (§13.6 item 12).
+/// Returns the token's audience: the resource server, or the patient index
+/// of one (§13.32), the request names in `resource` (RFC 8707 §2), or the
+/// one the client's `resources` lists when it lists one alone (RFC 9068
+/// §3, a default audience). The issuer is a resource too, the introspection
+/// endpoint's (`docs/architecture.md` §13.6 item 8); any other base the
+/// client's `resources` does not list is `invalid_target` (§13.6 item 12).
 fn audience(state: &AppState, client: &Client, resource: Option<&str>) -> Result<String, Refusal> {
     let settings = state.settings();
     let target = |description| Refusal {
@@ -311,7 +311,7 @@ fn audience(state: &AppState, client: &Client, resource: Option<&str>) -> Result
     };
     match (resource, client.resources.as_slice()) {
         (Some(named), _) if named == settings.issuer => Ok(settings.issuer.clone()),
-        (Some(named), _) if !settings.resources.iter().any(|base| base == named) => {
+        (Some(named), _) if !settings.serves(named) => {
             Err(target("the resource is not served by this issuer"))
         }
         (Some(named), _) if client.reaches(named) => Ok(named.to_owned()),

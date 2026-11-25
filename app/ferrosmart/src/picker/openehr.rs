@@ -142,7 +142,7 @@ pub(super) async fn by_subject(
     namespace: &str,
     (subject_id, declared): (&str, Option<Declared<'_>>),
 ) -> Result<Option<FoundEhr>, PickerError> {
-    let person = super::Person::of(pending).ok_or(PickerError::Unreadable)?;
+    let person = super::send::Person::of(pending).ok_or(PickerError::Unreadable)?;
     let at = (pending.audience.as_str(), namespace);
     by_subject_as(state, &person, from, at, (subject_id, declared)).await
 }
@@ -151,7 +151,7 @@ pub(super) async fn by_subject(
 /// base of `at` as `person`, as [`by_subject`] does.
 pub(super) async fn by_subject_as(
     state: &AppState,
-    person: &super::Person<'_>,
+    person: &super::send::Person<'_>,
     from: IpAddr,
     (base, namespace): (&str, &str),
     (subject_id, declared): (&str, Option<Declared<'_>>),
@@ -170,7 +170,7 @@ pub(super) async fn by_subject_as(
         describe: Box::new(move |fetched| access(audience, namespace, subject_id, asked, fetched)),
         purpose: declared,
     };
-    match super::as_the(state, person, from, &ask).await {
+    match super::send::as_the(state, person, from, &ask).await {
         Ok(ehr) => found(subject_id, &ehr).map(Some),
         // NOTE: openEHR ITS-REST 1.1.0, ehr_get_by_subject, `404` is returned when
         // no EHR with the subject exists, which is an answer and no failure.

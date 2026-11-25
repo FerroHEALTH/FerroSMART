@@ -32,6 +32,7 @@ fail() {
 fhir_user="http://localhost:8090/fhir/Practitioner/example"
 password=$(openssl rand -hex 16)
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$LANE_DIR/signing.pem" 2> /dev/null
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out "$LANE_DIR/backend.pem" 2> /dev/null
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$LANE_DIR/assertion.pem" 2> /dev/null
 psql "$LANE_PG/postgres" -qc 'CREATE DATABASE ferrosmart_keycloak'
 
@@ -40,6 +41,7 @@ psql "$LANE_PG/postgres" -qc 'CREATE DATABASE ferrosmart_keycloak'
 ferrosmart=("$root/target/debug/ferrosmart" --config "$example/ferrosmart.toml"
   --set server.listen=127.0.0.1:8080
   --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+  --set "ferrosmart.backend.keys.private_key_file=$LANE_DIR/backend.pem"
   --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem"
   --set "ferrosmart.database.url=$LANE_PG/ferrosmart_keycloak")
 "${ferrosmart[@]}" client apply "$example/example-app.json"

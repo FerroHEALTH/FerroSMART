@@ -30,7 +30,8 @@ reach: the server's own `.well-known/smart-configuration` names FerroSMART's
    treated as asking it, and the granted `scope` says so. A patient
    whose `fhirUser` names their own `Patient` at that server (or at the
    FHIR server paired with the openEHR server asked) sees no picker: their
-   own record, read again as them, is the context, and they get the app's
+   own record, read for them by FerroSMART's own SMART Backend Services
+   client (`system/Patient.rs`), is the context, and they get the app's
    `patient/` scopes without a role at the identity provider. At a FHIR
    server the person searches by name or identifier
    (`GET [base]/Patient`); at an openEHR server whose
@@ -44,9 +45,10 @@ reach: the server's own `.well-known/smart-configuration` names FerroSMART's
    lists purposes of use (`[[ferrosmart.resource.purpose]]`), a
    professional chooses one on the picker page, and the lookups send it
    in the server's purpose header. The search runs as
-   the person, with a token of their own for that one server that lives 30
-   seconds and is revoked after the request, so the server's rules decide
-   which patients they see. The chosen patient is read again as them before
+   the person, under a grant of theirs to FerroSMART for that one server
+   whose token lives 30 seconds and is revoked after the request, so the
+   server's rules decide which patients they see, and a server that
+   exchanges the token onward finds the person's own grant. The chosen patient is read again as them before
    it enters the context. When the app also asks for `launch/encounter` at
    a FHIR server, the picker then lists that patient's encounters
    (`GET [base]/Encounter?patient=…`, as the person, with the scope

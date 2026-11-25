@@ -150,8 +150,14 @@ async fn pixm_resolves_an_sd_jwt_vc_login_to_the_patient_of_the_fhir_server() {
     );
     let token = token_at(wallet.pix(), "/pix/Patient/$ihe-pix").await;
     assert_eq!(json!("system/Patient.rs"), token["scope"]);
-    assert_eq!(json!(ISSUER), token["sub"], "FerroSMART asks as itself");
-    assert_eq!(json!(ISSUER), token["client_id"]);
+    // NOTE: SMART App Launch 2.2.0, Backend Services; IHE IUA §3.71.4.2.2.1, `sub`
+    // is the client FerroSMART registered itself as.
+    assert_eq!(
+        json!("ferrosmart"),
+        token["sub"],
+        "FerroSMART asks as its client"
+    );
+    assert_eq!(json!("ferrosmart"), token["client_id"]);
     assert!(token.get("fhirUser").is_none(), "{token}");
     let person = &pending.person_claims;
     assert_eq!(

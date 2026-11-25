@@ -16,7 +16,8 @@ use serde_json::Value;
 use url::Url;
 
 use super::openehr::{self, FoundEhr};
-use super::{Access, Ask, Found, Person, PickerError, as_person, fhir_ask, fhir_request};
+use super::send::{Person, as_person};
+use super::{Access, Ask, Found, PickerError, fhir_ask, fhir_request};
 use crate::authorize::consent;
 use crate::config::Assigned;
 use crate::server::AppState;
@@ -57,7 +58,13 @@ pub(super) async fn fhir(
             .append_pair("_id", &recent.join(","))
             .append_pair("_count", &recent.len().to_string());
         let read = searched(
-            &as_person(state, pending, from, &fhir_ask(&url, base, Action::Query)).await?,
+            &as_person(
+                state,
+                pending,
+                from,
+                &fhir_ask(&url, base, Action::Query, super::PICKER_SCOPE),
+            )
+            .await?,
         )?;
         recent
             .iter()
@@ -202,7 +209,7 @@ async fn assigned(
         purpose: None,
     };
     let person = Person::of(pending).ok_or(PickerError::Unreadable)?;
-    searched(&super::as_the(state, &person, from, &ask).await?)
+    searched(&super::send::as_the(state, &person, from, &ask).await?)
 }
 
 /// The scope of the token the care-team search is sent with.

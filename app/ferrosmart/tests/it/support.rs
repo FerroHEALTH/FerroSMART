@@ -185,7 +185,8 @@ pub(crate) fn inline(value: &Value) -> String {
 
 /// Returns the configuration `text` holds, its `[[client]]` tables left
 /// out, with `[ferrosmart.keys]` naming `keys`' current key unless `text`
-/// names one, and [`UNREACHED_DATABASE`] as the database unless `text`
+/// names one, a fresh `[ferrosmart.backend]` key when people log in and
+/// `text` names none, and [`UNREACHED_DATABASE`] as the database unless `text`
 /// names one.
 pub(crate) fn config(text: &str, keys: &Keys) -> Config {
     let (text, _) = split(text);
@@ -207,6 +208,13 @@ pub(crate) fn config(text: &str, keys: &Keys) -> Config {
         environment.insert(
             String::from("FERROSMART__FERROSMART__KEYS__PRIVATE_KEY_FILES"),
             keys.current.display().to_string(),
+        );
+    }
+    let logs_in = text.contains("[[ferrosmart.upstream]]") || text.contains("[ferrosmart.saml]");
+    if logs_in && !text.contains("[ferrosmart.backend") {
+        environment.insert(
+            String::from("FERROSMART__FERROSMART__BACKEND__KEYS__PRIVATE_KEY_FILE"),
+            ec_key(keys.dir.path(), "backend.pem").display().to_string(),
         );
     }
     Config::from_sources(Some(text), &environment).expect("the configuration reads")

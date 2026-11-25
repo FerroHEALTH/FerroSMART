@@ -177,6 +177,11 @@ pub struct FerroSmartSection {
     /// `[ferrosmart.picker]`: what the patient picker keeps of a person's
     /// choices.
     pub picker: PickerSection,
+    /// `[ferrosmart.backend]`: FerroSMART's own SMART Backend Services
+    /// client, which every deployment that logs people in at a FHIR base
+    /// needs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<BackendSection>,
 }
 
 /// `[ferrosmart.registration]`: an app's own registration at `POST
@@ -440,6 +445,7 @@ impl Default for FerroSmartSection {
             audit: AuditSection::default(),
             registration: RegistrationSection::default(),
             picker: PickerSection::default(),
+            backend: None,
         }
     }
 }
@@ -496,6 +502,31 @@ impl Default for KeysSection {
             previous_private_key_file: None,
             previous_key_overlap: Span::from_secs(0),
             next_private_key_file: None,
+        }
+    }
+}
+
+/// `[ferrosmart.backend]`: FerroSMART as a SMART Backend Services client of
+/// its own token endpoint (`docs/architecture.md` §13.33).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BackendSection {
+    /// The `client_id` FerroSMART registers itself under.
+    pub client_id: String,
+    /// The JWS algorithm of its client assertions: `ES384` or `RS384`, the
+    /// two SMART App Launch 2.2.0's asymmetric client profile names.
+    pub algorithm: String,
+    /// `[ferrosmart.backend.keys]`: the ring that signs its assertions,
+    /// sharing no key with `[ferrosmart.keys]`.
+    pub keys: KeysSection,
+}
+
+impl Default for BackendSection {
+    fn default() -> Self {
+        Self {
+            client_id: String::from("ferrosmart"),
+            algorithm: String::from("ES384"),
+            keys: KeysSection::default(),
         }
     }
 }

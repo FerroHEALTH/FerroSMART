@@ -23,9 +23,9 @@ use secrecy::SecretString;
 use serde_json::Value;
 use url::Url;
 
+use super::send::as_person;
 use super::{
-    Access, Ask, PickerError, Reach, as_person, enter, entries, fhir_request, go_on, is_fhir_id,
-    read_patient,
+    Access, Ask, PickerError, Reach, enter, entries, fhir_request, go_on, is_fhir_id, read_patient,
 };
 use crate::form::Params;
 use crate::launch::context::Context;

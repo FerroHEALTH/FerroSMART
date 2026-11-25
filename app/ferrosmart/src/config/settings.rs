@@ -95,6 +95,19 @@ pub struct Settings {
     pub brand: Option<crate::brands::Brands>,
     /// Where every login and token is recorded.
     pub audit: AuditSettings,
+    /// FerroSMART's own SMART Backend Services client, when
+    /// `[ferrosmart.backend]` is set.
+    pub backend: Option<Backend>,
+}
+
+/// FerroSMART's own SMART Backend Services client, resolved from
+/// `[ferrosmart.backend]`.
+#[derive(Debug, Clone)]
+pub struct Backend {
+    /// The `client_id` it is registered under.
+    pub client_id: String,
+    /// The ring that signs its client assertions.
+    pub keys: Arc<KeyRing>,
 }
 
 /// The audit lane, resolved from `[ferrosmart.audit]`.
@@ -123,6 +136,18 @@ impl Settings {
         let path = format!("{}{route}", self.issuer_url.path().trim_end_matches('/'));
         url.set_path(&path);
         url
+    }
+
+    /// Returns whether FerroSMART issues tokens for `base`: a configured
+    /// resource server or the patient index of one (`docs/architecture.md`
+    /// §13.32).
+    #[must_use]
+    pub fn serves(&self, base: &str) -> bool {
+        self.resources.iter().any(|served| served == base)
+            || self
+                .patient_indexes
+                .values()
+                .any(|index| index.base == base)
     }
 
     /// Returns the path of the RFC 8414 §3 metadata: the well-known suffix
@@ -227,6 +252,7 @@ impl Config {
             registration: registration(&section.registration)?,
             brand: brand(section)?,
             audit: audit(&section.audit, &issuer)?,
+            backend: backend(section, &keys)?,
         })
     }
 }
@@ -261,6 +287,58 @@ fn brand(
         .map_err(Error::from)
 }
 
+/// The names of `[ferrosmart.backend.keys]`, the ring that signs
+/// FerroSMART's own client assertions to its token endpoint.
+const BACKEND_KEYS: RingNames = RingNames {
+    current: "ferrosmart.backend.keys.private_key_file",
+    previous: "ferrosmart.backend.keys.previous_private_key_file",
+    next: "ferrosmart.backend.keys.next_private_key_file",
+};
+
+/// Returns FerroSMART's own Backend Services client `section` names.
+///
+/// A deployment that logs people in at a FHIR base reads their launch
+/// patient as that client, so it needs one (`docs/architecture.md` §13.33).
+fn backend(
+    section: &crate::config::FerroSmartSection,
+    tokens: &SigningKeys,
+) -> Result<Option<Backend>, Error> {
+    let rule = |rule| Error::Backend { rule };
+    let logs_in = !section.upstream.is_empty() || section.saml.is_some();
+    let fhir = section
+        .resource
+        .iter()
+        .any(|resource| resource.kind == crate::config::ResourceKind::Fhir);
+    let Some(backend) = &section.backend else {
+        return if logs_in && fhir {
+            Err(rule(
+                "people log in at a FHIR base, so `[ferrosmart.backend]` is set",
+            ))
+        } else {
+            Ok(None)
+        };
+    };
+    if backend.client_id.trim().is_empty() {
+        return Err(rule("`client_id` is set"));
+    }
+    // NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric, the server
+    // validates RS384 and ES384.
+    let algorithm = match backend.algorithm.as_str() {
+        "ES384" => Algorithm::ES384,
+        "RS384" => Algorithm::RS384,
+        _ => return Err(rule("`algorithm` is `ES384` or `RS384`")),
+    };
+    let ring = key_ring(&backend.keys, &BACKEND_KEYS, algorithm)?;
+    if signs_tokens(&ring, tokens) {
+        return Err(rule(
+            "the assertion keys share no key with `[ferrosmart.keys]`",
+        ));
+    }
+    Ok(Some(Backend {
+        client_id: backend.client_id.clone(),
+        keys: Arc::new(ring),
+    }))
+}
 /// Returns the audit lane `section` describes for the server at `issuer`.
 fn audit(section: &AuditSection, issuer: &Url) -> Result<AuditSettings, Error> {
     let feed = section
@@ -938,13 +1016,7 @@ fn assertion_keys(
             rule: "`private_key_jwt.algorithm` names a JWS algorithm (RFC 7518 §3.1)",
         })?;
     let ring = key_ring(&section.keys, &ASSERTION_KEYS, algorithm)?;
-    // NOTE: RFC 8725 §3.12: a key that signs client assertions never signs a
-    // token, so the two rings share no key.
-    let pool: Vec<&AssertionKey> = tokens.pool().iter().collect();
-    if shares_key(
-        &ring.published(),
-        &ferrohealth_smart::client::assertion::jwk_set(&pool),
-    ) {
+    if signs_tokens(&ring, tokens) {
         return Err(Error::Upstream {
             rule: "the assertion keys share no key with `[ferrosmart.keys]`",
         });
@@ -964,6 +1036,18 @@ fn assertion_keys(
         signer: Box::new(key),
         ring: Arc::new(ring),
     })
+}
+
+/// Whether the assertion `ring` holds a key of the token keys `tokens`.
+///
+/// RFC 8725 §3.12: a key that signs client assertions never signs a token,
+/// so an assertion ring shares no key with the token keys.
+fn signs_tokens(ring: &KeyRing, tokens: &SigningKeys) -> bool {
+    let pool: Vec<&AssertionKey> = tokens.pool().iter().collect();
+    shares_key(
+        &ring.published(),
+        &ferrohealth_smart::client::assertion::jwk_set(&pool),
+    )
 }
 
 /// Whether the JWK Sets `one` and `other` publish a key in common, compared

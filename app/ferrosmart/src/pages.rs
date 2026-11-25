@@ -60,7 +60,7 @@ pub enum Fault {
     /// The request could not be read.
     BadRequest,
     /// The person's own record, which their `fhirUser` names, cannot be
-    /// read as them, or has no EHR they may see.
+    /// read, or has no EHR they may see.
     NoOwnRecord,
     /// The person's login does not reach the eIDAS level of assurance the
     /// provider or the deployment holds it to.

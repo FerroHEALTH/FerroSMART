@@ -10,8 +10,9 @@
 //! server as the `org.fhir.rest` service beside `org.openehr.rest` (Service
 //! Discovery). The person picks the patient at that FHIR server, and
 //! FerroSMART looks the patient's EHR up at the openEHR server by the
-//! identifier the configuration names, each as the person, so the launch
-//! context carries `patient` and `ehrId`. The draft does not say how a
+//! identifier the configuration names, as the person, so the launch context
+//! carries `patient` and `ehrId`. A patient's own record is read by
+//! FerroSMART's Backend Services client on their behalf. The draft does not say how a
 //! `Patient` names its EHR's subject: the identifier system is our own
 //! design, set per base.
 
@@ -117,7 +118,7 @@ pub(super) async fn context_of(
 /// Returns the [`PickerError`] of a read or lookup that failed.
 pub(super) async fn ehr_of(
     state: &AppState,
-    person: &super::Person<'_>,
+    person: &super::send::Person<'_>,
     from: IpAddr,
     (base, pairing): (&str, &Pairing),
     id: &str,
@@ -126,8 +127,13 @@ pub(super) async fn ehr_of(
         return Ok(None);
     };
     let url = super::patient_url(&pairing.fhir_base, Some(id)).map_err(PickerError::Url)?;
-    let ask = super::fhir_ask(&url, &pairing.fhir_base, super::Action::Read);
-    let patient = super::as_the(state, person, from, &ask).await?;
+    let ask = super::fhir_ask(
+        &url,
+        &pairing.fhir_base,
+        super::Action::Read,
+        crate::backend::SCOPE,
+    );
+    let patient = super::send::as_backend(state, person, from, &ask).await?;
     if patient.get("id").and_then(Value::as_str) != Some(id) {
         return Err(PickerError::Unreadable);
     }

@@ -535,11 +535,7 @@ fn described(client: &Client) -> Vec<(&'static str, String)> {
 /// configured.
 fn check_names(state: &AppState, client: &Client) -> Result<(), AdminError> {
     let settings = state.settings();
-    if let Some(base) = client
-        .resources
-        .iter()
-        .find(|base| !settings.resources.contains(base))
-    {
+    if let Some(base) = client.resources.iter().find(|base| !settings.serves(base)) {
         return Err(AdminError::UnknownResource {
             client_id: client.client_id.clone(),
             base: base.clone(),

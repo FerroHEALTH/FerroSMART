@@ -2837,18 +2837,22 @@ specification governs.
    `fhirUser` names a `Patient` at that server (absolute, or relative to
    the request's base, `smart scopes-and-launch-context`, `fhirUser`), or
    at the FHIR base paired with the openEHR base asked, sees no picker:
-   FerroSMART reads that record again as them and puts it in context, with
-   their EHR at a paired base, and a record it cannot read is a page that
-   says so, never the picker. Such a person is offered the `patient/`
+   FerroSMART reads that record for them as its SMART Backend Services
+   client (13.33) and puts it in context, with their EHR at a paired base,
+   and a record it cannot read is a page that says so, never the picker. Such a person is offered the `patient/`
    scopes the client's ceiling allows with no role, since they reach their
    own record alone (owner, 2026-11-19, #673). The picker is a
    server-rendered form
    over a FHIR R4 search (`GET [base]/Patient?name=…&identifier=…`). The
    search runs as the signed-in person, never as a system: FerroSMART
-   issues itself a token whose `sub` is the person's pairwise subject and
-   whose `fhirUser` is theirs, `aud` the one base, scope `user/Patient.rs`
-   alone, living 30 seconds and revoked once the request is answered, each
-   step committed with its record (13.2). The FHIR server's own access
+   records a grant of the person to its own client (13.33) for the one
+   base and the scope `user/Patient.rs` alone, with their `fhirUser`, roles
+   and login, and issues under it a token whose `sub` is the person's
+   pairwise subject, living 30 seconds; the grant and its token are revoked
+   once the request is answered, each step committed with its record
+   (13.2). A resource server that carries the person onto its own upstream
+   exchanges that token (RFC 8693 §2.1, 13.29), which finds the person's
+   own grant. The grant is our own design. The FHIR server's own access
    rules for that person decide which patients they see: a `user/` scope
    is "relative to the user's underlying permissions. If the underlying
    user has limited permissions, the client will face these same
@@ -2875,9 +2879,9 @@ specification governs.
    a base without one offers no `launch/patient`. The person enters the
    patient's identifier, and FerroSMART looks the EHR up with `GET
    [base]/ehr?subject_id=…&subject_namespace=…` (openEHR ITS-REST 1.1.0,
-   `ehr_get_by_subject`), under the same guard: a token of the person's own
-   for the one base, living 30 seconds, revoked after the one request, with
-   the scope `user/composition-*.r`, since the EHR has no scope family and
+   `ehr_get_by_subject`), under the same guard: a grant of the person to
+   FerroSMART's own client for the one base, its token living 30 seconds,
+   both revoked after the one request, with the scope `user/composition-*.r`, since the EHR has no scope family and
    is held to the `composition-` family over every template (3.9). A `404`
    is "no EHR you may see"; any other failure is an error page. The chosen
    EHR is looked up again as the person before its `ehrId` enters the
@@ -2899,9 +2903,11 @@ specification governs.
    there, and FerroSMART looks the EHR up at the openEHR base by the value
    of the patient's `Patient.identifier` whose `system` is the table's
    `subject_system`, in the `subject_namespace`. Each request keeps the
-   guard above with a token for the one server it goes to: `aud` the FHIR
+   guard above with a grant for the one server it goes to: `aud` the FHIR
    base and `user/Patient.rs` for the search and the read, `aud` the
-   openEHR base and `user/composition-*.r` for the lookup. The context then
+   openEHR base and `user/composition-*.r` for the lookup. A patient's own
+   record is read by FerroSMART's Backend Services client (13.33), and their
+   EHR looked up under a grant of theirs. The context then
    carries both `patient` and `ehrId`. An identifier whose `use` is `old`
    names no current subject (FHIR R4, `Identifier.use`); a patient with no
    identifier of the system, or whose EHR the person may not see, gets the
@@ -3364,6 +3370,12 @@ private_key_files = [                         # in the order they take over; eac
     "/run/secrets/rs256-2.pem",
 ]
 rotation_period = "90d"                       # how long a key signs before the next takes over
+
+[ferrosmart.backend]                          # FerroSMART's own Backend Services client; needed with a login at a FHIR base (13.33)
+client_id = "ferrosmart"                      # the client it registers itself as; its tokens' sub
+algorithm = "ES384"                           # or "RS384"
+[ferrosmart.backend.keys]                     # its assertion ring, sharing no key with [ferrosmart.keys]
+private_key_file = "/run/secrets/backend-assertion.pem"
 
 [[ferrosmart.resource]]                       # each base an `aud` may name; at least one
 base = "https://ehr.example.org/fhir"
@@ -4952,15 +4964,15 @@ FerroHEALTH/FerroEHR#6419, #784).
 The tests are `app/ferrosmart/tests/it/authorize/assurance.rs` and the SAML
 case `a_class_is_held_to_its_eidas_level_and_the_client_s_minimum`.
 
-### 13.29 The token exchange of a patient's own token
+### 13.29 The token exchange of a person's own token
 
 A product that serves a person at a FHIR base, such as FerroBRIDGE's
-patient summary, reads the person's own EHR at the openEHR base paired
-with it. With its own credential the CDR would see a system caller, so it
-could not apply the person's own-access rules (EHDS Article 3) or name the
-person in its access record. FerroSMART therefore grants RFC 8693 token
-exchange for this one case (owner decision on FerroHEALTH/FerroEHR#6419,
-#785); no other subject is exchanged. Where the specification leaves the
+patient summary, reads the CDR at the openEHR base paired with it. With
+its own credential the CDR would see a system caller, so it could not
+apply the person's own rules (EHDS Article 3) or name the person in its
+access record. FerroSMART therefore grants RFC 8693 token exchange of a
+patient's own token (owner decision on FerroHEALTH/FerroEHR#6419, #785)
+and of a professional's own token (#873); no other subject is exchanged. Where the specification leaves the
 choice to the server, the rules below are our own design.
 
 - **The client.** A confidential client whose `grant_types` lists
@@ -4974,39 +4986,45 @@ choice to the server, the rules below are our own design.
   delegation (`rfc8693 §1.1`); a `requested_token_type`, when named, of an
   access token; `resource` or `audience`, when named, the paired openEHR
   base, any other `invalid_target`; `scope` within `patient/composition-*.r`
-  and `patient/aql-*.s` (reading the person's compositions and running a
-  query on their EHR, `master08 §Resource Scopes`) and the client's
-  ceiling, `invalid_scope` beyond it, and those of the two the client's
+  and `patient/aql-*.s` for a patient, `user/composition-*.r` and
+  `user/aql-*.s` for a professional (reading compositions and running a
+  query in the subject's own compartment, `master08 §Resource Scopes`) and
+  the client's ceiling, `invalid_scope` beyond it, and those of the two the client's
   ceiling admits when named none. SMART on openEHR has no scope for a
   demographic read, so the exchange issues none.
 - **The subject token.** An access token FerroSMART issued, its signature
   verified with its own keys, its record active (unexpired, neither it nor
   its grant revoked), under a grant that is the person's own access
   (3.13): `fhirUser` naming `Patient/<x>` at the token's FHIR base,
-  `patient` naming `<x>`, `patient/` scopes alone with a read among them.
-  Any other subject, a professional's or a machine's among them, is
-  `invalid_request` (`rfc8693 §2.2.2`). Every request, refused or answered,
+  `patient` naming `<x>`, `patient/` scopes alone with a read among them;
+  or a professional's own access: `user/` scopes alone with a read among
+  them and a `fhirUser`, when named, that names no `Patient`, such as the
+  picker's grant (13.6 item 4). Any other subject, a machine's among them,
+  is `invalid_request` (`rfc8693 §2.2.2`). Every request, refused or answered,
   is the token endpoint's `IHE.IUA.71` record (13.2).
 - **The patient's EHR.** The openEHR base is the one whose `fhir_base`
   pairs it with the subject token's audience (13.6 item 4). The patient is
-  read at the FHIR base and their EHR looked up by the identifier
-  `subject_system` names, each as the person with a token for that lookup
-  alone and its access record, as the paired picker does; a patient with
+  read at the FHIR base by FerroSMART's Backend Services client (13.33)
+  and their EHR looked up by the identifier `subject_system` names under a
+  grant of theirs, each with a token for that lookup alone and its access
+  record, as the paired picker does; a patient with
   no EHR there is `invalid_target`.
 - **The issued token.** An RFC 9068 access token with the subject token's
   `sub`, `aud` the openEHR base, `client_id` the exchanging client and no
-  `act`, `fhirUser` as the absolute URL of the patient at the FHIR base,
-  `patient` and `ehrId`, the subject's `acr` and `auth_time` (13.28) and
+  `act`; for a patient `fhirUser` as the absolute URL of the patient at the
+  FHIR base, `patient` and `ehrId`; for a professional their `fhirUser` and
+  no patient; the subject's `acr` and `auth_time` (13.28) and
   its roles, the scope granted, and a lifetime of at most five minutes,
   never past the subject token's `exp`. It is recorded under the subject
   token's grant, so revoking the grant revokes it. The response names
   `issued_token_type` as an access token (`rfc8693 §2.2.1`), and an audit
   line names the client and both tokens' `jti`, never a value.
 - **What a product reads.** Under the `ferrosmart` preset the issued
-  token reads as
-  `CallerKind::Patient` and `is_the_person` (3.13, 3.14).
+  token reads as `CallerKind::Patient` for a patient, and
+  `is_the_person` for either (3.13, 3.14).
 
-The tests are `app/ferrosmart/tests/it/authorize/token_exchange.rs`.
+The tests are `app/ferrosmart/tests/it/authorize/token_exchange.rs` and
+`onward_exchange.rs`.
 
 ### 13.30 Pushed authorization requests
 
@@ -5308,16 +5326,15 @@ FHIR R4 `Identifier` the index is asked for.
 **The patient.** At a FHIR base with `[ferrosmart.resource.patient_index]`
 the `fhirUser`, and with it the `patient` of the launch, comes from the
 patient index, never from the wallet's values alone. FerroSMART asks the
-index as itself, a token whose `sub` and `client_id` are its issuer with
-the one scope `system/Patient.rs` (FerroPIX's scope for a PIXm or PDQm
-Consumer), for the person's identifier in the index's `system`, the
+index as its SMART Backend Services client (13.33), with the one scope
+`system/Patient.rs` (FerroPIX's scope for a PIXm or PDQm Consumer), for the person's identifier in the index's `system`, the
 domain of the FHIR server's own patients: by ITI-83,
 `Patient/$ihe-pix?sourceIdentifier={system}|{number}&targetSystem={system}`
 (PIXm 3.1.0 §2:3.83.4.1.2), or with `transaction = "pdqm"` by ITI-78,
 `Patient?identifier={system}|{number}`, the one patient's identifier in
 that domain (PDQm 3.2.0 §2:3.78.4.1.2.1). It then searches the FHIR server
-for `Patient?identifier={domain}|{value}` as the person, as the `fhirUser`
-lookup does (13.6 item 9). Exactly one patient at each step is the
+for `Patient?identifier={domain}|{value}` as the same client on the
+person's behalf. Exactly one patient at each step is the
 `fhirUser`. An index's `404` (PIXm 3.1.0 §2:3.83.4.2.2.2) or an empty
 answer is no match, a `409` or two values several; either refuses the
 launch with `access_denied`, a failed request with `server_error` (`rfc6749
@@ -5343,3 +5360,68 @@ identifier and `issuing_country` among them when the mdoc is asked for),
 the request URI, the response URI, the redirect URI, the formats, and per
 format the types and the attributes the registrar records (Implementing Regulation (EU) 2025/848
 Art 5, Annex I).
+
+### 13.33 FerroSMART as a SMART Backend Services client
+
+During a standalone launch FerroSMART reads some patients before any
+grant of the person exists: the person's own record, which their
+`fhirUser` names (13.6 item 4), the `Patient` of the paired-EHR lookup
+(13.6 item 4, 13.29), a wallet login's identifier search and the patient
+index (13.32). No runtime user authorization exists for such a read, so
+FerroSMART makes it as a SMART Backend Services client (`smart
+backend-services`): a confidential client that authenticates with a
+`private_key_jwt` assertion (RFC 7523 §2.2) in the client credentials
+grant, scope `system/Patient.rs`, for the one base named in `resource`
+(RFC 8707 §2). The token's `sub` is its `client_id` (IHE IUA ITI-71
+§3.71.4.2.2.1), so a resource server that exchanges every user token
+onward (RFC 8693 §2.1) finds no user subject to delegate and reads with
+its own credential. No RFC 8693 exchange happens for that read.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as FerroSMART
+    participant T as FerroSMART token endpoint
+    participant R as FHIR resource server
+    B->>S: callback of the person's login
+    S->>S: record the login (IUA §3.71.5.1)
+    S->>T: client_credentials, private_key_jwt, system/Patient.rs
+    T->>T: record the token request (IHE.IUA.71)
+    T-->>S: token, sub = client_id
+    S->>R: GET Patient/[id] with the token
+    R-->>S: the one Patient, read under its own credential
+    S->>S: access record filed under the patient, revoke the token
+    S-->>B: on to the consent
+```
+
+- **The client.** `[ferrosmart.backend]` names its `client_id`
+  (`ferrosmart` by default), the assertion algorithm (`ES384` or `RS384`,
+  the two `smart client-authentication-asymmetric` has a server validate)
+  and the `[ferrosmart.backend.keys]` ring, which shares no key with
+  `[ferrosmart.keys]` (RFC 8725 §3.12). A deployment that logs people in
+  at a FHIR base needs it, and a configuration without it is refused at
+  start. Before each request FerroSMART checks the client's registration
+  and writes it through the admin registry when it differs, as `ferrosmart
+  client apply` would: the client credentials grant alone, the ceiling
+  `system/Patient.rs`, its JWK Set by value, and every FHIR base and
+  patient index it serves as its `resources`. Writing its own registration is our own design.
+- **The request.** The token request runs through the token endpoint's
+  own grant and record in process, so it is authenticated, granted and
+  recorded exactly as any backend client's: the acquisition is the
+  endpoint's `IHE.IUA.71` record (IUA §3.71.5.1), which BALP 1.1.4 3:5.7.5
+  presumes of every token an access names. The person's authentication is
+  the login's `110122` record (13.2).
+- **The read.** One token serves one read of the one matched `Patient`, a
+  read by id or a search by identifier that takes exactly one match, and
+  is revoked once the read is answered (GDPR Art 5(1)(c), Art 25). Each
+  read writes its access record (Regulation (EU) 2025/327 Annex II 3.2)
+  naming the client as the accessor, filed under the person on whose
+  behalf FerroSMART read. Annex II 3.2(b) is silent on a system's access,
+  so naming the person is our own design.
+- **What stays the person's.** A professional's picker search, reads and
+  EHR lookups, a patient's EHR lookup and the `fhirUser` lookup run as the
+  person under a grant of theirs to FerroSMART's client (13.6 item 4), so
+  the resource server's own rules for that person decide what they see.
+
+The tests are `app/ferrosmart/tests/it/authorize/onward_exchange.rs`,
+`authorize.rs` and `authorize/wallet/patient_index.rs`.

@@ -85,6 +85,23 @@ in turn ([keys and rotation](../operate/keys.md)).
 | `private_key_files` | required | The PEM files of the keys, in the order they take over; each is published under its RFC 7638 thumbprint |
 | `rotation_period` | `90d` | How long a key signs before the next one takes over; at least `access_token_lifetime` plus an hour and a minute |
 
+## `[ferrosmart.backend]`
+
+FerroSMART's own SMART Backend Services client. During a standalone launch
+it reads a patient's own record, the patient of a paired EHR lookup, a
+wallet login's patient and the patient index with a client credentials
+token of this client (`system/Patient.rs`, `sub` its `client_id`), which a
+resource server that exchanges user tokens onward reads with its own
+credential. FerroSMART registers the client itself before its first
+request. A deployment that logs people in at a FHIR server needs this
+table.
+
+| Key | Default | What it is |
+|---|---|---|
+| `client_id` | `ferrosmart` | The client FerroSMART registers itself as |
+| `algorithm` | `ES384` | The JWS algorithm of its client assertions: `ES384` or `RS384` |
+| `[ferrosmart.backend.keys]` | required | The assertion ring: `private_key_file` (a P-384 key for `ES384`, an RSA key for `RS384`), `kid`, `next_private_key_file`, `previous_private_key_file` and `previous_key_overlap`, as the upstream assertion ring has them. It may share no key with the token keys |
+
 ## `[[ferrosmart.resource]]`
 
 Each FHIR or openEHR server a token may be for. Its base URL is the `aud`
@@ -417,6 +434,9 @@ url_file = "/run/secrets/ferrosmart-db-url"
 
 [ferrosmart.keys]
 private_key_files = ["/run/secrets/rs256-1.pem", "/run/secrets/rs256-2.pem"]
+
+[ferrosmart.backend.keys]
+private_key_file = "/run/secrets/backend-assertion.pem"
 
 [[ferrosmart.resource]]
 base = "https://ehr.example.org/fhir"
