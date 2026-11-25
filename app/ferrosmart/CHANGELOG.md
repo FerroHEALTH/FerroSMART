@@ -12,6 +12,43 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-25
+
+Post-quantum: ML-DSA tokens, client assertions and signed launches (RFC 9964),
+and the X25519MLKEM768 key exchange on every TLS connection (RFC 10024).
+
+### Added
+
+- ML-DSA-65 token signing keys (RFC 9964) beside the RSA ones:
+  `[ferrosmart.keys]` reads ML-DSA-65 private keys (RFC 9881) beside RSA
+  keys, each algorithm rotating on its own, the JWK Set publishes each as
+  an `AKP` key, and discovery lists `ML-DSA-65` in
+  `id_token_signing_alg_values_supported`. A client's
+  `id_token_signed_response_alg`, `RS256` or `ML-DSA-65`, picks the
+  algorithm of its ID Tokens and access tokens; any other value, or one no
+  key signs, is refused at registration (#887).
+- The token endpoint accepts `private_key_jwt` client assertions, and the
+  launch registration accepts signed launches, signed with ML-DSA-44,
+  ML-DSA-65 or ML-DSA-87 (RFC 9964) by an `AKP` key of the client's
+  registered JWK Set, beside RS384 and ES384; a key verifies only its own
+  algorithm, so an assertion whose `alg` disagrees with the key is refused.
+  `token_endpoint_auth_signing_alg_values_supported` and the introspection
+  and revocation lists name the three ML-DSA algorithms (#888).
+- The TLS 1.3 key exchange of the listener and of every client FerroSMART
+  builds, the PostgreSQL connection among them, offers the post-quantum
+  hybrid X25519MLKEM768 (RFC 10024) first, through `ferrohealth-server`
+  0.12.4, and still reaches a classical-only peer over X25519.
+  `docs/post-quantum.md` lists every cryptographic use and whether it is
+  post-quantum safe, with `conformance/post-quantum.tsv` as its
+  machine-readable copy and a README badge counted from it (#890).
+
+### Changed
+
+- Breaking: the `signing_key` and `client` tables of the baseline schema
+  gain the `algorithm` and `id_token_signed_response_alg` columns, and a
+  token key that is neither RSA nor ML-DSA-65 is refused at start, as is a
+  pool without an RSA key. Requires `ferrohealth-smart` 0.35 (#887).
+
 ## [0.7.0] - 2026-11-25
 
 FerroSMART 0.7.0 reads a launch patient for whom no grant exists yet as a
@@ -958,7 +995,8 @@ Shipped with functional changes because: the `url` fix is a lockfile move on `ma
   read its token response (SMART App Launch 2.2.0, Considerations for CORS
   support). Every other origin gets no CORS header (#560).
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.7.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.8.0...HEAD
+[0.8.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.7.0...ferrosmart-v0.8.0
 [0.7.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.6.0...ferrosmart-v0.7.0
 [0.6.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.5.0...ferrosmart-v0.6.0
 [0.5.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrosmart-v0.4.0...ferrosmart-v0.5.0
