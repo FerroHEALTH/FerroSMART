@@ -913,8 +913,9 @@ fn is_loopback(url: &Url) -> bool {
 /// `kty` and `kid` properties, with content conveyed using 'bare key'
 /// properties", `n` and `e` for RSA and `crv`, `x` and `y` for EC (SMART
 /// App Launch 2.2.0, Client Authentication: Asymmetric, Registering a
-/// client). A private member (`d`, RFC 7518 §6.2.2.1 and §6.3.2.1) is
-/// refused: a public key set never carries one.
+/// client), and `alg` and `pub` for an ML-DSA key (`AKP`, RFC 9964 §3). A
+/// private member (`d`, RFC 7518 §6.2.2.1 and §6.3.2.1; `priv`, RFC 9964
+/// §3) is refused: a public key set never carries one.
 fn check_set(client_id: &str, set: &Value) -> Result<(), ClientError> {
     let keys = set
         .get("keys")
@@ -939,12 +940,13 @@ fn check_set(client_id: &str, set: &Value) -> Result<(), ClientError> {
             Some("EC") => ["crv", "x", "y"]
                 .iter()
                 .all(|member| text(member).is_some()),
-            _ => return Err(fault("is no RSA or EC key")),
+            Some("AKP") => ["alg", "pub"].iter().all(|member| text(member).is_some()),
+            _ => return Err(fault("is no RSA, EC or AKP key")),
         };
         if !bare {
             return Err(fault("lacks a bare key member"));
         }
-        if key.get("d").is_some() {
+        if key.get("d").is_some() || key.get("priv").is_some() {
             return Err(fault("carries a private member"));
         }
     }

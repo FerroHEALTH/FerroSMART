@@ -10,7 +10,7 @@
 //! Client Authentication: Asymmetric, Signature Verification, checks a
 //! client assertion.
 
-use jsonwebtoken::{Algorithm, Validation};
+use ferrohealth_smart::jws::claims::Validation;
 use serde_json::{Map, Value};
 
 use crate::clients::{Client, ClientKeys, ClientKind};
@@ -19,7 +19,7 @@ use crate::launch::context::Context;
 use crate::launch::{LAUNCH_SCOPE, MAX_LAUNCH_SECONDS};
 use crate::server::AppState;
 use crate::token::LEEWAY_SECONDS;
-use crate::token::assertion::key_of;
+use crate::token::assertion::{ALGORITHMS, jku, key_of, unverified_claims};
 
 /// The `typ` of a launch JWT (RFC 7515 §4.1.9; RFC 8725 §3.11, explicit
 /// typing). Our own media type.
@@ -58,7 +58,8 @@ pub struct SignedLaunch {
 
 /// Reads the launch JWT `jwt`, without recording its `jti`.
 ///
-/// It is read as `RS384` or `ES384`, `typ` [`LAUNCH_JWT_TYPE`],
+/// It is read as `RS384`, `ES384` or an ML-DSA parameter set (RFC 9964 §5),
+/// `typ` [`LAUNCH_JWT_TYPE`],
 /// signed by a key its `iss` registered, an EHR client that may launch, with
 /// `aud` FerroSMART's issuer as its sole value, an `exp` at most
 /// [`MAX_LAUNCH_SECONDS`] ahead, a `jti`, the app and the resource server,
@@ -68,12 +69,17 @@ pub struct SignedLaunch {
 /// Returns [`Unresolved::Refused`] naming the rule broken, and
 /// [`Unresolved::Store`] when the registry cannot be read.
 pub async fn read(state: &AppState, jwt: &str) -> Result<SignedLaunch, Unresolved> {
-    let header =
-        jsonwebtoken::decode_header(jwt).map_err(|_unread| Refused("the launch is no JWT"))?;
+    let jws = ferrohealth_smart::jws::compact::decode(jwt).map_err(|error| match error {
+        ferrohealth_smart::jws::JwsError::Algorithm => {
+            Refused("the launch JWT's algorithm is not admitted")
+        }
+        _ => Refused("the launch is no JWT"),
+    })?;
+    let header = jws.header();
     let algorithm = header.alg;
-    // NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric, the two
-    // algorithms FerroSMART validates for a client's key.
-    if !matches!(algorithm, Algorithm::RS384 | Algorithm::ES384) {
+    // NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric, the algorithms
+    // FerroSMART validates for a client's key.
+    if !ALGORITHMS.contains(&algorithm) {
         return Err(Refused("the launch JWT's algorithm is not admitted"));
     }
     if header.typ.as_deref() != Some(LAUNCH_JWT_TYPE) {
@@ -85,8 +91,8 @@ pub async fn read(state: &AppState, jwt: &str) -> Result<SignedLaunch, Unresolve
         .ok_or(Refused("the launch JWT names no kid"))?;
     // NOTE: RFC 7519 §4.1.1, the issuer names the EHR; the claims are read
     // unverified only to find whose key verifies them.
-    let unverified: Value = jsonwebtoken::dangerous::insecure_decode_claims(jwt)
-        .map_err(|_unread| Refused("the launch JWT's claims are no JSON"))?;
+    let unverified =
+        unverified_claims(jwt).ok_or(Refused("the launch JWT's claims are no JSON"))?;
     let issuer = unverified
         .get("iss")
         .and_then(Value::as_str)
@@ -94,7 +100,7 @@ pub async fn read(state: &AppState, jwt: &str) -> Result<SignedLaunch, Unresolve
     let ehr = super::launching_ehr(state, issuer)
         .await?
         .ok_or(Refused("the launch JWT's iss is no EHR that may launch"))?;
-    if let Some(jku) = header.jku.as_deref()
+    if let Some(jku) = jku(&jws)
         && !matches!(&ehr.keys, Some(ClientKeys::Uri(url)) if url.as_str() == jku)
     {
         return Err(Refused(
@@ -104,13 +110,14 @@ pub async fn read(state: &AppState, jwt: &str) -> Result<SignedLaunch, Unresolve
     let key = key_of(state, &ehr, kid, algorithm)
         .await
         .map_err(|refusal| Refused(refusal.description))?;
-    let mut validation = Validation::new(algorithm);
-    validation.leeway = LEEWAY_SECONDS;
-    validation.validate_aud = false;
-    validation.set_required_spec_claims(&["exp", "iss", "aud"]);
-    let claims: Map<String, Value> = jsonwebtoken::decode(jwt, &key, &validation)
-        .map_err(|_refused| Refused("the launch JWT does not verify"))?
-        .claims;
+    let claims: Map<String, Value> = jws
+        .verify_claims(&key)
+        .map_err(|_refused| Refused("the launch JWT does not verify"))?;
+    Validation::default()
+        .with_required(&["exp", "iss", "aud"])
+        .with_leeway(std::time::Duration::from_secs(LEEWAY_SECONDS))
+        .check(&claims)
+        .map_err(|_refused| Refused("the launch JWT does not verify"))?;
     claims_of(state, &ehr, claims)
 }
 
