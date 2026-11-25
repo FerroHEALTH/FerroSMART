@@ -15,7 +15,8 @@
 #                          plans' negative modules (the login refused), those
 #                          the suite passes
 #   smart-app-launch.json  app/ferrosmart/inferno/smart_stu2_2_expected.json:
-#                          the Inferno tests that pass, of all run
+#                          the Inferno tests that pass, of all run and not
+#                          omitted, as Inferno scores them
 #
 # Each label names the exact version it was tested against, and no label
 # claims more than a self-test: "certified", "compliant" and "conformant"
@@ -81,7 +82,9 @@ render() {
     awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused" && $3 == "PASSED"' | wc -l | tr -d ' ')
   badge "OpenID4VP 1.0" "$refused" "$negative" "negative tests" openid > "$out/openid4vp.json"
   local results="$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
-  tests=$(jq '[.[] | select(.test_id)] | length' "$results")
+  # NOTE: inferno_core 1.4.3 result.rb:50, result_summarizer.rb and HelpModal.tsx:76: an omit
+  # "does not affect passed or failed scores", and a group of passes and omits scores `pass`.
+  tests=$(jq '[.[] | select(.test_id and .result != "omit")] | length' "$results")
   passed=$(jq '[.[] | select(.test_id and .result == "pass")] | length' "$results")
   version=$(smart_version "$tree")
   [[ -n "$version" ]] || { echo "conformance: docs/VERSIONS.md pins no SMART App Launch version" >&2; return 2; }
@@ -175,9 +178,18 @@ self_test() {
     fail "the negative-test count"
   [[ "$(jq -r .label "$tree/conformance/badges/smart-app-launch.json")" == "SMART App Launch 2.2.0" ]] ||
     fail "the SMART label"
-  [[ "$(jq -r .message "$tree/conformance/badges/smart-app-launch.json")" == "1/2 Inferno tests" ]] ||
-    fail "the Inferno count"
+  [[ "$(jq -r .message "$tree/conformance/badges/smart-app-launch.json")" == "1/1 Inferno tests" ]] ||
+    fail "an omitted test counted"
   run "$tree" check > /dev/null || fail "fresh badges are refused"
+  cp "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json" "$work/badge"
+  jq -c '. + [{"test_id":"c","result":"fail"}]' "$work/badge" > "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
+  run "$tree" update > /dev/null || fail "a tree with a failed test is refused"
+  [[ "$(jq -r .message "$tree/conformance/badges/smart-app-launch.json")" == "1/2 Inferno tests" ]] ||
+    fail "a failed test left out of the count"
+  [[ "$(jq -r .color "$tree/conformance/badges/smart-app-launch.json")" == yellow ]] ||
+    fail "a failed test leaves the badge green"
+  cp "$work/badge" "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
+  run "$tree" update > /dev/null || fail "the rewrite after a fail is refused"
   printf 'given_name\tyes\tgiven_name\tgiven_name\t-\tmaps\n' >> "$tree/conformance/pid-attributes.tsv"
   if run "$tree" check > /dev/null 2>&1; then fail "a stale badge passes"; fi
   run "$tree" update > /dev/null || fail "the rewrite is refused"
