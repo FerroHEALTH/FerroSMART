@@ -137,7 +137,7 @@ impl AppState {
         }
         let metadata = discovery::metadata(&self.settings, true);
         self.smart = discovery::smart_configuration(&self.settings, &metadata, true);
-        let mut openid = discovery::openid_configuration(&metadata);
+        let mut openid = discovery::openid_configuration(&metadata, &self.settings.keys);
         discovery::add_acr_values(&mut openid, &self.settings);
         discovery::add_pushed_requests(&mut openid, &self.settings);
         self.openid = Some(openid);
@@ -321,7 +321,7 @@ async fn openid_configuration(State(state): State<Arc<AppState>>) -> Response {
 /// `GET {issuer}/jwks`, the JWK Set (RFC 7517 §5), cacheable as
 /// [`JWKS_CACHE_CONTROL`] says.
 async fn jwks(State(state): State<Arc<AppState>>) -> Response {
-    let mut response = public(Json(state.settings.keys.ring().published()).into_response());
+    let mut response = public(Json(state.settings.keys.published()).into_response());
     response.headers_mut().insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static(JWKS_CACHE_CONTROL),

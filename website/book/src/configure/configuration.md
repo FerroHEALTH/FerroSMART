@@ -77,12 +77,15 @@ one. Migrations ship in the binary and run at start.
 
 ## `[ferrosmart.keys]`
 
-The RSA keys that sign every access token and ID Token under `RS256`, each
-in turn ([keys and rotation](../operate/keys.md)).
+The keys that sign every access token and ID Token, each in turn
+([keys and rotation](../operate/keys.md)): RSA keys under `RS256`, which
+are required, and ML-DSA-65 keys (RFC 9964) beside them. The keys of each
+algorithm rotate on their own, and a client's
+`id_token_signed_response_alg` decides which signs its tokens.
 
 | Key | Default | What it is |
 |---|---|---|
-| `private_key_files` | required | The PEM files of the keys, in the order they take over; each is published under its RFC 7638 thumbprint |
+| `private_key_files` | required | The PEM files of the keys, RSA (PKCS#8 or PKCS#1) or ML-DSA-65 (PKCS#8, RFC 9881), in the order they take over; at least one RSA key; each is published under its RFC 7638 thumbprint |
 | `rotation_period` | `90d` | How long a key signs before the next one takes over; at least `access_token_lifetime` plus an hour and a minute |
 
 ## `[ferrosmart.backend]`

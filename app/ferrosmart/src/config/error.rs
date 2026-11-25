@@ -147,6 +147,19 @@ pub enum Error {
         #[source]
         source: ihe_atna::atna::feed::FeedConfigError,
     },
+    /// A key of `ferrosmart.keys.private_key_files` is neither an RSA key
+    /// nor an ML-DSA-65 key.
+    #[error("the token signing key {} is neither an RSA nor an ML-DSA-65 private key", path.display())]
+    TokenKeyType {
+        /// The file.
+        path: PathBuf,
+    },
+    /// `ferrosmart.keys.private_key_files` holds no RSA key, and RFC 9068
+    /// §2.1 has an authorization server sign with RS256.
+    #[error(
+        "`ferrosmart.keys.private_key_files` holds no RSA key to sign RS256 with (RFC 9068 §2.1)"
+    )]
+    NoRs256Key,
     /// `ferrosmart.keys.private_key_files` names one key twice.
     #[error("`ferrosmart.keys.private_key_files` names the key {kid} twice")]
     RepeatedKey {

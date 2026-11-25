@@ -21,14 +21,18 @@ the database.
 
 Tokens are signed `RS256`, the algorithm RFC 9068 §2.1 and OpenID Connect
 Discovery 1.0 §3 have every authorization server support and SMART signs
-ID Tokens with. `none` and HMAC never sign. One ring signs both access
-tokens and ID Tokens; their `typ` (`at+jwt` against `JWT`) keeps an ID Token
-from passing as an access token.
+ID Tokens with, or `ML-DSA-65` (RFC 9964) for a client whose
+`id_token_signed_response_alg` names it. `none` and HMAC never sign. Each
+algorithm has one ring, which signs both access tokens and ID Tokens; their
+`typ` (`at+jwt` against `JWT`) keeps an ID Token from passing as an access
+token.
 
-Make a key with OpenSSL:
+Make an RSA key, and an ML-DSA-65 key beside it, with OpenSSL 3.5 or
+later:
 
 ```sh
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out rs256.pem
+openssl genpkey -algorithm ML-DSA-65 -out ml-dsa-65.pem
 ```
 
 Each key is published under its RFC 7638 thumbprint as its `kid`.

@@ -22,6 +22,7 @@ mod ehr_launch;
 mod ig_examples;
 mod introspection;
 mod launch;
+mod ml_dsa;
 mod openapi;
 mod refresh;
 mod registration;

@@ -450,7 +450,7 @@ fn signing_keys(
     const KEY: &str = "ferrosmart.keys.private_key_files";
     let mut pool: Vec<AssertionKey> = Vec::with_capacity(section.private_key_files.len());
     for path in &section.private_key_files {
-        let key = read_key(KEY, path, None, Algorithm::Rs256)?;
+        let key = token_key(KEY, path)?;
         if pool.iter().any(|other| other.kid() == key.kid()) {
             return Err(Error::RepeatedKey {
                 kid: key.kid().to_owned(),
@@ -469,7 +469,32 @@ fn signing_keys(
             shortest: schedule.retirement,
         });
     }
-    SigningKeys::new(pool, schedule).map_err(|_empty| Error::Missing { key: KEY })
+    if pool.is_empty() {
+        return Err(Error::Missing { key: KEY });
+    }
+    SigningKeys::new(pool, schedule).map_err(|_no_rs256| Error::NoRs256Key)
+}
+
+/// Reads the token signing key at `path`, which `key` names: an RSA key
+/// signs RS256 (RFC 9068 §2.1), an ML-DSA-65 key signs ML-DSA-65 (RFC 9964
+/// §5, RFC 9881 §6).
+fn token_key(key: &'static str, path: &Path) -> Result<AssertionKey, Error> {
+    let pem = std::fs::read(path).map_err(|source| Error::KeyFile {
+        key,
+        path: path.to_owned(),
+        source,
+    })?;
+    let read =
+        AssertionKey::from_pem(&pem, None, None).map_err(|source| Error::Key { key, source })?;
+    match read.algorithm() {
+        Algorithm::MlDsa65 => Ok(read),
+        algorithm if algorithm.is_rsa() => read
+            .with_algorithm(Algorithm::Rs256)
+            .map_err(|source| Error::Key { key, source }),
+        _ => Err(Error::TokenKeyType {
+            path: path.to_owned(),
+        }),
+    }
 }
 
 /// Returns the ring `keys` names: the current key, the previous one for its
@@ -1042,7 +1067,7 @@ fn assertion_keys(
 /// RFC 8725 §3.12: a key that signs client assertions never signs a token,
 /// so an assertion ring shares no key with the token keys.
 fn signs_tokens(ring: &KeyRing, tokens: &SigningKeys) -> bool {
-    let pool: Vec<&AssertionKey> = tokens.pool().iter().collect();
+    let pool: Vec<&AssertionKey> = tokens.pool().collect();
     shares_key(
         &ring.published(),
         &ferrohealth_smart::client::assertion::jwk_set(&pool),

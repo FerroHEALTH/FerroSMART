@@ -97,6 +97,16 @@ pub enum AdminError {
         /// The name.
         name: String,
     },
+    /// The client names a signing algorithm no configured key signs with.
+    #[error(
+        "the client `{client_id}` names {algorithm}, which no key of `ferrosmart.keys` signs with"
+    )]
+    UnheldAlgorithm {
+        /// The client.
+        client_id: String,
+        /// The algorithm.
+        algorithm: ferrohealth_smart::jws::algorithm::Algorithm,
+    },
     /// The client names a resource server the configuration does not.
     #[error("the client `{client_id}` names the resource `{base}`, which is not configured")]
     UnknownResource {
@@ -164,9 +174,10 @@ impl AdminError {
             Self::Metadata(ClientError::RedirectUri { .. }) => {
                 (StatusCode::BAD_REQUEST, "invalid_redirect_uri")
             }
-            Self::Metadata(_) | Self::UnknownUpstream { .. } | Self::UnknownResource { .. } => {
-                (StatusCode::BAD_REQUEST, "invalid_client_metadata")
-            }
+            Self::Metadata(_)
+            | Self::UnknownUpstream { .. }
+            | Self::UnknownResource { .. }
+            | Self::UnheldAlgorithm { .. } => (StatusCode::BAD_REQUEST, "invalid_client_metadata"),
             Self::NotFound(_) | Self::NoProvider(_) | Self::NoGrant => {
                 (StatusCode::NOT_FOUND, "not_found")
             }
@@ -541,6 +552,16 @@ fn check_names(state: &AppState, client: &Client) -> Result<(), AdminError> {
             base: base.clone(),
         });
     }
+    if settings
+        .keys
+        .ring(client.id_token_signed_response_alg)
+        .is_none()
+    {
+        return Err(AdminError::UnheldAlgorithm {
+            client_id: client.client_id.clone(),
+            algorithm: client.id_token_signed_response_alg,
+        });
+    }
     let upstreams = &settings.upstreams;
     match client
         .upstreams
@@ -624,17 +645,26 @@ async fn secret(on: OnClient, access: Access) -> Result<Response, AdminError> {
     Ok(issued(StatusCode::OK, &applied, Value::Null))
 }
 
-/// `GET /admin/keys`: the signing key ring this replica signs with, each
-/// public key with its state: `active` signs, `next` is published ahead of
+/// `GET /admin/keys`: the signing key rings this replica signs with, one
+/// per algorithm, each public key with its state and its `alg`: `active` signs, `next` is published ahead of
 /// the rotation that makes it sign, and `retiring` stays published until
 /// the tokens it signed have expired (`docs/architecture.md` §13.11). The
 /// private keys stay in the files the configuration names; the API never
 /// carries one.
 async fn keys(State(state): State<Arc<AppState>>) -> Response {
-    let ring = state.settings().keys.ring();
-    let keys: Vec<Value> = std::iter::once(("active", ring.current()))
-        .chain(ring.retiring().map(|key| ("retiring", key)))
-        .chain(ring.next().map(|key| ("next", key)))
+    let signing = &state.settings().keys;
+    let rings: Vec<_> = signing
+        .algorithms()
+        .into_iter()
+        .filter_map(|algorithm| signing.ring(algorithm))
+        .collect();
+    let keys: Vec<Value> = rings
+        .iter()
+        .flat_map(|ring| {
+            std::iter::once(("active", ring.current()))
+                .chain(ring.retiring().map(|key| ("retiring", key)))
+                .chain(ring.next().map(|key| ("next", key)))
+        })
         .map(|(state, key)| json!({ "state": state, "jwk": key.public_jwk() }))
         .collect();
     no_store(Json(json!({ "keys": keys })).into_response())
