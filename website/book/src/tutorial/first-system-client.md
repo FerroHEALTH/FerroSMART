@@ -73,7 +73,7 @@ and `sub` set to `first-system`, `aud` set to
 fresh `jti`. Below, `$ASSERTION` stands for it; sign a new one for every
 request, since each `jti` is accepted once.
 
-<!-- book-request: token status=200 capture=TOKEN:/access_token expect=/token_type="Bearer" expect=/scope="system/Observation.rs" -->
+<!-- book-request: token status=200 capture=TOKEN:/access_token expect=/token_type="bearer" expect=/scope="system/Observation.rs" -->
 
 ```http
 POST /token HTTP/1.1
@@ -87,8 +87,9 @@ grant_type=client_credentials
 &client_assertion=$ASSERTION
 ```
 
-The answer carries `access_token`, `token_type` `Bearer`, `expires_in` and
-the granted `scope`. The token is a JWT whose `aud` is the FHIR server
+The answer carries `access_token`, `token_type` `bearer`, `expires_in` and
+the granted `scope`. Compare `token_type` without regard to case, as RFC
+6749 §5.1 has it: a person's tokens answer `Bearer`. The token is a JWT whose `aud` is the FHIR server
 named in `resource` (RFC 8707) and whose `sub` is your `client_id`. Below,
 `$TOKEN` stands for it. Send it to the FHIR server as
 `Authorization: Bearer $TOKEN`.
