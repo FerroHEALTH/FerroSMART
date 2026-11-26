@@ -9,6 +9,7 @@
 
 - [What FerroSMART is](evaluate/what-ferrosmart-is.md)
 - [Capabilities and conformance](evaluate/conformance.md)
+- [How FerroSMART decides a token](explanation/token-decision.md)
 - [Xt-EHR system authorization](evaluate/xt-ehr-authorization.md)
 - [Licensing](evaluate/licensing.md)
 

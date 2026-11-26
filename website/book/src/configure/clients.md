@@ -4,7 +4,9 @@
 # Clients, roles and consent
 
 Who may ask for what is content, never code. Three things decide the scope
-an app gets, and the narrowest wins:
+an app gets, and the narrowest wins
+([how FerroSMART decides a token](../explanation/token-decision.md) explains
+the whole decision):
 
 1. the client's **ceiling**, the scopes its client document lists;
 2. the **roles** the person holds at the identity provider, each mapped by a

@@ -7,6 +7,8 @@ An app finds FerroSMART through the FHIR or openEHR server it wants to
 reach: the server's own `.well-known/smart-configuration` names FerroSMART's
 `authorization_endpoint` and `token_endpoint`. Everything below follows
 [SMART App Launch 2.2.0](https://hl7.org/fhir/smart-app-launch/STU2.2/).
+[How FerroSMART decides a token](../explanation/token-decision.md) explains
+what FerroSMART weighs at each step.
 
 ## The standalone launch
 
