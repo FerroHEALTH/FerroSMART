@@ -61,6 +61,8 @@ launches, and the grants an hour old with no token left.
 
 Back up the database as you back up any PostgreSQL. Losing it ends every
 grant: people log in again and apps receive new tokens.
+[Deploy for production](deploy.md) covers the proxy, TLS and replicas, and
+[upgrade FerroSMART](upgrades.md) the release-to-release steps.
 
 ## Stopping and restarting
 

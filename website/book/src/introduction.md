@@ -19,7 +19,7 @@ change.
 |---|---|---|---|
 | An integrator of a SMART app | Launch an app and get a token | [The flows](integrate/flows.md) | [Launch from an EHR](integrate/ehr-launch.md), [how FerroSMART decides a token](explanation/token-decision.md) |
 | An integrator of a FHIR or openEHR server | Accept FerroSMART's tokens | [A server behind FerroSMART](integrate/resource-server.md) | [Refusal codes](integrate/refusals.md), [how FerroSMART decides a token](explanation/token-decision.md) |
-| An operator | Run FerroSMART | [Quickstart](install/quickstart.md) | [Identity providers](install/upstream.md), [clients, roles and consent](configure/clients.md), [configuration](configure/configuration.md), [operate and monitor](operate/operations.md) |
+| An operator | Run FerroSMART | [Quickstart](install/quickstart.md) | [Identity providers](install/upstream.md), [clients, roles and consent](configure/clients.md), [deploy for production](operate/deploy.md), [upgrade FerroSMART](operate/upgrades.md), [configuration](configure/configuration.md) |
 | A compliance reader | Decide whether FerroSMART meets your obligations | [What FerroSMART is](evaluate/what-ferrosmart-is.md) | [How FerroSMART decides a token](explanation/token-decision.md), [the consent rules](configure/consent.md), [security and the CRA](operate/security.md), [Xt-EHR system authorization](evaluate/xt-ehr-authorization.md) |
 
 ## How the book is organised
