@@ -66,7 +66,7 @@ registers itself sends too. `resources`, `launch_uri`, `upstreams` and
 | `logo_uri` | Optional: the app's logo, absolute `https`, drawn on the consent page; the page's CSP admits that origin for images alone |
 | `policy_uri` | Optional: the app's privacy policy, absolute `https`, linked from the consent page |
 | `tos_uri` | Optional: the app's terms of service, absolute `https`, linked from the consent page |
-| `first_party` | `true` for the organisation's own app, or one that acts for it, whose patients then see no consent page ([who skips the page](#who-skips-the-page)); only an administrator sets it, and it needs `authorization_code`. `false` by default |
+| `first_party` | `true` for the organisation's own app, or one that acts for it, whose patients then see no consent page ([the consent rules](consent.md#who-sees-the-page)); only an administrator sets it, and it needs `authorization_code`. `false` by default |
 | `scope` | The ceiling, space-separated: every scope the client may ever be granted |
 | `grant_types` | Any of `authorization_code`, `client_credentials`, `refresh_token` and `urn:ietf:params:oauth:grant-type:token-exchange`. The token exchange lets a confidential client that serves a FHIR base exchange a patient's own token there for a token at the paired openEHR base (RFC 8693), and needs both bases in `resources` |
 
@@ -213,103 +213,43 @@ scopes = ["user/Patient.rs", "__ferroehr.platform"]
 Any other scope outside the SMART set is never granted to a person. `[ferrosmart.upstream.oidc] role_claims` says where in the ID
 Token the roles are ([identity providers](../install/upstream.md)).
 
-## Which scopes the consent page offers
+## Which scopes a person is offered
 
-FerroSMART matches each requested scope against these rules, drops the
-rest, and shows the person what remains. "Lists it" and "grants it" read a
-`patient/`, `user/` or `system/` scope by its parts (SMART App Launch 2.2.0,
-SMART v2 scopes): a listed scope covers a request in the same context whose
-permission letters are a subset of its own, on the same resource or under
-`*`, with the same query parameters, or any when the listed scope names
-none. So one ceiling entry `patient/Composition.crs` admits
-`patient/Composition.rs` and `patient/Composition.r`, `user/*.rs` admits
-`user/Observation.r`, and `patient/Observation.rs?category=vital-signs`
-never admits the unrestricted `patient/Observation.r`. A v1 scope
-(`.read`, `.write`, `.*`) reads as its v2 letters. Every other scope matches
-as written.
+FerroSMART offers a requested scope only when the client's ceiling lists
+it, and, for a `user/`, `patient/` or extension scope, when one of the
+person's roles grants it; [how FerroSMART decides a
+token](../explanation/token-decision.md#the-scopes-request-ceiling-roles-context)
+has the whole table. "Lists it" and "grants it" read a scope by its parts
+(SMART App Launch 2.2.0, Scopes and Launch Context), so write a ceiling or
+a role with these in mind:
 
-| Requested scope | Offered when |
-|---|---|
-| `openid` | the ceiling lists it |
-| `fhirUser` | the ceiling lists it, `openid` is offered, and the identity provider carries the person's `fhirUser` |
-| `user/...` | the ceiling lists it and one of the person's roles grants it |
-| `patient/...` | the ceiling lists it, a role grants it, and a patient is in context |
-| `launch` | the ceiling lists it and the request carries an EHR launch |
-| `launch/patient` | the ceiling lists it and a patient is in context: the EHR launch named one, or the patient picker can choose one |
-| `launch/encounter` | the ceiling lists it and an encounter is in context: the EHR launch named one, or, with `launch/patient` at a FHIR server, the patient picker can choose one |
-| `offline_access`, `online_access` | the ceiling lists it and the client registers `refresh_token` |
-| `__...` (an extension scope) | the ceiling lists it and one of the person's roles grants it |
+- `patient/Composition.crs` admits `patient/Composition.rs` and
+  `patient/Composition.r`;
+- `user/*.rs` admits `user/Observation.r`;
+- `patient/Observation.rs?category=vital-signs` never admits the
+  unrestricted `patient/Observation.r`;
+- a v1 scope (`.read`, `.write`, `.*`) reads as its v2 letters, and every
+  other scope matches as written.
 
 With both refresh scopes granted, `offline_access` decides.
 
 ## Consent
 
-A flow with a person shows the consent page unless the registration or a
-remembered choice answers for them; [The consent
-rules](consent.md) lists every case with the text it rests on. The person
-approves the offered scopes, unticks
-any access to their data (`patient/`, `user/` and extension scopes), or
-refuses, which sends the app an `access_denied` error. Sign-in, launch and
-refresh scopes (`openid`, `fhirUser`, `profile`, `email`, `launch`,
-`launch/patient`, `launch/encounter`, `offline_access`, `online_access`)
-are listed as fixed lines with no box: they give the app no data the
-boxes do not, and the person ends lasting access on the management page. The page shows the app's logo and
-links to its home page, privacy policy and terms when the client registers
-them. FerroSMART draws the page itself, with the
-deployment's `[ferrosmart] name` and the `consent_text` of `[ferrosmart.branding]`.
-
-When the person ticks "Remember this choice", FerroSMART keeps the consent
-for that client, that resource server (the request's `aud`) and that scope
-set; a request to another resource server shows the page again. A later request whose offered scopes it
-covers goes back to the app with a code at once; a request for more shows
-the page again. The person sees each remembered consent at
-`{issuer}/manage`, the SMART `management_endpoint`, with every app that
-holds live access to their data: a refresh token or an access token not
-yet expired, remembered or not. The page says
-how long each app stays connected, and each app has a Disconnect button.
-Disconnect forgets the remembered consent and revokes every grant the app
-holds for the person, with every token under them, at once: its next
-refresh fails. SMART App Launch 2.2.0 lets `offline_access` last "as long
-as the authorization server and end-user will allow", so the person can
-end any app's access. The audit record of a disconnect is
-`consent-withdrawn`.
-
-### Who skips the page
-
-An administrator's registration is the organisation's consent for its
-professionals, so a person whose `fhirUser` is a `Practitioner` or a
-`PractitionerRole` sees no consent page for an app an administrator
-registered (OpenID Connect Core 1.0 §3.1.2.4, "previous administrative
-consent"). A patient, related person or person sees the page for an app of
-another party: they decide whether another party reads their data
-(Regulation (EU) 2025/327 Art 3, 4(2) and 7(1)).
-
-For the organisation's own app, such as its patient portal, or an app that
-acts for it, set `"first_party": true` in its document. Only an
-administrator sets it. A patient, related person or person then sees no
-page either. The audit record of a skipped page is `consent-administrative`
-or `consent-first-party`, and the management page lists the app as the
-organisation's, with a Disconnect button that ends the person's access and
-leaves the registration standing. Clearing `first_party` revokes at once
-every token issued on it with no page. [The consent rules](consent.md) list
-every case with the text it rests on.
+[The consent rules](consent.md) say who sees the consent page and why. Two
+members of the client document change the outcome: `first_party`, for the
+organisation's own app, and the redirect URIs of a public client.
 
 ### Native and browser apps without a secret
 
-A public client (`token_endpoint_auth_method` `none`) has no secret, so a request carrying
-its `client_id` could come from any app on the device. FerroSMART gives a
-public client a code with no consent page, on its registration or a
-remembered consent, only when the request's redirect URI is a claimed `https` URI: an
-`https` URL whose host is not `localhost` or a loopback address. The
-operating system hands such a redirect only to the app that proved it owns
-the domain (RFC 8252 §7.2). A custom-scheme redirect such as
-`com.example.app:/callback`, or a loopback one such as
-`http://127.0.0.1:8400/callback`, any app can register or listen on, so the
-person sees the page on every sign-in, with a remembered choice already
-ticked (RFC 8252 §8.6: the server "SHOULD NOT process authorization
-requests automatically without user consent or interaction, except when the
-identity of the client can be assured"; RFC 6749 §10.2). Confidential
-clients authenticate at the token endpoint and are not affected.
+A public client (`token_endpoint_auth_method` `none`) has no secret, so a
+request carrying its `client_id` could come from any app on the device.
+FerroSMART skips the consent page for a public client only when the
+request's redirect URI is a claimed `https` URI: an `https` URL whose host
+is not `localhost` or a loopback address, which the operating system hands
+only to the app that proved it owns the domain (RFC 8252 §7.2). With a
+custom-scheme redirect such as `com.example.app:/callback`, or a loopback
+one such as `http://127.0.0.1:8400/callback`, the person sees the page on
+every sign-in (RFC 8252 §8.6).
 
 Register the organisation's own mobile app with a claimed `https` redirect,
 an iOS Universal Link or an Android App Link, so its patients see no page.
@@ -320,18 +260,3 @@ loopback ones:
 ```text
 ferrosmart: warning: client "portal-app" is a public app with no claimed https redirect URI, so every sign-in shows the consent page (RFC 8252 §8.6): register an https redirect the app claims, such as a Universal Link or an App Link
 ```
-
-![The management page, titled "Apps you allowed": one app that stays connected after sign-out, the scopes it holds in words, and the Disconnect button](../integrate/img/manage.png)
-
-The management page, with one app that keeps access.
-[Dark theme](../integrate/img/manage-dark.png).
-
-The consent and management pages read each scope in words, with plain
-words before the common FHIR resource types, such as "Measurements and test
-results (Observation)".
-
-Backend Services tokens live at most five minutes, whatever
-`access_token_lifetime` says (SMART App Launch 2.2.0, Backend Services).
-
-Backend Services has no person and no consent: the client's ceiling is its
-pre-authorization (SMART App Launch 2.2.0, Backend Services).

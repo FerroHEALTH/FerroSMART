@@ -6,7 +6,7 @@
 **For:** operators who deploy the container image.
 
 FerroSMART ships as `ghcr.io/ferrohealth/ferrosmart`, for `linux/amd64` and
-`linux/arm64`, from v0.1.0 on. The image is one static
+`linux/arm64`. The image is one static
 binary on `gcr.io/distroless/static-debian13:nonroot`: no shell, no package
 manager, and the user 65532.
 

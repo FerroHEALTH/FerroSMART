@@ -19,8 +19,7 @@ and issues JWT access tokens under RFC 9068. In the terms of
 [IHE IUA](https://profiles.ihe.net/ITI/IUA/), it is an Authorization Server
 with the JWT Token option, the Token Introspection option and the
 Authorization Server Metadata option. It does not issue IUA SAML tokens
-and does not publish OASIS SMP documents. The owner decided this on
-2026-11-24 (FerroHEALTH/FerroSMART#858), for three reasons:
+and does not publish OASIS SMP documents, for three reasons:
 
 - D8.2 gives the SAML token and SMP forms as examples. Each heads its
   column "Suggestion for testable implementation (Example)", beside the

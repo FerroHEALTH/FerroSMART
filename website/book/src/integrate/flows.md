@@ -69,7 +69,7 @@ what FerroSMART weighs at each step.
    as the person. The person forgets their recent patients on the
    management page.
 4. **Consent.** The person approves the scopes on the consent page
-   ([clients, roles and consent](../configure/clients.md#consent)).
+   ([the consent rules](../configure/consent.md)).
 5. **The code.** FerroSMART redirects to the app with `code`, the `state` as
    sent, and `iss` (RFC 9207). The code lives 60 seconds and is single use;
    a second use revokes everything the first one issued.
@@ -163,14 +163,10 @@ registered.
 Three behaviours are fixed. Each one protects the person or the deployment,
 and an app works with it in the way described here.
 
-**"Remember this choice" is off by default, for the exact scopes asked.**
-The consent page asks again unless the person ticks "Remember this
-choice", and a remembered choice answers only a later request for the same
-scopes or fewer; a request for more shows the page again. This keeps the
-patient in control of what each app holds (SMART App Launch 2.2.0, Best
-Practices). Ask for the same scopes on each launch, so a remembered choice
-applies, and the person can disconnect the app on the management page
-(`management_endpoint`).
+**A remembered choice covers the scopes asked, or fewer.** Ask for the
+same scopes on each launch, so a choice the person remembered applies; a
+request for more shows the consent page again
+([the consent rules](../configure/consent.md)).
 
 **Access tokens live five minutes.** `access_token_lifetime` defaults to
 five minutes, the same default Keycloak uses. An app that works longer than
@@ -179,8 +175,7 @@ login at the identity provider does, or `offline_access`, one that outlives
 it, and refreshes before the token expires (SMART App Launch 2.2.0, Refresh
 access token). The authorization server metadata lists `refresh_token` in
 `grant_types_supported` (RFC 8414 §2), so a client that reads it knows the
-grant is served. A rotated refresh token presented again within ten seconds
-by the same client gets the same answer, so a retry is safe.
+grant is served.
 
 **FerroSMART's pages refuse to be framed.** Every page answers with
 `frame-ancestors 'none'` and its cookie is `SameSite=Lax`, which keeps
@@ -233,7 +228,8 @@ grant_type=client_credentials
 serves one server alone, and FerroSMART's own issuer is a resource too, for
 the introspection and audit endpoints. The granted scope is the request
 within the client's ceiling, and the response has no refresh token. The
-token's `sub` is the client id.
+token's `sub` is the client id, and it lives at most five minutes, whatever
+`access_token_lifetime` says (SMART App Launch 2.2.0, Backend Services).
 
 ## Refresh, introspection and revocation
 
