@@ -3,40 +3,48 @@
 
 # Summary
 
-[Introduction](introduction.md)
+[FerroSMART](introduction.md)
 
-# Evaluate
-
-- [What FerroSMART is](evaluate/what-ferrosmart-is.md)
-- [Capabilities and conformance](evaluate/conformance.md)
-- [Xt-EHR system authorization](evaluate/xt-ehr-authorization.md)
-- [Licensing](evaluate/licensing.md)
-
-# Install
+# Tutorial
 
 - [Quickstart](install/quickstart.md)
-- [The image](install/image.md)
-- [Identity providers](install/upstream.md)
 
-# Configure
+# How-to guides: integrate
+
+- [Launch an app](integrate/flows.md)
+- [Launch from an EHR](integrate/ehr-launch.md)
+- [Put a server behind FerroSMART](integrate/resource-server.md)
+
+# How-to guides: deploy and operate
+
+- [Run the image](install/image.md)
+- [Log in at OpenID Connect providers](install/upstream.md)
+- [Log in at a SAML 2.0 provider](install/saml.md)
+- [Log in with the EUDI Wallet](install/wallet.md)
+- [Register clients and roles](configure/clients.md)
+- [Rotate keys](operate/keys.md)
+- [Operate and monitor](operate/operations.md)
+
+# Reference
 
 - [Configuration](configure/configuration.md)
-- [Clients, roles and consent](configure/clients.md)
-- [The consent rules](configure/consent.md)
+- [Upstream configuration](configure/upstream-keys.md)
 - [The admin API](configure/admin-api.md)
-
-# Integrate
-
-- [The flows](integrate/flows.md)
-- [The EHR launch API](integrate/ehr-launch.md)
-- [A server behind FerroSMART](integrate/resource-server.md)
-
-# Operate
-
-- [Keys and rotation](operate/keys.md)
+- [Endpoints and conformance](evaluate/conformance.md)
+- [Refusal codes](integrate/refusals.md)
 - [Audit records](operate/audit.md)
-- [Operations and health](operate/operations.md)
+
+# Explanation
+
+- [What FerroSMART is](evaluate/what-ferrosmart-is.md)
+- [How FerroSMART decides a token](explanation/token-decision.md)
+- [The consent rules](configure/consent.md)
+
+# Compliance
+
 - [Security and the CRA](operate/security.md)
+- [Xt-EHR system authorization](evaluate/xt-ehr-authorization.md)
+- [Licensing](evaluate/licensing.md)
 
 ---
 

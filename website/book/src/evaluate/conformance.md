@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# Capabilities and conformance
+# Endpoints and conformance
+
+**For:** integrators and compliance readers who check what FerroSMART implements and how it is tested.
 
 FerroSMART implements
 [SMART App Launch 2.2.0](https://hl7.org/fhir/smart-app-launch/STU2.2/) on
@@ -41,8 +43,8 @@ supports. FerroSMART's App Launch document lists these:
 | `authorize-post` | The authorization endpoint takes the request by `GET` and by `POST` |
 | `client-public` | A public client authenticates with PKCE alone |
 | `client-confidential-symmetric` | A confidential client authenticates with its secret, `client_secret_basic` or `client_secret_post` |
-| `client-confidential-asymmetric` | A confidential client authenticates with a `private_key_jwt` assertion signed `RS384` or `ES384` |
-| `sso-openid-connect` | `openid` and `fhirUser` give the app an ID Token signed `RS256` with the person's `fhirUser` |
+| `client-confidential-asymmetric` | A confidential client authenticates with a `private_key_jwt` assertion signed `RS384`, `ES384`, `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87` |
+| `sso-openid-connect` | `openid` and `fhirUser` give the app an ID Token with the person's `fhirUser`, signed `RS256` or, for a client that registers it, `ML-DSA-65` |
 | `context-ehr-patient`, `context-ehr-encounter` | The patient and encounter of an EHR launch reach the token response |
 | `context-standalone-patient` | The patient picker chooses the patient of a standalone launch, when a resource server can be searched |
 | `context-standalone-encounter` | The picker chooses one of that patient's encounters, at a FHIR server |
@@ -55,10 +57,12 @@ supports. FerroSMART's App Launch document lists these:
 
 The Backend Services document lists `client-confidential-asymmetric`.
 
-Both documents advertise `code_challenge_methods_supported: ["S256"]` and
-never `plain`, `token_endpoint_auth_signing_alg_values_supported:
-["RS384", "ES384"]`, the introspection and revocation endpoints, and, with
-login, `management_endpoint`, where a person sees the apps they allowed
+Every document advertises `token_endpoint_auth_signing_alg_values_supported:
+["RS384", "ES384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]`,
+`dpop_signing_alg_values_supported`, the introspection, revocation and
+registration endpoints. With login it adds
+`code_challenge_methods_supported: ["S256"]` and never `plain`,
+`launch_registration_endpoint` and `management_endpoint`, where a person sees the apps they allowed
 and every app holding live access to their data, and disconnects any of
 them.
 
@@ -68,7 +72,11 @@ them.
 |---|---|---|
 | `GET {issuer}/jwks` | The public keys that sign tokens, as bare JWKs | RFC 7517 §5 |
 | `GET`, `POST {issuer}/authorize` | The authorization endpoint | SMART App Launch 2.2.0; RFC 6749 §3.1 |
-| `GET {issuer}/callback` | The identity provider's redirect back | OpenID Connect Core 1.0 §3.1.2.5 |
+| `POST {issuer}/par` | Pushed authorization requests | RFC 9126 §2 |
+| `GET`, `POST {issuer}/login` | The chooser of identity providers, when a client may use more than one | our own design |
+| `GET {issuer}/callback` | The OpenID Connect provider's redirect back | OpenID Connect Core 1.0 §3.1.2.5 |
+| `GET {issuer}/saml/metadata`, `GET`, `POST {issuer}/saml/acs` | FerroSMART's SAML metadata and its assertion consumer service | SAML 2.0 Metadata §2.4.4; SAML 2.0 Bindings §3.4, §3.5, §3.6 |
+| `GET {issuer}/wallet` and `{issuer}/wallet/...` | The EUDI Wallet login: the page, the request object, the response and the return | OpenID4VP 1.0; OpenID4VC HAIP 1.0 |
 | `GET`, `POST {issuer}/picker` | The patient picker | our own design |
 | `GET`, `POST {issuer}/consent` | The consent page | our own design |
 | `GET`, `POST {issuer}/manage` | The person's remembered consents and every app holding live access, organisation-approved apps included, each with Disconnect | SMART App Launch 2.2.0, `management_endpoint` |
@@ -76,6 +84,9 @@ them.
 | `POST {issuer}/introspect` | Token introspection | RFC 7662 §2 |
 | `POST {issuer}/revoke` | Token revocation | RFC 7009 §2 |
 | `POST {issuer}/launch` | The EHR launch API | our own design |
+| `POST {issuer}/register`, `GET`, `PUT`, `DELETE {issuer}/register/{client_id}` | Client registration and its management | RFC 7591 §3; RFC 7592 §2 |
+| `GET {issuer}/brands` | The User Access Brands Bundle, when `[ferrosmart.brand]` is set | SMART App Launch 2.2.0, User Access Brands and Endpoints |
+| `{issuer}/admin/...` | [The admin API](../configure/admin-api.md), its OpenAPI document at `GET {issuer}/admin/openapi.json` | our own design |
 | `POST {issuer}/backchannel-logout` | The identity provider's logout notice | OpenID Connect Back-Channel Logout 1.0 |
 | `GET {issuer}/frontchannel-logout` | The identity provider's logout notice, in its iframe | OpenID Connect Front-Channel Logout 1.0 |
 | `GET`, `POST {issuer}/logout` | The end-session endpoint, with its confirmation at `{issuer}/logout/confirm` and the provider's return at `{issuer}/logout/return` | OpenID Connect RP-Initiated Logout 1.0 |
@@ -101,7 +112,8 @@ the parameters about that login go there:
 | `acr_values` | An eIDAS level URI is the level the login must reach, asked of the identity provider; a login below it answers `unmet_authentication_requirements` (RFC 9470 §5). Any other value is taken and ignored |
 | `display`, `claims_locales` | Taken without changing the flow |
 
-Every ID Token is signed `RS256` and carries `auth_time`, the time the
+Every ID Token is signed `RS256`, or `ML-DSA-65` for a client whose
+`id_token_signed_response_alg` names it, and carries `auth_time`, the time the
 person authenticated at the identity provider, and `acr`, the eIDAS level
 of that login. FerroSMART has no UserInfo
 endpoint: the ID Token and its `fhirUser` claim identify the person.
@@ -118,19 +130,8 @@ and the architecture records it as its own design:
 - **Scopes.** The granted scope is what the request asks for, narrowed to
   the client's registered ceiling, the scopes the person's roles allow and
   what the person approves ([clients, roles and consent](../configure/clients.md)).
-- **Consent where it protects the person.** A user flow shows the consent
-  page unless the person remembered that choice for that client and
-  resource server, or the administrator's registration answers: for the
-  organisation's professionals, and for an app marked `first_party` its
-  patients too, lasting access included (OpenID Connect Core 1.0
-  §3.1.2.4, "previous administrative consent"). An app of another party
-  always shows a patient the page (SMART App Launch 2.2.0, Best
-  Practices; Regulation (EU) 2025/327 Art 3). A public
-  client without a claimed `https` redirect, and an app's
-  `prompt=consent`, always show the page (RFC 8252 §8.6; OpenID Connect
-  Core 1.0 §3.1.2.1). Every app holding live access can be disconnected on
-  the management page. [The consent rules](../configure/consent.md) lists
-  every case.
+- **Consent where it protects the person.** [The consent
+  rules](../configure/consent.md) list every case with its ground.
 - **`online_access`.** An online refresh token ends when the person's login
   at the identity provider ends, signalled by back-channel or front-channel
   logout, when the person logs out at the end-session endpoint, or after
@@ -151,9 +152,12 @@ and the architecture records it as its own design:
 The CI lane runs the four groups of the kit's STU 2.2 server suite
 (`smart_stu2_2`): the standalone launch, the EHR launch, Backend Services
 and token introspection. FerroSMART runs with Keycloak upstream and
-FerroBRIDGE's FHIR R4 facade as the FHIR server, all over TLS, and every
-test of the suite passes. The lane fails when a result changes, and the
-list of tests it may expect anything other than a pass is empty.
+FerroBRIDGE's FHIR R4 facade as the FHIR server, all over TLS. Every test
+passes but one the kit omits itself for a client that is not public, the
+CORS check of the EHR launch's token request, which groups 1 and 4 run
+with the public client. The lane fails when a result changes, and
+[`app/ferrosmart/inferno/exceptions.tsv`](https://github.com/FerroHEALTH/FerroSMART/blob/main/app/ferrosmart/inferno/exceptions.tsv)
+lists that one exception with its reason.
 
 ## The OpenID Foundation conformance suite in CI
 
@@ -173,3 +177,7 @@ As the relying party, FerroSMART runs from one configuration that names no
 client authentication, and the lane adds the method each module fixes, as
 an administrator sets it for a provider (see
 [Identity providers](../install/upstream.md)).
+
+A third lane runs the suite's OpenID4VP 1.0 and HAIP 1.0 verifier plan
+against FerroSMART's [EUDI Wallet](../install/wallet.md)
+verifier, held to the same `expected.tsv`.

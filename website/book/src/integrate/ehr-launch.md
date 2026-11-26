@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# The EHR launch API
+# Launch from an EHR
+
+**For:** integrators who launch apps from an EHR.
 
 In an EHR launch the EHR hands the app "an opaque handle to the EHR
 context", which the app passes back as `launch`, and "the server will
@@ -38,8 +40,8 @@ FerroSMART's `.well-known/smart-configuration` and RFC 8414 metadata name
 `launch_registration_endpoint` (a member of FerroSMART's own; SMART defines
 none), authenticated with the client assertion it would send to the token
 endpoint: `iss` and `sub` its `client_id`, `aud` FerroSMART's token URL or
-issuer, `exp` at most five minutes ahead, a fresh `jti`, signed `RS384` or
-`ES384`, `typ` `JWT`.
+issuer, `exp` at most five minutes ahead, a fresh `jti`, signed `RS384`,
+`ES384` or ML-DSA (RFC 9964), `typ` `JWT`.
 
 ```http
 POST /launch HTTP/1.1

@@ -3,6 +3,8 @@
 
 # Security and the CRA
 
+**For:** compliance readers and operators: reporting a vulnerability, supported versions, and how the tokens are protected.
+
 This page says how to report a vulnerability, which releases receive
 fixes, what each release proves, and how FerroSMART protects the tokens it
 issues.
@@ -65,7 +67,7 @@ Netherlands. The family book holds the
 | A stolen refresh token | Rotation on every use, a reused token revoking its grant, binding to the client, idle expiry |
 | A database leak | Codes, refresh tokens and launch values stored as their SHA-256 |
 | Scope escalation | The client's ceiling, the roles and the consent narrow every grant; a refresh never widens it |
-| An identity provider that misbehaves | One configured issuer, its ID Token checked by OpenID Connect Core 1.0 §3.1.3.7, and only the mapped claims read |
+| An identity provider that misbehaves | Each provider has its own issuer, and a person's `sub` is derived under it; an ID Token is checked by OpenID Connect Core 1.0 §3.1.3.7, a SAML response by its signature, audience and `InResponseTo`, a wallet presentation by its issuer chain, status and key binding; only the mapped claims are read |
 | Credentials in logs | No token, code, secret or assertion in a log line or an error |
 
 The architecture's threat model, with the specification behind each row, is

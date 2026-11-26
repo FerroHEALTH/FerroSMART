@@ -3,6 +3,8 @@
 
 # Licensing
 
+**For:** decision makers and anyone who redistributes FerroSMART.
+
 FerroSMART is licensed under the
 [Business Source License 1.1](https://github.com/FerroHEALTH/FerroSMART/blob/main/LICENSE),
 with Cadasto B.V. as the Licensor. The repository's `LICENSE` file holds

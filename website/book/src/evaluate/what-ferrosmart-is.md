@@ -3,6 +3,8 @@
 
 # What FerroSMART is
 
+**For:** anyone deciding whether FerroSMART fits: decision makers, compliance readers and architects.
+
 FerroSMART is the authorization server of the
 [SMART App Launch 2.2](https://hl7.org/fhir/smart-app-launch/STU2.2/)
 specification, with OAuth 2.0 and OpenID Connect underneath. It issues the
@@ -46,10 +48,12 @@ at your identity provider, and FerroSMART issues the SMART tokens.
 ## What it is not
 
 - **Not an identity provider.** FerroSMART keeps no password and draws no
-  login form. It is an OpenID Connect client of one provider you name, and
-  reads only the claims you map: the person, their roles and their
-  `fhirUser`. Keycloak, ZITADEL, Microsoft Entra ID and Okta each have a
-  tested setup ([identity providers](../install/upstream.md)).
+  login form. A person logs in at a provider you configure: an OpenID
+  Connect provider, a SAML 2.0 identity provider or their EUDI Wallet, and
+  you may configure several. FerroSMART reads only the claims you map: the
+  person, their roles and their `fhirUser`. Keycloak, ZITADEL, Microsoft
+  Entra ID and Okta each have a tested setup
+  ([identity providers](../install/upstream.md)).
 - **Not a clinical data store.** FerroSMART holds clients, grants, codes,
   token records, consents and its audit records in PostgreSQL. It reads
   patient data only in the picker, as the signed-in person, and keeps none

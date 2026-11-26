@@ -3,6 +3,8 @@
 
 # Xt-EHR system authorization
 
+**For:** compliance readers who compare FerroSMART with the Xt-EHR system authorization assertions.
+
 Xt-EHR deliverable D8.2 (2026-05-19), §5.1.2, suggests testable forms for
 the system authorization requirements that deliverable D5.1 sets for the
 interoperability component of an EHR system. This page compares each of
@@ -17,8 +19,7 @@ and issues JWT access tokens under RFC 9068. In the terms of
 [IHE IUA](https://profiles.ihe.net/ITI/IUA/), it is an Authorization Server
 with the JWT Token option, the Token Introspection option and the
 Authorization Server Metadata option. It does not issue IUA SAML tokens
-and does not publish OASIS SMP documents. The owner decided this on
-2026-11-24 (FerroHEALTH/FerroSMART#858), for three reasons:
+and does not publish OASIS SMP documents, for three reasons:
 
 - D8.2 gives the SAML token and SMP forms as examples. Each heads its
   column "Suggestion for testable implementation (Example)", beside the
@@ -37,7 +38,7 @@ where the exchange between national contact points uses them.
 flowchart LR
     C[Consumer EHR system] -- "1. RFC 8414 metadata (ITI-103)" --> S[FerroSMART]
     C -- "2. client credentials, private_key_jwt (ITI-71)" --> S
-    S -- "3. RS256 JWT access token, RFC 9068" --> C
+    S -- "3. JWT access token, RFC 9068" --> C
     C -- "4. Bearer token" --> P[Producer EHR system]
     P -- "5. key set, or RFC 7662 introspection (ITI-102)" --> S
 ```
@@ -76,7 +77,7 @@ access.
 | `TA-api-producer-authProvideToken-01` | Issue a token per IHE IUA as a SAML token of the IUA SAML Token option, with the scopes authorized for the consumer | Meets the normative requirement with the IUA JWT Token option. A registered consumer authenticates with a `private_key_jwt` assertion (RFC 7523, SMART Backend Services) or its secret, and gets a JWT access token whose `scope` is the request within the client's registered ceiling (ITI-71, client credentials). The token is a JWT, never a SAML assertion. |
 | `TA-api-producer-authProvideToken-02` | Refuse invalid, expired, revoked or unregistered credentials with an IUA error response, issuing no token | Meets it. Every failed client authentication answers `invalid_client` (RFC 6749 §5.2), the error IUA ITI-71 takes from OAuth 2.1 §5.3, and no token is issued. An assertion's `jti` is accepted once. |
 | `TA-api-producer-authProvideToken-03` | Deny scopes not permitted for the consumer with an IUA authorization failure, and never grant beyond them | Meets it, with one difference. FerroSMART grants the requested scopes that fall within the client's ceiling and leaves out the others (SMART Backend Services, Evaluate Requested Access). When none fall within it, it answers `invalid_scope`. A token never carries a scope beyond the ceiling. |
-| `TA-api-producer-authProvideToken-04` | Sign the SAML token per IUA, with issuer, audience, validity and subject, in the IUA XML schema | Meets the token content in the JWT form: an RS256 JWS (`typ` `at+jwt`) with `iss`, `aud`, `sub`, `client_id`, `jti`, `iat`, `exp` and `scope`, the claims IUA §3.71.4.2.2.1 requires. No SAML assertion or XML schema is involved. FerroSMART signs with RSA keys only and never HS256, although IUA lists HS256 as an algorithm the JWT option shall support. |
+| `TA-api-producer-authProvideToken-04` | Sign the SAML token per IUA, with issuer, audience, validity and subject, in the IUA XML schema | Meets the token content in the JWT form: a JWS signed `RS256`, or `ML-DSA-65` for a client that registers it (`typ` `at+jwt`), with `iss`, `aud`, `sub`, `client_id`, `jti`, `iat`, `exp` and `scope`, the claims IUA §3.71.4.2.2.1 requires. No SAML assertion or XML schema is involved. FerroSMART signs with RSA or ML-DSA keys and never HS256, although IUA lists HS256 as an algorithm the JWT option shall support. |
 | `TA-api-producer-authProvideToken-05` | Refuse an expired SAML token with an IUA token-expired error | Meets it for its JWT tokens. A resource server using `ferrohealth-smart` refuses a token past `exp` with `401`, `error="invalid_token"` and `error_description="expired"` (RFC 6750 §3.1). FerroSMART's introspection answers `active: false` for it (RFC 7662 §2.2, ITI-102). |
 
 ### `api-consumer-authObtainToken`

@@ -1,12 +1,16 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# The flows
+# Launch an app
+
+**For:** integrators who write a SMART app.
 
 An app finds FerroSMART through the FHIR or openEHR server it wants to
 reach: the server's own `.well-known/smart-configuration` names FerroSMART's
 `authorization_endpoint` and `token_endpoint`. Everything below follows
 [SMART App Launch 2.2.0](https://hl7.org/fhir/smart-app-launch/STU2.2/).
+[How FerroSMART decides a token](../explanation/token-decision.md) explains
+what FerroSMART weighs at each step.
 
 ## The standalone launch
 
@@ -65,7 +69,7 @@ reach: the server's own `.well-known/smart-configuration` names FerroSMART's
    as the person. The person forgets their recent patients on the
    management page.
 4. **Consent.** The person approves the scopes on the consent page
-   ([clients, roles and consent](../configure/clients.md#consent)).
+   ([the consent rules](../configure/consent.md)).
 5. **The code.** FerroSMART redirects to the app with `code`, the `state` as
    sent, and `iss` (RFC 9207). The code lives 60 seconds and is single use;
    a second use revokes everything the first one issued.
@@ -159,14 +163,10 @@ registered.
 Three behaviours are fixed. Each one protects the person or the deployment,
 and an app works with it in the way described here.
 
-**"Remember this choice" is off by default, for the exact scopes asked.**
-The consent page asks again unless the person ticks "Remember this
-choice", and a remembered choice answers only a later request for the same
-scopes or fewer; a request for more shows the page again. This keeps the
-patient in control of what each app holds (SMART App Launch 2.2.0, Best
-Practices). Ask for the same scopes on each launch, so a remembered choice
-applies, and the person can disconnect the app on the management page
-(`management_endpoint`).
+**A remembered choice covers the scopes asked, or fewer.** Ask for the
+same scopes on each launch, so a choice the person remembered applies; a
+request for more shows the consent page again
+([the consent rules](../configure/consent.md)).
 
 **Access tokens live five minutes.** `access_token_lifetime` defaults to
 five minutes, the same default Keycloak uses. An app that works longer than
@@ -175,8 +175,7 @@ login at the identity provider does, or `offline_access`, one that outlives
 it, and refreshes before the token expires (SMART App Launch 2.2.0, Refresh
 access token). The authorization server metadata lists `refresh_token` in
 `grant_types_supported` (RFC 8414 §2), so a client that reads it knows the
-grant is served. A rotated refresh token presented again within ten seconds
-by the same client gets the same answer, so a retry is safe.
+grant is served.
 
 **FerroSMART's pages refuse to be framed.** Every page answers with
 `frame-ancestors 'none'` and its cookie is `SameSite=Lax`, which keeps
@@ -187,8 +186,9 @@ or tab, and that window returns to the app's redirect URI as usual.
 
 ## The tokens
 
-An access token is an RFC 9068 JWT, `typ` `at+jwt`, signed `RS256` with a
-key published at `{issuer}/jwks`. It carries `iss`, `sub`, `aud`,
+An access token is an RFC 9068 JWT, `typ` `at+jwt`, signed with a key
+published at `{issuer}/jwks`: `RS256`, or `ML-DSA-65` (RFC 9964) for a
+client whose `id_token_signed_response_alg` names it. It carries `iss`, `sub`, `aud`,
 `client_id`, `iat`, `exp`, `jti` and `scope`, and the context the response
 carried: `patient`, `encounter`, `fhirUser`, and `ehrId` at an openEHR
 server. Its `aud` is the one base the request named. It lives
@@ -196,15 +196,15 @@ server. Its `aud` is the one base the request named. It lives
 
 A person's `sub` is pairwise: derived from the identity provider's issuer
 and `sub`, so two providers never collide and the provider's identifier
-never reaches a resource server. The ID Token, signed `RS256`, carries
+never reaches a resource server. The ID Token, signed with the same algorithm, carries
 `iss`, `sub`, `aud`, `exp`, `iat`, `nonce` when the app sent one,
 `auth_time`, and `fhirUser` when `fhirUser` was granted. When the client's
 ceiling lists `profile` or `email` and the app asks for them, the ID Token
 also carries `name`, `preferred_username`, `given_name`, `family_name`
 and `birthdate` (`profile`) and `email` and `email_verified` (`email`) as
 the identity provider sent them; a wallet login adds the PID's
-`place_of_birth` and `nationalities` under `profile`. That lets a
-standard OpenID Connect library can show who is signed in. The `sub`
+`place_of_birth` and `nationalities` under `profile`. A standard
+OpenID Connect library can then show who is signed in. The `sub`
 stays pairwise.
 
 ## Backend Services
@@ -228,7 +228,8 @@ grant_type=client_credentials
 serves one server alone, and FerroSMART's own issuer is a resource too, for
 the introspection and audit endpoints. The granted scope is the request
 within the client's ceiling, and the response has no refresh token. The
-token's `sub` is the client id.
+token's `sub` is the client id, and it lives at most five minutes, whatever
+`access_token_lifetime` says (SMART App Launch 2.2.0, Backend Services).
 
 ## Refresh, introspection and revocation
 

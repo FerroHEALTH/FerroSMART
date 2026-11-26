@@ -3,6 +3,8 @@
 
 # The consent rules
 
+**For:** compliance readers, operators and integrators who need to know when a person sees the consent page and why.
+
 This page is the whole rule set for FerroSMART's consent page: who sees
 it, when, and which text each rule rests on. How to register the clients
 and configure the roles the rules read is on
@@ -86,12 +88,32 @@ ends lasting access on the management page, where it is listed with how
 long it lasts. "Remember this choice" is off unless the person remembered a
 choice for the app before.
 
+FerroSMART draws the page itself, with the deployment's `[ferrosmart] name`
+and the `consent_text` of `[ferrosmart.branding]`. It shows the app's logo
+and links to its home page, privacy policy and terms when the client
+registers them, and reads each scope in words, with plain words before the
+common FHIR resource types, such as "Measurements and test results
+(Observation)".
+
 ## After the decision
 
 - Every code's audit record names its basis: `page`, `remembered`,
   `administrative` or `first-party` ([Audit records](../operate/audit.md)).
-- The person sees every remembered consent and every app with live access
-  on the management page, and disconnects any of them there.
+- A remembered choice holds for that client, that resource server (the
+  request's `aud`) and that scope set. A later request whose offered scopes
+  it covers goes back to the app with a code at once.
+- The management page at `{issuer}/manage`, the SMART
+  `management_endpoint`, lists every remembered consent and every app that
+  holds live access to the person's data (a refresh token, or an access
+  token not yet expired), with how long each stays connected. Disconnect
+  forgets the remembered consent and revokes every grant the app holds for
+  the person, with every token under them, at once; its record is
+  `consent-withdrawn`. For a first-party app the registration stands.
 - An administrator who clears a client's `first_party`, through the
   [admin API](admin-api.md) or `ferrosmart client apply`, revokes at once
   every token issued on it with no page.
+
+![The management page, titled "Apps you allowed": one app that stays connected after sign-out, the scopes it holds in words, and the Disconnect button](../integrate/img/manage.png)
+
+The management page, with one app that keeps access.
+[Dark theme](../integrate/img/manage-dark.png).
