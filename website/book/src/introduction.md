@@ -1,34 +1,43 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# Introduction
+# FerroSMART
 
 FerroSMART is a SMART App Launch 2.2 authorization server. A health app
 sends a person to FerroSMART to ask for access to a FHIR or openEHR server.
-FerroSMART sends them on to the identity provider your organisation already
-runs to log in, shows them what the app asks for, and gives the app an
-access token the server checks. The person's password never reaches
-FerroSMART.
-
-This book is for two readers:
-
-- **The operator**, who runs FerroSMART: the [quickstart](install/quickstart.md),
-  the [image](install/image.md), the [identity provider](install/upstream.md)
-  upstream, the [configuration](configure/configuration.md), the
-  [keys](operate/keys.md), the [audit records](operate/audit.md) and
-  [day-to-day operations](operate/operations.md).
-- **The integrator**, who writes an app, an EHR or a resource server: the
-  [flows](integrate/flows.md), the [EHR launch API](integrate/ehr-launch.md)
-  and [a server behind FerroSMART](integrate/resource-server.md).
+FerroSMART sends them to the login your organisation already runs, shows
+them what the app asks for, and gives the app an access token the server
+checks. The person's password never reaches FerroSMART.
 
 The newest release is v{{version:ferrosmart}}. Every page describes what
 the code on `main` does, and the [release notes](changelog.md) list each
-change. The design of record,
-with the specification section behind every decision, is
-[`docs/architecture.md`](https://github.com/FerroHEALTH/FerroSMART/blob/main/docs/architecture.md)
-§13 in the repository.
+change.
 
-FerroSMART is one of the
-[FerroHEALTH](https://ferrohealth.eu/) products. The pages that hold for
+## Start here
+
+| You are | You want to | Start with | Then |
+|---|---|---|---|
+| An integrator of a SMART app | Launch an app and get a token | [The flows](integrate/flows.md) | [Launch from an EHR](integrate/ehr-launch.md), [how FerroSMART decides a token](explanation/token-decision.md) |
+| An integrator of a FHIR or openEHR server | Accept FerroSMART's tokens | [A server behind FerroSMART](integrate/resource-server.md) | [Refusal codes](integrate/refusals.md), [how FerroSMART decides a token](explanation/token-decision.md) |
+| An operator | Run FerroSMART | [Quickstart](install/quickstart.md) | [Identity providers](install/upstream.md), [clients, roles and consent](configure/clients.md), [configuration](configure/configuration.md), [operate and monitor](operate/operations.md) |
+| A compliance reader | Decide whether FerroSMART meets your obligations | [What FerroSMART is](evaluate/what-ferrosmart-is.md) | [How FerroSMART decides a token](explanation/token-decision.md), [the consent rules](configure/consent.md), [security and the CRA](operate/security.md), [Xt-EHR system authorization](evaluate/xt-ehr-authorization.md) |
+
+## How the book is organised
+
+The book follows the [Diátaxis](https://diataxis.fr/) framework:
+
+- **Tutorial:** the quickstart, one run from nothing to a working server.
+- **How-to guides:** one task each, for integrators and for operators.
+- **Reference:** the configuration, the APIs, the endpoints, the refusal
+  codes and the audit records, to look things up.
+- **Explanation:** why FerroSMART decides as it does.
+- **Compliance:** security, the Cyber Resilience Act, Xt-EHR and the
+  licence.
+
+The design of record, with the specification section behind every
+decision, is
+[`docs/architecture.md`](https://github.com/FerroHEALTH/FerroSMART/blob/main/docs/architecture.md)
+§13 in the repository. FerroSMART is one of the
+[FerroHEALTH](https://ferrohealth.eu/) products; the pages that hold for
 every product (the manufacturer, the security policy, the Cyber Resilience
 Act and the EHDS) are in the [family book](https://ferrohealth.eu/docs/).

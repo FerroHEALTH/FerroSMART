@@ -3,6 +3,8 @@
 
 # The consent rules
 
+**For:** compliance readers, operators and integrators who need to know when a person sees the consent page and why.
+
 This page is the whole rule set for FerroSMART's consent page: who sees
 it, when, and which text each rule rests on. How to register the clients
 and configure the roles the rules read is on

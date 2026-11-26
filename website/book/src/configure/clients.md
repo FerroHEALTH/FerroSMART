@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# Clients, roles and consent
+# Register clients and roles
+
+**For:** operators and administrators who register apps and map roles to scopes.
 
 Who may ask for what is content, never code. Three things decide the scope
 an app gets, and the narrowest wins

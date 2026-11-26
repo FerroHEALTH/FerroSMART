@@ -3,6 +3,8 @@
 
 # The admin API
 
+**For:** administrators and the tools they write against the registry.
+
 The admin API and the registration endpoint change the client registry
 while FerroSMART runs, so a new app, a changed redirect URI or a disabled
 client needs no restart. They write the PostgreSQL store every replica

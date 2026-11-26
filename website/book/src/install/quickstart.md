@@ -3,6 +3,8 @@
 
 # Quickstart
 
+**For:** operators trying FerroSMART for the first time, on one machine.
+
 The quickstart is one file, `compose.yaml`, which runs the FerroSMART image
 beside PostgreSQL. It needs Docker with Compose and no checkout of the
 repository. It pulls `ghcr.io/ferrohealth/ferrosmart` at the release the

@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# Operations and health
+# Operate and monitor
+
+**For:** operators who run FerroSMART day to day.
 
 FerroSMART is one binary with a few commands, health routes for an
 orchestrator, and all of its state in PostgreSQL, so running it is mostly

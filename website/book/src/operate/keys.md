@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# Keys and rotation
+# Rotate keys
+
+**For:** operators who create and rotate FerroSMART's keys.
 
 FerroSMART holds three rings of JWS keys, each for one purpose, so a key
 of one kind signs nothing the other is trusted for (RFC 8725 §3.12), and

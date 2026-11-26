@@ -3,6 +3,8 @@
 
 # Audit records
 
+**For:** operators and compliance readers who read FerroSMART's audit records.
+
 FerroSMART records every login and every token request as a FHIR R4
 `AuditEvent`, in its own PostgreSQL store. An issued token and its record
 commit in one transaction; a refusal or a login commits its record alone.

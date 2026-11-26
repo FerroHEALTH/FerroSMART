@@ -3,6 +3,8 @@
 
 # What FerroSMART is
 
+**For:** anyone deciding whether FerroSMART fits: decision makers, compliance readers and architects.
+
 FerroSMART is the authorization server of the
 [SMART App Launch 2.2](https://hl7.org/fhir/smart-app-launch/STU2.2/)
 specification, with OAuth 2.0 and OpenID Connect underneath. It issues the

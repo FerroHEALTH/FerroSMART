@@ -3,6 +3,8 @@
 
 # Security and the CRA
 
+**For:** compliance readers and operators: reporting a vulnerability, supported versions, and how the tokens are protected.
+
 This page says how to report a vulnerability, which releases receive
 fixes, what each release proves, and how FerroSMART protects the tokens it
 issues.

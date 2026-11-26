@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# Identity providers
+# Log in at OpenID Connect providers
+
+**For:** operators who log people in at an OpenID Connect provider.
 
 A person logs in at an identity provider upstream of FerroSMART: an
 OpenID Connect provider, of which FerroSMART is a client, or a SAML 2.0
@@ -10,8 +12,8 @@ Connect provider that publishes a discovery document works, and any SAML
 2.0 provider of the Web Browser SSO profile; no code in FerroSMART knows a
 vendor or a country. Four OpenID Connect providers have a tested setup,
 and each section below says what to configure at the provider and in
-`[[ferrosmart.upstream]]`. [SAML 2.0](#saml-20) and [the EUDI Wallet](#the-eudi-wallet)
-close the page.
+`[[ferrosmart.upstream]]`. [SAML 2.0](saml.md) and [the EUDI Wallet](wallet.md)
+have pages of their own.
 
 ## What every provider needs
 
@@ -61,7 +63,7 @@ An entry names the vendor it is set up for as `preset`, and the preset
 brings that setup's scopes, claims and assertion algorithm; each provider
 below lists what its preset holds. A key set in the entry's
 `[ferrosmart.upstream.oidc]` table wins over the preset
-([the keys](../configure/configuration.md#ferrosmartupstream)).
+([the keys](../configure/upstream-keys.md#ferrosmartupstream)).
 
 FerroSMART authenticates to a provider with `private_key_jwt` (OpenID
 Connect Core 1.0 §9) by default: a JWT signed by its assertion key,
@@ -282,161 +284,8 @@ next key's JWK to the integration before the ring makes it current.
 
 ## SAML 2.0
 
-FerroSMART is a service provider of the OASIS SAML 2.0 Web Browser SSO
-profile, with the standard bindings and no national profile. Configure
-FerroSMART once as a service provider in `[ferrosmart.saml]`, then one
-entry with a `[ferrosmart.upstream.saml]` table per identity provider
-([the keys](../configure/configuration.md#ferrosmartsaml)).
-
-At the identity provider, register FerroSMART by its metadata at
-`{issuer}/saml/metadata` (`ferrosmart upstream registration <name>` prints
-it with the entity IDs, the assertion consumer service and the attributes
-the entry reads). It names:
-
-- FerroSMART's entity ID and its signing certificate: every
-  `AuthnRequest` is signed;
-- one encryption certificate per decryption key, for an encrypted
-  assertion, identifier or attribute;
-- the assertion consumer service `{issuer}/saml/acs` under HTTP-POST and
-  HTTP-Artifact.
-
-At the provider, release:
-
-- a persistent name identifier, or an attribute with the person's
-  identifier named by `subject_attribute`; a transient name identifier is
-  refused, since it names the person for one login only;
-- the attributes the `claims` table maps, such as the display name, the
-  roles that [`[[ferrosmart.role]]`](../configure/clients.md#roles) maps to
-  scopes, and the person's `fhirUser` or an identifier a
-  [`fhirUser` lookup](../configure/configuration.md#ferrosmartresource) searches by;
-- an authentication context class among `authn_contexts`, which lists the
-  classes at or above the minimum assurance you accept.
-
-```toml
-[ferrosmart.saml]
-signing_key_file = "/run/secrets/saml-signing.pem"
-signing_certificate_file = "/run/secrets/saml-signing.crt"
-
-[[ferrosmart.saml.decryption]]
-key_file = "/run/secrets/saml-decryption.pem"
-certificate_file = "/run/secrets/saml-decryption.crt"
-
-[[ferrosmart.upstream]]
-name = "saml-idp"
-label = "Your organisation's login"
-
-[ferrosmart.upstream.saml]
-entity_id = "https://idp.example.org/saml"
-metadata_url = "https://idp.example.org/saml/metadata"
-name_id_format = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"
-authn_contexts = ["urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"]
-fhir_user_claim = "fhir_user"
-role_claims = ["roles"]
-
-[ferrosmart.upstream.saml.claims]
-name = "urn:oid:2.16.840.1.113730.3.1.241"
-roles = "urn:oid:1.3.6.1.4.1.5923.1.1.1.7"
-fhir_user = "fhirUser"
-```
-
-FerroSMART refuses a response that is not signed by a key of the
-provider's metadata, that answers no request it sent or another one, that
-names another audience, or whose authentication context is not one you
-accept, and it admits each assertion once. Each outcome is a login record
-in the [audit](../operate/audit.md) that names the check that failed. For
-the HTTP-Artifact binding, set `response_binding = "artifact"` and give
-FerroSMART a TLS client identity in `[ferrosmart.saml.tls]`: it resolves
-the artifact at the provider's artifact resolution service over mutual
-TLS. Single Logout is not taken: a SAML login's grants end with their own
-lifetimes.
+A SAML 2.0 identity provider has [its own page](saml.md).
 
 ## The EUDI Wallet
 
-A person can log in by presenting the person identification data (PID) in
-their European Digital Identity Wallet. FerroSMART is the verifier, under
-the OpenID4VC High Assurance Interoperability Profile and the EU wallet
-profile: it sends the browser to the wallet with a signed request, the
-wallet posts the person's PID back encrypted, and the browser that began
-the login brings the answer back. The entry has an
-`[ferrosmart.upstream.openid4vp]` table
-([the keys](../configure/configuration.md#ferrosmartupstream)).
-
-Before the first login you need, from your Member State's registrar of
-wallet-relying parties:
-
-- a wallet-relying party access certificate with its P-256 key, which signs
-  every request;
-- a registration certificate naming the attributes you may ask for;
-- the trust anchors of the PID providers you accept.
-
-`ferrosmart upstream registration <name>` prints what the registrar
-records: the request URI, the response URI `{issuer}/wallet/response`, the
-redirect URI `{issuer}/wallet/complete`, the credential formats, and for
-each format the credential or document type and the attributes.
-
-The request asks for the PID as an SD-JWT VC or as an ISO mdoc, and the
-wallet presents the one it holds. Both name the same person, so the login
-is the same either way. Set `credential_formats` to ask for one format
-only.
-
-The browser first shows a page with an "Open your wallet" link. Where the
-browser has the W3C Digital Credentials API, a press asks the browser for
-the PID, which offers a wallet on the device or on a phone nearby; any
-other browser follows the link to the wallet app. Set
-`digital_credentials_api = false` to send the browser straight to the
-wallet.
-
-```toml
-[[ferrosmart.upstream]]
-name = "wallet"
-label = "EUDI Wallet"
-
-[ferrosmart.upstream.openid4vp]
-access_certificate_file = "/run/secrets/wrp-access.pem"
-access_key_file = "/run/secrets/wrp-access-key.pem"
-registration_certificate_file = "/run/secrets/wrp-registration.jwt"
-issuer_anchor_files = ["/run/secrets/pid-providers.pem"]
-
-[[ferrosmart.resource]]
-base = "https://ehr.example.org/fhir"
-
-[[ferrosmart.resource.fhir_user_lookup]]
-resource_type = "Patient"
-claim = "personal_administrative_number"
-system = "http://fhir.nl/fhir/NamingSystem/bsn"
-```
-
-The PID's administrative number names the person, and the `fhirUser`
-lookup finds their record by it. A PID without one is refused, since
-FerroSMART does not match people by name and birth date.
-
-With a patient index such as FerroPIX, the index resolves the person
-instead. `identifier_systems` names the identifier system of each issuing
-country's administrative numbers, and the FHIR server's `patient_index`
-names the index and the system of the server's own patients there.
-FerroSMART asks the index by PIXm ITI-83 (or PDQm ITI-78 with
-`transaction = "pdqm"`) for the person's identifier in that system, as
-itself with the scope `system/Patient.rs`, and then searches the FHIR
-server for it as the person. Exactly one patient at each step is the
-person's `fhirUser` and the app's `patient`; no patient or several refuse
-the launch, and the app gets `access_denied`.
-
-```toml
-[ferrosmart.upstream.openid4vp]
-# ...
-identifier_systems = { NL = "http://fhir.nl/fhir/NamingSystem/bsn" }
-
-[[ferrosmart.resource]]
-base = "https://ehr.example.org/fhir"
-
-[ferrosmart.resource.patient_index]
-base = "https://pix.example.org/fhir"
-system = "urn:oid:2.16.840.1.113883.2.4.6.3.1"
-```
-
-FerroSMART
-refuses a presentation whose issuer does not chain to an anchor, whose
-type was not asked for, that has expired or been revoked, whose key
-binding does not hold, whose nonce was answered before, or that leaves out
-a claim asked for. Each refusal is a login record in the
-[audit](../operate/audit.md) that names the reason.
+The EUDI Wallet login has [its own page](wallet.md).

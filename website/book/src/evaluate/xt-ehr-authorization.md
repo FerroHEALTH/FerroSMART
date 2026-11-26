@@ -3,6 +3,8 @@
 
 # Xt-EHR system authorization
 
+**For:** compliance readers who compare FerroSMART with the Xt-EHR system authorization assertions.
+
 Xt-EHR deliverable D8.2 (2026-05-19), §5.1.2, suggests testable forms for
 the system authorization requirements that deliverable D5.1 sets for the
 interoperability component of an EHR system. This page compares each of

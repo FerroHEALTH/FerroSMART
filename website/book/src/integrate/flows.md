@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# The flows
+# Launch an app
+
+**For:** integrators who write a SMART app.
 
 An app finds FerroSMART through the FHIR or openEHR server it wants to
 reach: the server's own `.well-known/smart-configuration` names FerroSMART's

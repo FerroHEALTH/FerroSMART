@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# The image
+# Run the image
+
+**For:** operators who deploy the container image.
 
 FerroSMART ships as `ghcr.io/ferrohealth/ferrosmart`, for `linux/amd64` and
 `linux/arm64`, from v0.1.0 on. The image is one static

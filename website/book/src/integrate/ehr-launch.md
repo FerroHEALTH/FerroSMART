@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# The EHR launch API
+# Launch from an EHR
+
+**For:** integrators who launch apps from an EHR.
 
 In an EHR launch the EHR hands the app "an opaque handle to the EHR
 context", which the app passes back as `launch`, and "the server will

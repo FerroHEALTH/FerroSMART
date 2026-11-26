@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Cadasto B.V. -->
 <!-- SPDX-License-Identifier: BUSL-1.1 -->
 
-# Capabilities and conformance
+# Endpoints and conformance
+
+**For:** integrators and compliance readers who check what FerroSMART implements and how it is tested.
 
 FerroSMART implements
 [SMART App Launch 2.2.0](https://hl7.org/fhir/smart-app-launch/STU2.2/) on
@@ -188,5 +190,5 @@ an administrator sets it for a provider (see
 [Identity providers](../install/upstream.md)).
 
 A third lane runs the suite's OpenID4VP 1.0 and HAIP 1.0 verifier plan
-against FerroSMART's [EUDI Wallet](../install/upstream.md#the-eudi-wallet)
+against FerroSMART's [EUDI Wallet](../install/wallet.md)
 verifier, held to the same `expected.tsv`.
