@@ -13,6 +13,7 @@ use super::{SessionError, Sessions};
 use crate::clock::ManualClock;
 use crate::config::{SessionSection, StoreKind};
 use crate::cookies::CookieNames;
+use crate::justification::{Justified, MAX_JUSTIFICATIONS};
 use crate::record::{Credential, Held, SignedIn};
 use crate::return_path::ReturnPath;
 
@@ -703,4 +704,146 @@ fn a_session_preference_carries_no_max_age_and_reads_back() {
             "{kind:?}"
         );
     }
+}
+
+#[test]
+fn a_justification_is_kept_for_its_object_until_it_ends() {
+    let (sessions, now) = store(StoreKind::Memory);
+    let cookie = sessions
+        .establish(&HeaderMap::new(), signed_in())
+        .expect("established");
+    let headers = sent(&cookie);
+    let kept = sessions
+        .justify(
+            &headers,
+            "ehr-1",
+            "TREAT",
+            Secret::new("synthetic reason"),
+            Duration::from_secs(45),
+        )
+        .expect("usable");
+    assert_eq!(kept, Justified::Kept(START + 45));
+    let held = sessions
+        .justification(&headers, "ehr-1")
+        .expect("usable")
+        .expect("kept");
+    assert_eq!(held.purpose(), "TREAT");
+    assert_eq!(held.reason().expose(), "synthetic reason");
+    assert_eq!(held.ends_at(), START + 45);
+    assert!(
+        !format!("{held:?}").contains("synthetic reason"),
+        "the reason never reaches a Debug rendering"
+    );
+    assert!(
+        sessions
+            .justification(&headers, "ehr-2")
+            .expect("usable")
+            .is_none(),
+        "a justification covers its one object"
+    );
+    now.advance(45);
+    assert!(
+        sessions
+            .justification(&headers, "ehr-1")
+            .expect("usable")
+            .is_none(),
+        "a justification ends at its end time"
+    );
+}
+
+#[test]
+fn a_justification_ends_on_request_and_with_its_session() {
+    let (sessions, _now) = store(StoreKind::Memory);
+    let cookie = sessions
+        .establish(&HeaderMap::new(), signed_in())
+        .expect("established");
+    let headers = sent(&cookie);
+    let justify = |object: &str| {
+        sessions
+            .justify(
+                &headers,
+                object,
+                "ETREAT",
+                Secret::new("synthetic"),
+                Duration::from_secs(60),
+            )
+            .expect("usable")
+    };
+    justify("ehr-1");
+    sessions
+        .end_justification(&headers, "ehr-1")
+        .expect("usable");
+    assert!(
+        sessions
+            .justification(&headers, "ehr-1")
+            .expect("usable")
+            .is_none()
+    );
+    justify("ehr-2");
+    sessions.end(&headers).expect("ended");
+    assert!(
+        sessions
+            .justification(&headers, "ehr-2")
+            .expect("usable")
+            .is_none(),
+        "a justification ends with its session"
+    );
+}
+
+#[test]
+fn a_session_keeps_a_bounded_number_of_justifications() {
+    let (sessions, _now) = store(StoreKind::Memory);
+    let cookie = sessions
+        .establish(&HeaderMap::new(), signed_in())
+        .expect("established");
+    let headers = sent(&cookie);
+    for (index, lifetime) in (0..=MAX_JUSTIFICATIONS).zip(1_u64..) {
+        sessions
+            .justify(
+                &headers,
+                &format!("object-{index}"),
+                "TREAT",
+                Secret::new("synthetic"),
+                Duration::from_mins(lifetime),
+            )
+            .expect("usable");
+    }
+    assert!(
+        sessions
+            .justification(&headers, "object-0")
+            .expect("usable")
+            .is_none(),
+        "the one that ends first is dropped"
+    );
+    assert!(
+        sessions
+            .justification(&headers, &format!("object-{MAX_JUSTIFICATIONS}"))
+            .expect("usable")
+            .is_some()
+    );
+}
+
+#[test]
+fn a_sealed_store_keeps_no_justification() {
+    let (sessions, _now) = store(StoreKind::Sealed);
+    let cookie = sessions
+        .establish(&HeaderMap::new(), signed_in())
+        .expect("established");
+    let headers = sent(&cookie);
+    let kept = sessions
+        .justify(
+            &headers,
+            "ehr-1",
+            "TREAT",
+            Secret::new("synthetic"),
+            Duration::from_secs(60),
+        )
+        .expect("usable");
+    assert_eq!(kept, Justified::Unavailable);
+    assert!(
+        sessions
+            .justification(&headers, "ehr-1")
+            .expect("usable")
+            .is_none()
+    );
 }

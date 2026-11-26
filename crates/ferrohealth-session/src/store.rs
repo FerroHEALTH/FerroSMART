@@ -76,6 +76,7 @@ pub(crate) struct Entry {
     pub(crate) gate: Arc<tokio::sync::Mutex<()>>,
     /// The access tokens for other resource servers, by resource.
     pub(crate) resources: BTreeMap<String, crate::resource::Held>,
+    pub(crate) justifications: BTreeMap<String, crate::justification::Justification>,
 }
 
 /// Both pools, under one lock.
@@ -201,6 +202,7 @@ impl Memory {
                 record,
                 gate: Arc::default(),
                 resources: BTreeMap::new(),
+                justifications: BTreeMap::new(),
             },
         );
         Ok(id)
