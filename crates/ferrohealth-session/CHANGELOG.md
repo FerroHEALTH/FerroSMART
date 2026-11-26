@@ -14,6 +14,12 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-11-26
+
+### Added
+
+- A console keeps a justification the operator stated for one object (a purpose of use, a reason in their own words and an end time) with a memory-store session: `Sessions::justify`, `Sessions::justification` and `Sessions::end_justification`. It ends at its end time, on request or with the session, the reason never reaches a log or a `Debug` rendering, and a sealed store keeps none, since it keeps the session in the browser (#902).
+
 ## [0.30.0] - 2026-11-25
 
 Releases beside `ferrohealth-smart` 0.35.0, whose types this crate carries in
@@ -533,7 +539,8 @@ FerroHEALTH operator consoles, over the relying party of `ferrohealth-smart`
   its request's `record::Held` and the `routes::Pages` trait a console draws
   a stopped sign-in through.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.30.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.30.1...HEAD
+[0.30.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.30.0...ferrohealth-session-v0.30.1
 [0.30.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.29.0...ferrohealth-session-v0.30.0
 [0.29.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.28.1...ferrohealth-session-v0.29.0
 [0.28.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.28.0...ferrohealth-session-v0.28.1
