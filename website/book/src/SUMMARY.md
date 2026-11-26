@@ -41,6 +41,9 @@
 
 - [What FerroSMART is](evaluate/what-ferrosmart-is.md)
 - [How FerroSMART decides a token](explanation/token-decision.md)
+- [Signing keys and algorithms](explanation/signatures.md)
+- [The EUDI Wallet login and the PID](explanation/eudi-wallet.md)
+- [The crates every product uses](explanation/shared-crates.md)
 - [The consent rules](configure/consent.md)
 
 # Compliance
