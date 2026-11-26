@@ -17,6 +17,7 @@ change.
 
 | You are | You want to | Start with | Then |
 |---|---|---|---|
+| An integrator of a system with no person | Get and check a Backend Services token | [Your first system client](tutorial/first-system-client.md) | [How FerroSMART decides a token](explanation/token-decision.md), [refusal codes](integrate/refusals.md) |
 | An integrator of a SMART app | Launch an app and get a token | [The flows](integrate/flows.md) | [Launch from an EHR](integrate/ehr-launch.md), [how FerroSMART decides a token](explanation/token-decision.md) |
 | An integrator of a FHIR or openEHR server | Accept FerroSMART's tokens | [A server behind FerroSMART](integrate/resource-server.md) | [Refusal codes](integrate/refusals.md), [how FerroSMART decides a token](explanation/token-decision.md) |
 | An operator | Run FerroSMART | [Quickstart](install/quickstart.md) | [Identity providers](install/upstream.md), [clients, roles and consent](configure/clients.md), [deploy for production](operate/deploy.md), [upgrade FerroSMART](operate/upgrades.md), [configuration](configure/configuration.md) |
@@ -26,7 +27,8 @@ change.
 
 The book follows the [Diátaxis](https://diataxis.fr/) framework:
 
-- **Tutorial:** the quickstart, one run from nothing to a working server.
+- **Tutorials:** the quickstart, one run from nothing to a working server,
+  and your first system client, whose requests run in CI.
 - **How-to guides:** one task each, for integrators and for operators.
 - **Reference:** the configuration, the APIs, the endpoints, the refusal
   codes and the audit records, to look things up.

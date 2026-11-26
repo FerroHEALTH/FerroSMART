@@ -14,6 +14,7 @@ mod admin_subjects;
 mod audit;
 mod audit_search;
 mod authorize;
+mod book_tutorial;
 mod brands;
 mod clients;
 mod config;
