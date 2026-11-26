@@ -23,6 +23,8 @@
 //!   what is left as FerroUI's session watch reads it;
 //! - [`sessions::Sessions::keep_fresh`]: the refresh of an access token before
 //!   it expires;
+//! - [`justification`]: a justification the operator stated for one object,
+//!   kept with a memory-store session until it ends;
 //! - `routes` (feature `axum`): `GET /login`, `GET /auth/callback`,
 //!   `POST /logout` and `GET`/`POST /session`, and the middleware that hands
 //!   every page what its request holds.
@@ -36,6 +38,7 @@
 pub mod clock;
 pub mod config;
 pub mod cookies;
+pub mod justification;
 pub mod lifetime;
 pub mod paths;
 pub mod record;

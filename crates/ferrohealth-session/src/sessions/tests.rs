@@ -13,6 +13,7 @@ use super::{SessionError, Sessions};
 use crate::clock::ManualClock;
 use crate::config::{SessionSection, StoreKind};
 use crate::cookies::CookieNames;
+use crate::justification::{Justified, MAX_JUSTIFICATIONS};
 use crate::record::{Credential, Held, SignedIn};
 use crate::return_path::ReturnPath;
 
@@ -703,4 +704,129 @@ fn a_session_preference_carries_no_max_age_and_reads_back() {
             "{kind:?}"
         );
     }
+}
+
+/// A store of `kind` with one signed-in session, and the headers that
+/// carry it.
+fn justified_store(kind: StoreKind) -> (Sessions, ManualClock, HeaderMap) {
+    let (sessions, now) = store(kind);
+    let cookie = sessions
+        .establish(&HeaderMap::new(), signed_in())
+        .expect("established");
+    (sessions, now, sent(&cookie))
+}
+
+/// States a justification of `purpose` for `object` for `lifetime`.
+fn justify(
+    sessions: &Sessions,
+    headers: &HeaderMap,
+    object: &str,
+    purpose: &str,
+    lifetime: Duration,
+) -> Justified {
+    sessions
+        .justify(
+            headers,
+            object,
+            purpose,
+            Secret::new("synthetic reason"),
+            lifetime,
+        )
+        .expect("usable")
+}
+
+/// Whether the session `headers` carry holds a justification for `object`.
+fn holds(sessions: &Sessions, headers: &HeaderMap, object: &str) -> bool {
+    sessions
+        .justification(headers, object)
+        .expect("usable")
+        .is_some()
+}
+
+#[test]
+fn a_justification_is_kept_for_its_object_until_it_ends() {
+    let (sessions, now, headers) = justified_store(StoreKind::Memory);
+    let kept = justify(
+        &sessions,
+        &headers,
+        "ehr-1",
+        "TREAT",
+        Duration::from_secs(45),
+    );
+    assert_eq!(kept, Justified::Kept(START + 45));
+    let held = sessions
+        .justification(&headers, "ehr-1")
+        .expect("usable")
+        .expect("kept");
+    assert_eq!(held.purpose(), "TREAT");
+    assert_eq!(held.reason().expose(), "synthetic reason");
+    assert_eq!(held.ends_at(), START + 45);
+    assert!(
+        !format!("{held:?}").contains("synthetic reason"),
+        "the reason never reaches a Debug rendering"
+    );
+    assert!(
+        !holds(&sessions, &headers, "ehr-2"),
+        "a justification covers its one object"
+    );
+    now.advance(45);
+    assert!(
+        !holds(&sessions, &headers, "ehr-1"),
+        "a justification ends at its end time"
+    );
+}
+
+#[test]
+fn a_justification_ends_on_request_and_with_its_session() {
+    let (sessions, _now, headers) = justified_store(StoreKind::Memory);
+    let minute = Duration::from_mins(1);
+    justify(&sessions, &headers, "ehr-1", "ETREAT", minute);
+    sessions
+        .end_justification(&headers, "ehr-1")
+        .expect("usable");
+    assert!(!holds(&sessions, &headers, "ehr-1"));
+    justify(&sessions, &headers, "ehr-2", "ETREAT", minute);
+    sessions.end(&headers).expect("ended");
+    assert!(
+        !holds(&sessions, &headers, "ehr-2"),
+        "a justification ends with its session"
+    );
+}
+
+#[test]
+fn a_session_keeps_a_bounded_number_of_justifications() {
+    let (sessions, _now, headers) = justified_store(StoreKind::Memory);
+    for (index, lifetime) in (0..=MAX_JUSTIFICATIONS).zip(1_u64..) {
+        let object = format!("object-{index}");
+        justify(
+            &sessions,
+            &headers,
+            &object,
+            "TREAT",
+            Duration::from_mins(lifetime),
+        );
+    }
+    assert!(
+        !holds(&sessions, &headers, "object-0"),
+        "the one that ends first is dropped"
+    );
+    assert!(holds(
+        &sessions,
+        &headers,
+        &format!("object-{MAX_JUSTIFICATIONS}")
+    ));
+}
+
+#[test]
+fn a_sealed_store_keeps_no_justification() {
+    let (sessions, _now, headers) = justified_store(StoreKind::Sealed);
+    let kept = justify(
+        &sessions,
+        &headers,
+        "ehr-1",
+        "TREAT",
+        Duration::from_mins(1),
+    );
+    assert_eq!(kept, Justified::Unavailable);
+    assert!(!holds(&sessions, &headers, "ehr-1"));
 }
