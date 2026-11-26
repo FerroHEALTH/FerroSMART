@@ -2350,14 +2350,13 @@ caller's, which holds the sessions.
   `id_token_hint` (RP-Initiated Logout 1.0 §2); a session that holds no ID
   Token was never signed in at the provider and lands on the console's
   signed-out page. The four paths are the same on every console.
-- **The stores.** `memory` keeps two bounded pools in the process: a full
-  pending pool drops its oldest sign-in, and a full session pool refuses a
-  new session and keeps every live one. `sealed` keeps the whole record in
-  one cookie sealed with AES-256-GCM (the `cookie` crate's private jar), so
-  a console that runs as several instances with no shared store opens it
-  anywhere; a cookie that does not open is no session, and one larger than
-  the 4096 bytes a browser keeps (`rfc6265 §6.1`) is refused when it is
-  sealed. Every cookie is `HttpOnly`, `SameSite=Lax` and, unless turned off,
+- **The store.** `memory`, the only store, keeps two bounded pools in the
+  process: a full pending pool drops its oldest sign-in, and a full session
+  pool refuses a new session and keeps every live one. The cookie carries
+  an opaque 256-bit id; the record, the refresh token, the tokens for other
+  resource servers and the justifications stay on the server. A restart
+  signs every operator out, and a console that runs as several instances
+  routes each session to one of them at its ingress. Every cookie is `HttpOnly`, `SameSite=Lax` and, unless turned off,
   `Secure` with the `__Host-` prefix (RFC 6265bis §4.1.3.2, §5.4.7).
 - **The lifetimes.** The absolute lifetime runs from the sign-in time the
   session carries and nothing moves it; the idle lifetime runs from the last
@@ -2366,7 +2365,7 @@ caller's, which holds the sessions.
   expires. The session watch (`GET`/`POST /session`) answers FerroUI's wire
   `{"idle": s, "absolute": s}`: a `GET` never counts as activity, a `POST`
   does, and `401` says the session is gone.
-- **The refresh.** A memory session that holds a refresh token renews its
+- **The refresh.** A session that holds a refresh token renews its
   access token within 60 seconds of its expiry, at most half its lifetime
   (`rfc6749 §6`), one refresh per session at a time so a rotated refresh
   token is spent once; a refusal ends the session, and a provider that is
@@ -2375,8 +2374,7 @@ caller's, which holds the sessions.
 | Decision | Ground | Owner items |
 |---|---|---|
 | The console sign-in and session is its own crate in this repository, `ferrohealth-session`, on its own version line, over `ferrohealth-smart`'s relying party | owner decision 2026-11-03 | each console moves onto it and deletes its copy |
-| A sealed store refuses `offline_access` when the configuration loads | `rfc6749 §10.4`: a refresh token sealed into a browser cookie outlives a sign-out that cannot reach it (owner decision 2026-11-03) | a console that wants refresh tokens uses the memory store |
-| A sealed store without a key is refused when the configuration loads; there is no per-process key | our own design, fail closed (owner decision 2026-11-03) | the FerroEHR viewer's deployments set `session.key` |
+| The memory store is the only store; a console runs as one instance, or routes each session to one replica (sticky sessions), and a restart signs every operator out. The sealed store is removed: `store = "sealed"`, `key` and `key_file` are refused at load for one release, then deleted | owner decision 2026-11-26 (#904): the sealed store was the one posture where server-only data (a justification's reason, the `rfc8707` resource tokens, the refresh token, `rfc6749 §10.4`) had no home; a shared store (Valkey, PostgreSQL) adds a component or breaks the console boundary for a need no deployment has | the FerroEHR viewer moves its scaled deployments to the memory store with sticky sessions |
 | One route set, `/login`, `/auth/callback`, `/logout` and `/session`, on every console | our own design (owner decision 2026-11-03) | FerroTERM and the FerroEHR viewer change the redirect URI registered at their provider |
 | The store, the lifetimes and the watch route | no specification governs them: our own design, held to the OWASP Session Management Cheat Sheet | none |
 

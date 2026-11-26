@@ -68,11 +68,6 @@ pub(crate) fn millis(span: Duration) -> i64 {
     i64::try_from(span.as_millis()).unwrap_or(i64::MAX)
 }
 
-/// A time in milliseconds as whole seconds, rounded down.
-pub(crate) const fn seconds_down(millis: i64) -> i64 {
-    millis.div_euclid(MILLIS_PER_SECOND)
-}
-
 /// A time in milliseconds as whole seconds, rounded up.
 pub(crate) const fn seconds_up(millis: i64) -> i64 {
     let whole = millis.div_euclid(MILLIS_PER_SECOND);
@@ -81,11 +76,6 @@ pub(crate) const fn seconds_up(millis: i64) -> i64 {
     } else {
         whole.saturating_add(1)
     }
-}
-
-/// A time in whole seconds as milliseconds, saturating.
-pub(crate) const fn from_seconds(seconds: i64) -> i64 {
-    seconds.saturating_mul(MILLIS_PER_SECOND)
 }
 
 /// A span in milliseconds as the whole seconds the watch's wire carries,
@@ -98,7 +88,7 @@ fn whole(span: i64) -> u32 {
 mod tests {
     use std::time::Duration;
 
-    use super::{Lifetimes, Times, seconds_down, seconds_up};
+    use super::{Lifetimes, Times, seconds_up};
 
     const LIFETIMES: Lifetimes = Lifetimes {
         idle: Duration::from_secs(60),
@@ -180,12 +170,9 @@ mod tests {
     }
 
     #[test]
-    fn a_time_rounds_to_whole_seconds_either_way() {
-        assert_eq!((1000, 1000), (seconds_down(s(1000)), seconds_up(s(1000))));
-        assert_eq!(
-            (1000, 1001),
-            (seconds_down(s(1000) + 1), seconds_up(s(1000) + 1))
-        );
-        assert_eq!((-1, 0), (seconds_down(-1), seconds_up(-1)));
+    fn a_time_rounds_up_to_a_whole_second() {
+        assert_eq!(1000, seconds_up(s(1000)));
+        assert_eq!(1001, seconds_up(s(1000) + 1));
+        assert_eq!(0, seconds_up(-1));
     }
 }

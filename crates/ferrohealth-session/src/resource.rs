@@ -9,7 +9,7 @@
 //! openEHR server. The refresh grant names it as `resource`, and the
 //! provider audience-restricts the token to it, so each resource server
 //! gets its own token (RFC 9068 §3, RFC 9700 §4.10.2). The token is kept
-//! with the memory-store session until it is due, and the refresh token the
+//! with the session until it is due, and the refresh token the
 //! provider rotates replaces the session's (RFC 9700 §4.14.2). Keeping it is
 //! our own design.
 
@@ -50,7 +50,7 @@ pub enum ForResource {
     /// An access token for the resource.
     Issued(Secret),
     /// The request holds no session that can be refreshed: no session, a
-    /// sealed store, a Basic sign-in, or no refresh token.
+    /// Basic sign-in, or no refresh token.
     Unavailable,
     /// The provider refused the resource (`invalid_target`, `invalid_scope`
     /// or another refusal but `invalid_grant`); the session stays.
@@ -83,7 +83,7 @@ impl Sessions {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Poisoned`] for an unusable memory store. A
+    /// Returns [`SessionError::Poisoned`] for an unusable store. A
     /// provider's refusal or failure is a [`ForResource`], never an error.
     pub async fn token_for(
         &self,
@@ -91,9 +91,10 @@ impl Sessions {
         headers: &HeaderMap,
         resource: &str,
     ) -> Result<ForResource, SessionError> {
-        let (Some(memory), Some(id)) = (self.memory(), self.session_id(headers)) else {
+        let Some(id) = self.session_id(headers) else {
             return Ok(ForResource::Unavailable);
         };
+        let memory = self.memory();
         let now = self.now();
         let found = memory.with(
             &id,

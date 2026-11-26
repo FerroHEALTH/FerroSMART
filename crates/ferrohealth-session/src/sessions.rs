@@ -5,27 +5,26 @@
 //!
 //! [`Sessions`] keeps the pending sign-ins between `GET /login` and the
 //! provider's redirect back, and the sessions once a sign-in completes, in
-//! the store `[session] store` names. Every method reads the request's
-//! cookies and answers the `Set-Cookie` values its response must carry, so a
-//! console handles both stores alike.
+//! the console's process. The cookie carries an opaque id, so a restart
+//! signs every operator out, and a console that runs as several instances
+//! routes each session to one of them. Every method reads the request's
+//! cookies and answers the `Set-Cookie` values its response must carry.
 
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ferrohealth_secret::secret::Secret;
 use ferrohealth_smart::oidc::PendingSignIn;
 use ferrohealth_ui::view::session::Left;
 use http::{HeaderMap, HeaderValue};
-use serde::{Deserialize, Serialize};
 
 use crate::clock::Clock;
-use crate::config::{SessionSettings, Storage};
+use crate::config::SessionSettings;
 use crate::cookies::{CookieNames, Jar, header};
-use crate::lifetime::{from_seconds, millis, seconds, seconds_up};
-use crate::record::{Ended, Held, Record, Sealed, SignedIn};
+use crate::lifetime::{millis, seconds};
+use crate::record::{Ended, Held, Record, SignedIn};
 use crate::return_path::ReturnPath;
-use crate::store::{COOKIE_LIMIT, Id, Memory, open, seal};
+use crate::store::{Id, Memory};
 
 /// Why a sign-in or a session could not be begun, read or ended.
 ///
@@ -42,20 +41,6 @@ pub enum SessionError {
     /// A thread panicked while it held the memory store.
     #[error("the session store is unusable after a panic")]
     Poisoned,
-    /// A sealed payload could not be written.
-    #[error("the session could not be sealed")]
-    Seal(#[source] serde_json::Error),
-    /// The private jar sealed nothing.
-    #[error("the session cookie was not sealed")]
-    Unsealed,
-    /// A sealed cookie is larger than a browser keeps (RFC 6265 §6.1).
-    #[error(
-        "the sealed session cookie takes {found} bytes, more than the {COOKIE_LIMIT} a browser keeps"
-    )]
-    TooLarge {
-        /// Its size in bytes.
-        found: usize,
-    },
     /// A cookie could not be written as a header value.
     #[error("a cookie could not be written as a header")]
     Header,
@@ -79,8 +64,8 @@ impl fmt::Debug for Pending {
     }
 }
 
-/// How many entries each pool of a memory store holds, expired ones not
-/// yet dropped included.
+/// How many entries each pool of the store holds, expired ones not yet
+/// dropped included.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Occupancy {
     /// Pending sign-ins.
@@ -104,30 +89,12 @@ impl<T> WithCookies<T> {
     }
 }
 
-/// A pending sign-in as a sealed cookie carries it, begun at `created` whole
-/// seconds since the Unix epoch, rounded up.
-#[derive(Serialize, Deserialize)]
-struct SealedPending {
-    state: String,
-    nonce: String,
-    verifier: String,
-    back: Option<String>,
-    created: i64,
-}
-
-/// Where the sessions are kept.
-#[derive(Clone)]
-enum Backend {
-    Memory(Memory),
-    Sealed(cookie::Key),
-}
-
 /// The store and what it is configured with.
 struct Inner {
     settings: SessionSettings,
     jar: Jar,
     clock: Clock,
-    backend: Backend,
+    memory: Memory,
 }
 
 /// The session store, shared by every request; cloning it shares it.
@@ -156,13 +123,7 @@ impl Sessions {
     /// counts every lifetime on `clock`.
     #[must_use]
     pub fn with_clock(settings: SessionSettings, names: CookieNames, clock: Clock) -> Self {
-        let backend = match &settings.storage {
-            Storage::Memory {
-                max_sign_ins,
-                max_sessions,
-            } => Backend::Memory(Memory::new(*max_sign_ins, *max_sessions)),
-            Storage::Sealed(key) => Backend::Sealed(key.clone()),
-        };
+        let memory = Memory::new(settings.max_sign_ins, settings.max_sessions);
         let jar = Jar {
             names,
             secure: settings.secure_cookie,
@@ -172,7 +133,7 @@ impl Sessions {
                 settings,
                 jar,
                 clock,
-                backend,
+                memory,
             }),
         }
     }
@@ -209,8 +170,8 @@ impl Sessions {
     /// # Errors
     ///
     /// Returns [`SessionError::Random`] when no id could be minted,
-    /// [`SessionError::Poisoned`] for an unusable memory store, and the
-    /// sealing errors of a sealed store.
+    /// [`SessionError::Poisoned`] for an unusable store, and
+    /// [`SessionError::Header`] when the cookie cannot be written.
     pub fn begin(
         &self,
         sign_in: PendingSignIn,
@@ -218,25 +179,12 @@ impl Sessions {
     ) -> Result<HeaderValue, SessionError> {
         let now = self.now();
         let name = self.jar().names.sign_in();
-        let value = match &self.inner.backend {
-            Backend::Memory(memory) => {
-                let id = memory.begin(Pending { sign_in, back }, now, self.timeout())?;
-                id.as_str().to_owned()
-            }
-            Backend::Sealed(key) => {
-                let pending = SealedPending {
-                    state: sign_in.state().to_owned(),
-                    nonce: sign_in.nonce().to_owned(),
-                    verifier: sign_in.verifier().expose().to_owned(),
-                    back: back.map(|back| back.as_str().to_owned()),
-                    created: seconds_up(now),
-                };
-                seal(key, &self.jar().name(&name), &pending)?
-            }
-        };
+        let id = self
+            .memory()
+            .begin(Pending { sign_in, back }, now, self.timeout())?;
         self.set(
             &name,
-            value,
+            id.as_str().to_owned(),
             Some(seconds(self.inner.settings.sign_in_timeout)),
         )
     }
@@ -247,7 +195,7 @@ impl Sessions {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Poisoned`] for an unusable memory store and
+    /// Returns [`SessionError::Poisoned`] for an unusable store and
     /// [`SessionError::Header`] when the removal cannot be written.
     pub fn take_pending(
         &self,
@@ -259,21 +207,9 @@ impl Sessions {
         let Some(value) = self.jar().read(headers, &name) else {
             return Ok(WithCookies::new(None, Vec::new()));
         };
-        let pending = match &self.inner.backend {
-            Backend::Memory(memory) => memory.take(&Id::from_cookie(value), now, self.timeout())?,
-            Backend::Sealed(key) => open::<SealedPending>(key, &self.jar().name(&name), value)
-                .filter(|pending| {
-                    now.saturating_sub(from_seconds(pending.created)) < self.timeout()
-                })
-                .map(|pending| Pending {
-                    sign_in: PendingSignIn::from_parts(
-                        pending.state,
-                        pending.nonce,
-                        Secret::new(pending.verifier),
-                    ),
-                    back: pending.back.map(ReturnPath::sealed),
-                }),
-        };
+        let pending = self
+            .memory()
+            .take(&Id::from_cookie(value), now, self.timeout())?;
         Ok(WithCookies::new(pending, vec![removal]))
     }
 
@@ -281,45 +217,34 @@ impl Sessions {
     /// session the request held before is ended first, so signing in again
     /// never fills the store.
     ///
-    /// A sealed store keeps no refresh token, so its session ends when the
-    /// access token expires.
-    ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Full`] when the memory store is at its bound,
-    /// [`SessionError::Random`] and [`SessionError::Poisoned`] as for
-    /// [`Self::begin`], and the sealing errors of a sealed store.
+    /// Returns [`SessionError::Full`] when the store is at its bound, and
+    /// the errors of [`Self::begin`].
     pub fn establish(
         &self,
         headers: &HeaderMap,
         signed_in: SignedIn,
     ) -> Result<HeaderValue, SessionError> {
         let now = self.now();
-        let mut record = Record::begin(signed_in, now);
+        let record = Record::begin(signed_in, now);
         let name = self.jar().names.session();
-        match &self.inner.backend {
-            Backend::Memory(memory) => {
-                if let Some(held) = self.jar().read(headers, &name) {
-                    memory.end(&Id::from_cookie(held))?;
-                }
-                let id = memory.establish(record, |record| self.live(record, now))?;
-                self.set(&name, id.as_str().to_owned(), None)
-            }
-            Backend::Sealed(key) => {
-                record.refresh_token = None;
-                self.reseal(key, &record, now)
-            }
+        let memory = self.memory();
+        if let Some(held) = self.jar().read(headers, &name) {
+            memory.end(&Id::from_cookie(held))?;
         }
+        let id = memory.establish(record, |record| self.live(record, now))?;
+        self.set(&name, id.as_str().to_owned(), None)
     }
 
     /// What the request carries, its activity counted: a live session's idle
-    /// lifetime starts again and a sealed cookie is sealed again; a cookie
-    /// that names no live session is answered with its removal.
+    /// lifetime starts again; a cookie that names no live session is
+    /// answered with its removal.
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Poisoned`] for an unusable memory store, and
-    /// the sealing errors of a sealed store.
+    /// Returns [`SessionError::Poisoned`] for an unusable store and
+    /// [`SessionError::Header`] when the removal cannot be written.
     pub fn held(&self, headers: &HeaderMap) -> Result<WithCookies<Held>, SessionError> {
         let now = self.now();
         let name = self.jar().names.session();
@@ -327,41 +252,22 @@ impl Sessions {
             return Ok(WithCookies::new(Held::Absent, Vec::new()));
         };
         let lifetimes = self.inner.settings.lifetimes;
-        match &self.inner.backend {
-            Backend::Memory(memory) => {
-                let held = memory.with(
-                    &Id::from_cookie(value),
-                    |record| self.live(record, now),
-                    |entry| {
-                        entry.record.touched = now;
-                        match lifetimes.left(entry.record.times(), now) {
-                            Some(left) if entry.record.token_valid(now) => {
-                                Held::SignedIn(entry.record.session(left))
-                            }
-                            _ => Held::TokenExpired,
-                        }
-                    },
-                )?;
-                match held {
-                    Some(held) => Ok(WithCookies::new(held, Vec::new())),
-                    None => self.ended(&name),
+        let held = self.memory().with(
+            &Id::from_cookie(value),
+            |record| self.live(record, now),
+            |entry| {
+                entry.record.touched = now;
+                match lifetimes.left(entry.record.times(), now) {
+                    Some(left) if entry.record.token_valid(now) => {
+                        Held::SignedIn(entry.record.session(left))
+                    }
+                    _ => Held::TokenExpired,
                 }
-            }
-            Backend::Sealed(key) => {
-                let opened = self.open_session(key, &name, value, now);
-                let Some(mut record) = opened else {
-                    return self.ended(&name);
-                };
-                record.touched = now;
-                let Some(left) = lifetimes.left(record.times(), now) else {
-                    return self.ended(&name);
-                };
-                let cookie = self.reseal(key, &record, now)?;
-                Ok(WithCookies::new(
-                    Held::SignedIn(record.session(left)),
-                    vec![cookie],
-                ))
-            }
+            },
+        )?;
+        match held {
+            Some(held) => Ok(WithCookies::new(held, Vec::new())),
+            None => self.ended(&name),
         }
     }
 
@@ -388,38 +294,19 @@ impl Sessions {
             let removal = header(&this.jar().removal(&name))?;
             Ok(WithCookies::new(None, vec![removal]))
         };
-        match &self.inner.backend {
-            Backend::Memory(memory) => {
-                let left = memory.with(
-                    &Id::from_cookie(value),
-                    |record| self.live(record, now),
-                    |entry| {
-                        if extend {
-                            entry.record.touched = now;
-                        }
-                        lifetimes.left(entry.record.times(), now)
-                    },
-                )?;
-                match left.flatten() {
-                    Some(left) => Ok(WithCookies::new(Some(left), Vec::new())),
-                    None => gone(self),
+        let left = self.memory().with(
+            &Id::from_cookie(value),
+            |record| self.live(record, now),
+            |entry| {
+                if extend {
+                    entry.record.touched = now;
                 }
-            }
-            Backend::Sealed(key) => {
-                let Some(mut record) = self.open_session(key, &name, value, now) else {
-                    return gone(self);
-                };
-                if !extend {
-                    return Ok(WithCookies::new(
-                        lifetimes.left(record.times(), now),
-                        Vec::new(),
-                    ));
-                }
-                record.touched = now;
-                let left = lifetimes.left(record.times(), now);
-                let cookie = self.reseal(key, &record, now)?;
-                Ok(WithCookies::new(left, vec![cookie]))
-            }
+                lifetimes.left(entry.record.times(), now)
+            },
+        )?;
+        match left.flatten() {
+            Some(left) => Ok(WithCookies::new(Some(left), Vec::new())),
+            None => gone(self),
         }
     }
 
@@ -428,33 +315,25 @@ impl Sessions {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Poisoned`] for an unusable memory store and
+    /// Returns [`SessionError::Poisoned`] for an unusable store and
     /// [`SessionError::Header`] when the removal cannot be written.
     pub fn end(&self, headers: &HeaderMap) -> Result<WithCookies<Option<Ended>>, SessionError> {
-        let now = self.now();
         let name = self.jar().names.session();
         let removal = header(&self.jar().removal(&name))?;
         let Some(value) = self.jar().read(headers, &name) else {
             return Ok(WithCookies::new(None, vec![removal]));
         };
-        let record = match &self.inner.backend {
-            Backend::Memory(memory) => memory.end(&Id::from_cookie(value))?,
-            Backend::Sealed(key) => self.open_session(key, &name, value, now),
-        };
+        let record = self.memory().end(&Id::from_cookie(value))?;
         Ok(WithCookies::new(record.map(Record::ended), vec![removal]))
     }
 
-    /// How many entries each pool of a memory store holds; `None` for a
-    /// sealed store, which holds none.
+    /// How many entries each pool of the store holds.
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Poisoned`] for an unusable memory store.
-    pub fn occupancy(&self) -> Result<Option<Occupancy>, SessionError> {
-        match &self.inner.backend {
-            Backend::Memory(memory) => memory.occupancy().map(Some),
-            Backend::Sealed(_) => Ok(None),
-        }
+    /// Returns [`SessionError::Poisoned`] for an unusable store.
+    pub fn occupancy(&self) -> Result<Occupancy, SessionError> {
+        self.memory().occupancy()
     }
 
     /// The `Set-Cookie` value that keeps the operator's preference `name` at
@@ -503,11 +382,8 @@ impl Sessions {
         self.jar().read(headers, &self.jar().names.preference(name))
     }
 
-    pub(crate) fn memory(&self) -> Option<&Memory> {
-        match &self.inner.backend {
-            Backend::Memory(memory) => Some(memory),
-            Backend::Sealed(_) => None,
-        }
+    pub(crate) fn memory(&self) -> &Memory {
+        &self.inner.memory
     }
 
     pub(crate) fn session_id(&self, headers: &HeaderMap) -> Option<Id> {
@@ -518,43 +394,6 @@ impl Sessions {
 
     pub(crate) fn live_at(&self, record: &Record) -> bool {
         self.live(record, self.now())
-    }
-
-    /// The live record a sealed session cookie carries.
-    fn open_session(
-        &self,
-        key: &cookie::Key,
-        name: &str,
-        value: String,
-        now: i64,
-    ) -> Option<Record> {
-        open::<Sealed>(key, &self.jar().name(name), value)
-            .and_then(Sealed::record)
-            .filter(|record| self.live(record, now))
-    }
-
-    /// `record` sealed into its cookie, living until the first lifetime ends.
-    fn reseal(
-        &self,
-        key: &cookie::Key,
-        record: &Record,
-        now: i64,
-    ) -> Result<HeaderValue, SessionError> {
-        let name = self.jar().names.session();
-        let value = seal(key, &self.jar().name(&name), &Sealed::from(record))?;
-        let max_age = self
-            .inner
-            .settings
-            .lifetimes
-            .left(record.times(), now)
-            .map_or(0, |left| i64::from(left.idle));
-        let cookie = self.set(&name, value, Some(max_age))?;
-        if cookie.len() > COOKIE_LIMIT {
-            return Err(SessionError::TooLarge {
-                found: cookie.len(),
-            });
-        }
-        Ok(cookie)
     }
 
     fn ended(&self, name: &str) -> Result<WithCookies<Held>, SessionError> {

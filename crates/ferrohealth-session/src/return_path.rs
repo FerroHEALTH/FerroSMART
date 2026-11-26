@@ -34,12 +34,6 @@ impl ReturnPath {
         own.then(|| Self(text.to_owned()))
     }
 
-    /// A return path this crate checked and sealed itself, read back from
-    /// its authenticated cookie.
-    pub(crate) const fn sealed(checked: String) -> Self {
-        Self(checked)
-    }
-
     /// The path and query.
     #[must_use]
     pub fn as_str(&self) -> &str {

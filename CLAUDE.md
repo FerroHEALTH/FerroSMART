@@ -140,7 +140,7 @@ pinned in `docs/VERSIONS.md` and held to their provenance by
   synthetic models and policies, the remote PDP against a `wiremock` point).
 - `crates/ferrohealth-session`: the console sign-in and session, on its own
   version line with its own `CHANGELOG.md`. `src/` (`config`, `sessions`
-  with its `memory` and `sealed` stores, `lifetime`, `refresh`, `record`,
+  with its in-process store, `lifetime`, `refresh`, `record`,
   `cookies`, `return_path`, `paths`, and `routes` behind `axum`),
   `tests/it/` (the four routes of a synthetic console against a test OpenID
   Provider, a `wiremock` stub with a key generated when the case runs).

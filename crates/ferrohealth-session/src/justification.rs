@@ -2,16 +2,15 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 //! A justification the operator stated for one object, kept with the
-//! memory-store session until it ends.
+//! session until it ends.
 //!
 //! A console whose server asks why an operator opens a record outside their
 //! usual access (a purpose of use and a reason in their own words) keeps
 //! the answer here, so each later call about that object carries it. The
-//! reason may hold health data, so it is kept on the server alone: a sealed
-//! store, which keeps the session in the browser, keeps none (GDPR Art.
-//! 5(1)(c) and (f)). A justification ends at its end time, when the
-//! operator ends it, or with the session. No specification governs this:
-//! our own design.
+//! reason may hold health data, so it is kept on the server alone and never
+//! reaches the browser (GDPR Art. 5(1)(c) and (f)). A justification ends at
+//! its end time, when the operator ends it, or with the session. No
+//! specification governs this: our own design.
 
 use std::fmt;
 use std::time::Duration;
@@ -71,9 +70,7 @@ pub enum Justified {
     /// The justification is kept until the instant it names, in whole
     /// seconds since the Unix epoch.
     Kept(i64),
-    /// The request holds no live memory-store session, so nothing is kept:
-    /// no session, or a sealed store, which keeps the session in the
-    /// browser.
+    /// The request holds no live session, so nothing is kept.
     Unavailable,
 }
 
@@ -84,7 +81,7 @@ impl Sessions {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Poisoned`] for an unusable memory store.
+    /// Returns [`SessionError::Poisoned`] for an unusable store.
     pub fn justify(
         &self,
         headers: &HeaderMap,
@@ -93,9 +90,10 @@ impl Sessions {
         reason: Secret,
         lifetime: Duration,
     ) -> Result<Justified, SessionError> {
-        let (Some(memory), Some(id)) = (self.memory(), self.session_id(headers)) else {
+        let Some(id) = self.session_id(headers) else {
             return Ok(Justified::Unavailable);
         };
+        let memory = self.memory();
         let now = self.now();
         let ends = now.saturating_add(millis(lifetime));
         let kept = memory.with(
@@ -134,15 +132,16 @@ impl Sessions {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Poisoned`] for an unusable memory store.
+    /// Returns [`SessionError::Poisoned`] for an unusable store.
     pub fn justification(
         &self,
         headers: &HeaderMap,
         object: &str,
     ) -> Result<Option<Justification>, SessionError> {
-        let (Some(memory), Some(id)) = (self.memory(), self.session_id(headers)) else {
+        let Some(id) = self.session_id(headers) else {
             return Ok(None);
         };
+        let memory = self.memory();
         let now = self.now();
         Ok(memory
             .with(
@@ -161,11 +160,12 @@ impl Sessions {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Poisoned`] for an unusable memory store.
+    /// Returns [`SessionError::Poisoned`] for an unusable store.
     pub fn end_justification(&self, headers: &HeaderMap, object: &str) -> Result<(), SessionError> {
-        let (Some(memory), Some(id)) = (self.memory(), self.session_id(headers)) else {
+        let Some(id) = self.session_id(headers) else {
             return Ok(());
         };
+        let memory = self.memory();
         memory.with(
             &id,
             |record| self.live_at(record),
