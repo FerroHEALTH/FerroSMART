@@ -74,8 +74,10 @@ None of the three lifetimes may be zero.
 | `url` | | The URL itself; set one of the two |
 | `max_connections` | 16 | The most connections one replica holds |
 
-Every piece of state is in the database, so any number of replicas share
-one. Migrations ship in the binary and run at start.
+FerroSMART needs PostgreSQL 19 or newer and refuses an older server at
+start. Every piece of state is in the database, so any number of replicas
+share one. Migrations ship in the binary and run at start
+([upgrade FerroSMART](../operate/upgrades.md)).
 
 ## `[ferrosmart.keys]`
 

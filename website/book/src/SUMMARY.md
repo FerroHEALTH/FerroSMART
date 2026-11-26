@@ -18,12 +18,15 @@
 # How-to guides: deploy and operate
 
 - [Run the image](install/image.md)
+- [Deploy for production](operate/deploy.md)
+- [Upgrade FerroSMART](operate/upgrades.md)
 - [Log in at OpenID Connect providers](install/upstream.md)
 - [Log in at a SAML 2.0 provider](install/saml.md)
 - [Log in with the EUDI Wallet](install/wallet.md)
 - [Register clients and roles](configure/clients.md)
 - [Rotate keys](operate/keys.md)
 - [Operate and monitor](operate/operations.md)
+- [Run a console's sessions](operate/console-sessions.md)
 
 # Reference
 
