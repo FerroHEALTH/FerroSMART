@@ -1,1 +1,0 @@
-- Breaking: `SessionSection::check` takes no argument, and `SessionSection::check_with` is removed, since the offline-access check belonged to the sealed store; a console calls `config.session.check()`. `Sessions::occupancy` answers `Occupancy` in place of `Option<Occupancy>`.
