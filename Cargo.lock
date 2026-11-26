@@ -1249,13 +1249,13 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferrobridge-fhirpath"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f689974211c438e208886435a330575835bb78cbb558808f59824f3fa32c65f4"
+checksum = "ae57087f92814880ff00a60cca4b4388369e12835760bfcf8cf16d34c69a7328"
 dependencies = [
  "base64 0.23.1",
  "chumsky",
- "fhir-types",
+ "fhir-types 0.2.0",
  "jiff",
  "logos",
  "quick-xml",
@@ -1268,13 +1268,13 @@ dependencies = [
 
 [[package]]
 name = "ferrobridge-term"
-version = "0.18.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a24a171bf4b6a8b5d8f2a7813853b16590efb17922a5eac892790170e6d2979c"
+checksum = "1c4f28366d020a44e46c733c5555920d0f4143a76adfcb9e48850df773c51d14"
 dependencies = [
  "async-trait",
  "backon",
- "fhir-types",
+ "fhir-types 0.2.0",
  "http",
  "reqwest",
  "secrecy",
@@ -1286,13 +1286,13 @@ dependencies = [
 
 [[package]]
 name = "ferrobridge-validator"
-version = "0.19.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a8bc731bab217278673412a984e62dedc6f58c837b09ccafa449a1704c6df5b"
+checksum = "288ae166065967873fd0df4e54f84900628dccefc3a0fda62213e05773701192"
 dependencies = [
  "ferrobridge-fhirpath",
  "ferrobridge-term",
- "fhir-types",
+ "fhir-types 0.2.0",
  "flate2",
  "http",
  "regex",
@@ -1525,7 +1525,7 @@ dependencies = [
  "ferrohealth-smart",
  "ferrohealth-telemetry",
  "ferrohealth-ui",
- "fhir-types",
+ "fhir-types 0.2.0",
  "flate2",
  "fluent-templates",
  "http",
@@ -1561,6 +1561,18 @@ name = "fhir-types"
 version = "0.1.131"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "295ec4729d0e3595a79b426afc54831a5386648c41b376fe0b7c38af19041d4a"
+dependencies = [
+ "quick-xml",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fhir-types"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dc799c13c2e292fbaae7c6aee40daf46d2e0ba4ead0275f6b51b67eeecdd524"
 dependencies = [
  "quick-xml",
  "regex",
@@ -2258,7 +2270,7 @@ dependencies = [
  "async-trait",
  "base64 0.23.1",
  "ferrohealth-secret",
- "fhir-types",
+ "fhir-types 0.1.131",
  "http",
  "jiff",
  "secrecy",
