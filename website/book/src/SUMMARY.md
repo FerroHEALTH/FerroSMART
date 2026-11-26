@@ -31,8 +31,11 @@
 # Reference
 
 - [Configuration](configure/configuration.md)
+- [Default configuration](reference/default-configuration.md)
+- [Command-line reference](reference/cli.md)
 - [Upstream configuration](configure/upstream-keys.md)
 - [The admin API](configure/admin-api.md)
+- [Admin API operations](reference/admin-operations.md)
 - [Endpoints and conformance](evaluate/conformance.md)
 - [Refusal codes](integrate/refusals.md)
 - [Audit records](operate/audit.md)

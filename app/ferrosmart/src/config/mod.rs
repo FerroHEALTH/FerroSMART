@@ -36,14 +36,6 @@
 //! base = "https://ehr.example.org/fhir"
 //! kind = "fhir"
 //!
-//! [[ferrosmart.client]]
-//! client_id = "bulk-export"
-//! name = "Bulk export"
-//! kind = "confidential_asymmetric"
-//! jwks_uri = "https://export.example.org/jwks.json"
-//! scopes = ["system/Patient.rs", "system/Observation.rs"]
-//! grant_types = ["client_credentials"]
-//!
 //! [ferrosmart.audit.feed]
 //! url = "https://audit.example.org/fhir"
 //! ```

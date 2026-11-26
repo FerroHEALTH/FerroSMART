@@ -8,3 +8,6 @@
 # normalization, and collapsed in diffs and language statistics.
 docs/specs/** linguist-vendored -text
 website/book/vendor/** linguist-vendored -text
+
+# The book's reference pages the ferrosmart test reference_pages writes.
+website/book/src/reference/** linguist-generated
