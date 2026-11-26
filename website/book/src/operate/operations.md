@@ -21,7 +21,7 @@ running a database well.
 | `ferrosmart subject --upstream <name> --sub <sub>` | Prints the FerroSMART `sub` of the person whose subject at the provider `<name>` is `<sub>`: the identifier a resource server binds the person by |
 | `ferrosmart upstream registration <name>` | Prints what the provider `<name>` must be configured with: the redirect and logout URIs, the client authentication with its JWK Set URL, the scopes, the claims and the roles |
 
-Each takes `--config <file>` and `--set key=value`
+[The command-line reference](../reference/cli.md) has every option. Each takes `--config <file>` and `--set key=value`
 ([configuration](../configure/configuration.md)). `subject` and `upstream
 registration` read the configuration alone, with no key file, secret or
 database, so they run on any host that has it.

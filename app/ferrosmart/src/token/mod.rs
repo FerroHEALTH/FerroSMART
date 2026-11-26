@@ -3,13 +3,14 @@
 
 //! The token endpoint (RFC 6749 §3.2).
 //!
-//! Its one grant so far is SMART Backend Services' client credentials grant
-//! with a `private_key_jwt` client assertion. The request is the form of RFC 6749 §4.4.2 with the assertion of RFC 7523
-//! §2.2; the client is authenticated as SMART App Launch 2.2.0, Client
-//! Authentication: Asymmetric, Signature Verification, has it, with the
-//! audience `docs/architecture.md` §13.6 item 1 fixes; the answer is the JSON
-//! of RFC 6749 §5.1, or the error of §5.2, never cached. The token is an RFC
-//! 9068 JWT.
+//! It serves the authorization code grant (RFC 6749 §4.1.3), the client
+//! credentials grant of SMART Backend Services (§4.4), the refresh token
+//! grant (§6) and the token exchange of a person's own token (RFC 8693 §2).
+//! A client authenticates by the method it registered: PKCE alone, its
+//! secret (§2.3.1), or a `private_key_jwt` assertion (RFC 7523 §2.2) checked
+//! as SMART App Launch 2.2.0, Client Authentication: Asymmetric, Signature
+//! Verification, has it. The answer is the JSON of RFC 6749 §5.1, or the
+//! error of §5.2, never cached, and the token is an RFC 9068 JWT.
 
 pub mod assertion;
 pub mod exchange;
