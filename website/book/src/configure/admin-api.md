@@ -186,8 +186,10 @@ the tokens it signed have expired). The private keys stay in the files
 
 `GET /admin/upstreams` shows whether each provider people log in at can
 still be read, in configuration order, without reading the logs. Each
-entry carries the provider's `name`, `label`, `protocol` (`oidc` or
-`saml`), its `issuer` (the issuer identifier or the SAML entity ID), the
+entry carries the provider's `name`, `label`, `protocol` (`oidc`, `saml`
+or `openid4vp`), its `issuer` (the issuer identifier, the SAML entity ID,
+or for a wallet the first of `vct_values`, which a person's `sub` is
+derived under), the
 `clients` that name it in their `upstreams` (a client that names none may
 use every provider), and its `documents`:
 
@@ -195,7 +197,9 @@ use every provider), and its `documents`:
   when the request is answered, since the key set is read at each login
   and FerroSMART holds no copy of it;
 - a SAML provider's `saml_metadata` as this replica last read it, with
-  `last_good_read_at` (the copy in use) and the metadata's `valid_until`.
+  `last_good_read_at` (the copy in use) and the metadata's `valid_until`;
+- a wallet's `pid_providers_list` as this replica last read it, with the
+  `valid_until` of the list in use, its next update.
 
 Each document has `read_at`, `ok` and, for a failed read, `error`. A key
 set or metadata also lists `certificates_expire_at`, the `notAfter` of

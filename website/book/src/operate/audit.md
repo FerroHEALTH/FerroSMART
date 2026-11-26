@@ -39,10 +39,14 @@ pattern covers it. The subtype comes from FerroSMART's code system
 | A code redeemed again, its tokens revoked | `110113` | `code-reused` | `E` |
 | An upstream session ended | `110114` | `110123`, `session-ended` | `E` |
 | The patient picker's own token issued | `110114` | `picker-token` | `C` |
+| A launch an EHR registered at `POST /launch` | `110114` | `launch-registered` | `C` |
+| A launch an app redeemed at the authorization endpoint | `110114` | `launch-redeemed` | `E` |
+| A launch registration or redemption refused, with outcome `4` | `110113` | `launch-refused` | `E` |
 | A client registered through the [admin API](../configure/admin-api.md) | `110113` | `110137`, `client-created` | `C` |
 | A client changed through the admin API | `110113` | `110137`, `client-updated` | `U` |
 | A client disabled, with the grants, access tokens and consents it ended | `110113` | `110137`, `client-disabled` | `D` |
 | A disabled client enabled | `110113` | `110137`, `client-enabled` | `U` |
+| A client deleted at `DELETE /register/{client_id}` | `110113` | `110137`, `client-deleted` | `D` |
 
 None of these is an access to a person's electronic health data. The
 patient picker, which does read Patient resources and EHRs, writes the

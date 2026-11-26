@@ -3,8 +3,10 @@
 
 # Keys and rotation
 
-FerroSMART holds three rings of keys, each for one purpose, so a key of one
-kind signs nothing the other is trusted for (RFC 8725 §3.12):
+FerroSMART holds three rings of JWS keys, each for one purpose, so a key
+of one kind signs nothing the other is trusted for (RFC 8725 §3.12), and
+the keys of its [SAML and wallet logins](#the-saml-and-wallet-keys) beside
+them:
 
 | Ring | Configured in | Published at | Signs |
 |---|---|---|---|
@@ -114,3 +116,23 @@ request FerroSMART checks its client registration against the ring and
 writes the ring's published keys into it when they differ, so the ring
 rotates by its files as the assertion ring does, each step a restart, with
 nothing to upload.
+
+## The SAML and wallet keys
+
+FerroSMART reads these keys from their files at start, and none of them
+rotates on a schedule. Change a file and restart each replica.
+
+- **The SAML signing key** (`signing_key_file`, with
+  `signing_certificate_file`, of `[ferrosmart.saml]`) signs every `AuthnRequest` and
+  `ArtifactResolve`, and `{issuer}/saml/metadata` publishes its
+  certificate. A provider trusts the certificate its copy of that metadata
+  holds, so give the provider the new metadata when you change the key.
+- **The SAML decryption keys** (`[[ferrosmart.saml.decryption]]`) open
+  what a provider encrypts, and the metadata publishes one encryption
+  certificate per key. Add the new key as a second entry, wait until every
+  provider has read the metadata again, then remove the old entry.
+- **The wallet access key** (`access_key_file`, with
+  `access_certificate_file`, of `[ferrosmart.upstream.openid4vp]`) signs
+  every request object a wallet reads. The certificate comes from your Member State's
+  registrar of wallet-relying parties, so a new key needs a new access
+  certificate from the registrar first.

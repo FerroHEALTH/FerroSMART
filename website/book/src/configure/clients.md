@@ -62,6 +62,7 @@ registers itself sends too. `resources`, `launch_uri`, `upstreams` and
 | `logo_uri` | Optional: the app's logo, absolute `https`, drawn on the consent page; the page's CSP admits that origin for images alone |
 | `policy_uri` | Optional: the app's privacy policy, absolute `https`, linked from the consent page |
 | `tos_uri` | Optional: the app's terms of service, absolute `https`, linked from the consent page |
+| `first_party` | `true` for the organisation's own app, or one that acts for it, whose patients then see no consent page ([who skips the page](#who-skips-the-page)); only an administrator sets it, and it needs `authorization_code`. `false` by default |
 | `scope` | The ceiling, space-separated: every scope the client may ever be granted |
 | `grant_types` | Any of `authorization_code`, `client_credentials`, `refresh_token` and `urn:ietf:params:oauth:grant-type:token-exchange`. The token exchange lets a confidential client that serves a FHIR base exchange a patient's own token there for a token at the paired openEHR base (RFC 8693), and needs both bases in `resources` |
 
@@ -70,14 +71,17 @@ RFC 7591 §3.2.2 error `invalid_redirect_uri` or `invalid_client_metadata`:
 
 - a client lists at least one grant type;
 - a `none` client registers no JWK Set and cannot use
-  `client_credentials`, since that grant authenticates with a key;
+  `client_credentials` or the token exchange, since both grants
+  authenticate the client;
 - a `private_key_jwt` client registers exactly one of `jwks_uri` and
   `jwks`, and every key in the set carries `kty` and `kid` and the bare
-  public members (`n` and `e`, or `crv`, `x` and `y`), and no private part;
+  public members (`n` and `e`, `crv`, `x` and `y`, or for an ML-DSA `AKP`
+  key `alg` and `pub`), and no private part;
 - a `client_secret_basic` or `client_secret_post` client registers no JWK
   Set and never `client_credentials`, which SMART keeps for asymmetric
   clients;
-- `refresh_token` comes with `authorization_code`;
+- `refresh_token`, `launch_uri` and `first_party` come with
+  `authorization_code`;
 - `authorization_code` comes with at least one redirect URI;
 - each of `default_acr_values` is an eIDAS level of assurance.
 
@@ -166,7 +170,7 @@ lists to reach an endpoint of FerroSMART itself:
 | `system/introspect` | `POST /introspect`, for a resource server that introspects ([the flows](../integrate/flows.md#refresh-introspection-and-revocation)) |
 | `system/launch.c` | `POST /launch` and the signed launch JWT, for an EHR ([the EHR launch API](../integrate/ehr-launch.md)) |
 | `system/AuditEvent.rs` | `GET /audit`, for an operator's client ([audit records](../operate/audit.md#reading-the-records)) |
-| `system/admin` | `/register`, `/admin/clients` and `/admin/keys`, for an administrator's client ([the admin API](admin-api.md)) |
+| `system/admin` | `/register` and every `/admin/` route, for an administrator's client ([the admin API](admin-api.md)) |
 
 ## Roles
 

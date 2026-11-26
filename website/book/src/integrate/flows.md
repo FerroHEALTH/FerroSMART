@@ -187,8 +187,9 @@ or tab, and that window returns to the app's redirect URI as usual.
 
 ## The tokens
 
-An access token is an RFC 9068 JWT, `typ` `at+jwt`, signed `RS256` with a
-key published at `{issuer}/jwks`. It carries `iss`, `sub`, `aud`,
+An access token is an RFC 9068 JWT, `typ` `at+jwt`, signed with a key
+published at `{issuer}/jwks`: `RS256`, or `ML-DSA-65` (RFC 9964) for a
+client whose `id_token_signed_response_alg` names it. It carries `iss`, `sub`, `aud`,
 `client_id`, `iat`, `exp`, `jti` and `scope`, and the context the response
 carried: `patient`, `encounter`, `fhirUser`, and `ehrId` at an openEHR
 server. Its `aud` is the one base the request named. It lives
@@ -196,15 +197,15 @@ server. Its `aud` is the one base the request named. It lives
 
 A person's `sub` is pairwise: derived from the identity provider's issuer
 and `sub`, so two providers never collide and the provider's identifier
-never reaches a resource server. The ID Token, signed `RS256`, carries
+never reaches a resource server. The ID Token, signed with the same algorithm, carries
 `iss`, `sub`, `aud`, `exp`, `iat`, `nonce` when the app sent one,
 `auth_time`, and `fhirUser` when `fhirUser` was granted. When the client's
 ceiling lists `profile` or `email` and the app asks for them, the ID Token
 also carries `name`, `preferred_username`, `given_name`, `family_name`
 and `birthdate` (`profile`) and `email` and `email_verified` (`email`) as
 the identity provider sent them; a wallet login adds the PID's
-`place_of_birth` and `nationalities` under `profile`. That lets a
-standard OpenID Connect library can show who is signed in. The `sub`
+`place_of_birth` and `nationalities` under `profile`. A standard
+OpenID Connect library can then show who is signed in. The `sub`
 stays pairwise.
 
 ## Backend Services

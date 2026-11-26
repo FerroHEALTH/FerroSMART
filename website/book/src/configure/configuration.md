@@ -312,8 +312,8 @@ verified stays in use until its own next update.
 
 ## `[ferrosmart.saml]`
 
-FerroSMART as one SAML 2.0 service provider, which every `protocol =
-"saml"` entry needs. FerroSMART serves its metadata at
+FerroSMART as one SAML 2.0 service provider, which every entry with a
+`[ferrosmart.upstream.saml]` table needs. FerroSMART serves its metadata at
 `{issuer}/saml/metadata` and takes the provider's answer at
 `{issuer}/saml/acs`.
 
