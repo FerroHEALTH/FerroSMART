@@ -12,9 +12,10 @@
 //! - [`config`]: the `[oidc]` and `[session]` sections every console embeds,
 //!   read with `deny_unknown_fields`, each secret through
 //!   `ferrohealth-secret`'s `<key>` / `<key>_file` rule;
-//! - [`sessions::Sessions`]: the store, in process (`memory`, an opaque id in
-//!   the cookie) or in one AES-256-GCM sealed cookie (`sealed`, for a console
-//!   that runs as several instances with no shared store);
+//! - [`sessions::Sessions`]: the store, in the console's process, with an
+//!   opaque id in the cookie; a restart signs every operator out, and a
+//!   console that runs as several instances routes each session to one of
+//!   them (sticky sessions);
 //! - [`clock`]: the clock every lifetime is counted on, the wall clock by
 //!   default, with `clock::ManualClock` (feature `test-clock`) for a
 //!   console's tests;
@@ -24,7 +25,7 @@
 //! - [`sessions::Sessions::keep_fresh`]: the refresh of an access token before
 //!   it expires;
 //! - [`justification`]: a justification the operator stated for one object,
-//!   kept with a memory-store session until it ends;
+//!   kept with the session until it ends;
 //! - `routes` (feature `axum`): `GET /login`, `GET /auth/callback`,
 //!   `POST /logout` and `GET`/`POST /session`, and the middleware that hands
 //!   every page what its request holds.

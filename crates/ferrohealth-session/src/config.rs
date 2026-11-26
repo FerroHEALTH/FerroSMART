@@ -16,10 +16,9 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use base64::Engine as _;
 use ferrohealth_config::tls::TlsClientSection;
 use ferrohealth_config::units::Duration as ConfigDuration;
-use ferrohealth_secret::file::{SecretError, read_secret, require_secret};
+use ferrohealth_secret::file::{SecretError, read_secret};
 use ferrohealth_secret::secret::Secret;
 use ferrohealth_secret::secret_url::SecretUrl;
 use ferrohealth_smart::client::{PresentedTls, Reach, Tls};
@@ -30,10 +29,6 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::lifetime::Lifetimes;
-
-/// The fewest bytes a sealing key decodes to: the 512 bits the `cookie`
-/// crate's `Key` derives its signing and encryption halves from.
-pub const KEY_BYTES: usize = 64;
 
 /// Why a section was refused, or the provider could not be reached.
 ///
@@ -84,29 +79,17 @@ pub enum ConfigError {
     /// The absolute lifetime is shorter than the idle one.
     #[error("session.absolute_timeout must be at least session.idle_timeout")]
     AbsoluteBeforeIdle,
-    /// A sealed store has no key.
-    #[error("session.store = \"sealed\" needs session.key or session.key_file")]
-    NoKey,
-    /// A key is set for a store that seals nothing.
-    #[error("session.key is set, but session.store = \"memory\" seals nothing")]
-    KeyUnused,
-    /// The sealing key is not base64.
-    #[error("session.key is not base64")]
-    KeyBase64 {
-        /// What the decoder said.
-        #[source]
-        source: base64::DecodeError,
+    /// `store = "sealed"`, a store this release removed.
+    #[error(
+        "session.store = \"sealed\" is removed; set session.store = \"memory\", and route each session to one instance when the console runs as several"
+    )]
+    SealedRemoved,
+    /// `key` or `key_file`, the sealing key of the removed sealed store.
+    #[error("{key} is removed with the sealed store; delete it and set session.store = \"memory\"")]
+    SealingKeyRemoved {
+        /// The key.
+        key: &'static str,
     },
-    /// The sealing key decodes to too few bytes.
-    #[error("session.key decodes to {found} bytes; it needs at least {KEY_BYTES}")]
-    KeyShort {
-        /// How many bytes it decodes to.
-        found: usize,
-    },
-    /// A sealed store with `offline_access`, which would put a refresh
-    /// token in a browser cookie.
-    #[error("oidc.offline_access cannot be used with session.store = \"sealed\"")]
-    OfflineAccessSealed,
     /// `oidc.tls` names TLS material and the section was checked without
     /// the console's TLS builder, the one reader of TLS material.
     #[error("oidc.tls names TLS material; check the section with the console's TLS builder")]
@@ -450,8 +433,9 @@ pub enum StoreKind {
     /// In the console's process, bounded; the cookie carries an opaque id.
     #[default]
     Memory,
-    /// In one AES-256-GCM sealed cookie, which every instance holding the
-    /// key opens.
+    /// The removed sealed store, which [`SessionSection::check`] refuses
+    /// with [`ConfigError::SealedRemoved`].
+    // TODO(#906): delete this variant and its refusal in the release after the removal.
     Sealed,
 }
 
@@ -476,11 +460,13 @@ pub struct SessionSection {
     /// How many sessions a `memory` store holds; past it a new one is
     /// refused.
     pub max_sessions: usize,
-    /// The sealing key of a `sealed` store, inline: base64 of at least 64
-    /// bytes, the same on every instance.
+    /// The sealing key of the removed sealed store, refused with
+    /// [`ConfigError::SealingKeyRemoved`].
+    // TODO(#906): delete `key` and `key_file` and their refusal in the release after the removal.
     #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
     pub key: Option<Secret>,
-    /// A file holding the sealing key.
+    /// The file of the removed sealing key, refused with
+    /// [`ConfigError::SealingKeyRemoved`].
     pub key_file: Option<PathBuf>,
 }
 
@@ -500,24 +486,11 @@ impl Default for SessionSection {
     }
 }
 
-/// The store a checked `[session]` names.
-#[derive(Clone)]
-pub(crate) enum Storage {
-    /// In process, with its two bounds.
-    Memory {
-        /// Pending sign-ins.
-        max_sign_ins: usize,
-        /// Sessions.
-        max_sessions: usize,
-    },
-    /// Sealed, with its key.
-    Sealed(cookie::Key),
-}
-
 /// The checked `[session]`.
 #[derive(Clone)]
 pub struct SessionSettings {
-    pub(crate) storage: Storage,
+    pub(crate) max_sign_ins: usize,
+    pub(crate) max_sessions: usize,
     pub(crate) secure_cookie: bool,
     pub(crate) sign_in_timeout: Duration,
     pub(crate) lifetimes: Lifetimes,
@@ -525,12 +498,9 @@ pub struct SessionSettings {
 
 impl fmt::Debug for SessionSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let store = match self.storage {
-            Storage::Memory { .. } => StoreKind::Memory,
-            Storage::Sealed(_) => StoreKind::Sealed,
-        };
         f.debug_struct("SessionSettings")
-            .field("store", &store)
+            .field("max_sign_ins", &self.max_sign_ins)
+            .field("max_sessions", &self.max_sessions)
             .field("secure_cookie", &self.secure_cookie)
             .field("sign_in_timeout", &self.sign_in_timeout)
             .field("lifetimes", &self.lifetimes)
@@ -553,30 +523,27 @@ impl SessionSettings {
 }
 
 impl SessionSection {
-    /// Checks the section against the console's checked `[oidc]` and reads
-    /// its key.
+    /// Checks the section.
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::Zero`] for a zero lifetime or bound,
+    /// Returns [`ConfigError::SealedRemoved`] for `store = "sealed"`,
+    /// [`ConfigError::SealingKeyRemoved`] for `key` or `key_file`,
+    /// [`ConfigError::Zero`] for a zero lifetime or bound, and
     /// [`ConfigError::AbsoluteBeforeIdle`] for an absolute lifetime shorter
-    /// than the idle one, [`ConfigError::NoKey`], [`ConfigError::KeyBase64`]
-    /// or [`ConfigError::KeyShort`] for a sealed store's missing or unusable
-    /// key, [`ConfigError::KeyUnused`] for a key beside a memory store, and
-    /// [`ConfigError::OfflineAccessSealed`] for a sealed store whose sign-in
-    /// asks for a refresh token.
-    pub fn check(&self, oidc: &OidcSettings) -> Result<SessionSettings, ConfigError> {
-        self.check_with(oidc.offline_access())
-    }
-
-    /// [`Self::check`] for a console whose sign-in asks for a refresh token
-    /// when `offline_access` holds, the configuration having no `[oidc]` of
-    /// its own (a sign-in the console checks itself).
-    ///
-    /// # Errors
-    ///
-    /// The errors of [`Self::check`].
-    pub fn check_with(&self, offline_access: bool) -> Result<SessionSettings, ConfigError> {
+    /// than the idle one.
+    pub fn check(&self) -> Result<SessionSettings, ConfigError> {
+        if self.store == StoreKind::Sealed {
+            return Err(ConfigError::SealedRemoved);
+        }
+        for (key, set) in [
+            ("session.key", self.key.is_some()),
+            ("session.key_file", self.key_file.is_some()),
+        ] {
+            if set {
+                return Err(ConfigError::SealingKeyRemoved { key });
+            }
+        }
         for (key, value) in [
             ("session.sign_in_timeout", self.sign_in_timeout),
             ("session.idle_timeout", self.idle_timeout),
@@ -589,42 +556,17 @@ impl SessionSection {
         if self.absolute_timeout < self.idle_timeout {
             return Err(ConfigError::AbsoluteBeforeIdle);
         }
-        let storage = match self.store {
-            StoreKind::Memory => {
-                if self.key.is_some() || self.key_file.is_some() {
-                    return Err(ConfigError::KeyUnused);
-                }
-                for (key, value) in [
-                    ("session.max_sign_ins", self.max_sign_ins),
-                    ("session.max_sessions", self.max_sessions),
-                ] {
-                    if value == 0 {
-                        return Err(ConfigError::Zero { key });
-                    }
-                }
-                Storage::Memory {
-                    max_sign_ins: self.max_sign_ins,
-                    max_sessions: self.max_sessions,
-                }
+        for (key, value) in [
+            ("session.max_sign_ins", self.max_sign_ins),
+            ("session.max_sessions", self.max_sessions),
+        ] {
+            if value == 0 {
+                return Err(ConfigError::Zero { key });
             }
-            StoreKind::Sealed => {
-                // NOTE: RFC 6749 §10.4: a refresh token is kept confidential, and one sealed into
-                // a browser cookie outlives a sign-out that cannot reach that cookie.
-                if offline_access {
-                    return Err(ConfigError::OfflineAccessSealed);
-                }
-                let secret: Secret =
-                    match require_secret("session.key", self.key.clone(), self.key_file.as_deref())
-                    {
-                        Ok(secret) => secret,
-                        Err(SecretError::Missing { .. }) => return Err(ConfigError::NoKey),
-                        Err(error) => return Err(error.into()),
-                    };
-                Storage::Sealed(sealing_key(&secret)?)
-            }
-        };
+        }
         Ok(SessionSettings {
-            storage,
+            max_sign_ins: self.max_sign_ins,
+            max_sessions: self.max_sessions,
             secure_cookie: self.secure_cookie,
             sign_in_timeout: self.sign_in_timeout.get(),
             lifetimes: Lifetimes {
@@ -633,15 +575,6 @@ impl SessionSection {
             },
         })
     }
-}
-
-/// The key `secret` decodes to.
-fn sealing_key(secret: &Secret) -> Result<cookie::Key, ConfigError> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(secret.expose().trim())
-        .map_err(|source| ConfigError::KeyBase64 { source })?;
-    cookie::Key::try_from(bytes.as_slice())
-        .map_err(|_short| ConfigError::KeyShort { found: bytes.len() })
 }
 
 /// `value` of `key`, refused when empty.
@@ -721,27 +654,15 @@ fn resolve_entry(entry: &str) -> Option<(String, SocketAddr)> {
 
 #[cfg(test)]
 mod tests {
-    use base64::Engine as _;
     use ferrohealth_secret::secret::Secret;
     use ferrohealth_secret::secret_url::SecretUrl;
 
     use ferrohealth_smart::oidc::{OFFLINE_ACCESS, OPENID};
 
-    use super::{ConfigError, OidcSection, SessionSection, StoreKind};
+    use super::{ConfigError, OidcSection, SessionSection};
 
-    fn key(bytes: usize) -> Secret {
-        let mut raw = vec![0_u8; bytes];
-        aws_lc_rs::rand::fill(&mut raw).expect("the random source works");
-        Secret::new(base64::engine::general_purpose::STANDARD.encode(raw))
-    }
-
-    fn sealed() -> SessionSection {
-        SessionSection {
-            store: StoreKind::Sealed,
-            key: Some(key(64)),
-            ..SessionSection::default()
-        }
-    }
+    /// A synthetic sealing key of the removed sealed store.
+    const SEALING_KEY: &str = "c3ludGhldGljLXNlYWxpbmcta2V5LW9mLXRoZS1yZW1vdmVkLXN0b3Jl";
 
     #[test]
     fn the_sections_refuse_an_unknown_key() {
@@ -853,7 +774,7 @@ post_logout_redirect_uri = "https://u:LOGOUT_REDIRECT_PW@console.example.org/"
     #[test]
     fn the_defaults_are_a_memory_store_with_secure_cookies() {
         let section: SessionSection = toml::from_str("").expect("all defaults");
-        let settings = section.check_with(false).expect("valid");
+        let settings = section.check().expect("valid");
         assert!(settings.secure_cookie(), "Secure by default");
         assert_eq!(1800, settings.lifetimes().idle.as_secs(), "idle");
         assert_eq!(43_200, settings.lifetimes().absolute.as_secs(), "absolute");
@@ -867,66 +788,81 @@ post_logout_redirect_uri = "https://u:LOGOUT_REDIRECT_PW@console.example.org/"
             ..SessionSection::default()
         };
         assert!(matches!(
-            section.check_with(false),
+            section.check(),
             Err(ConfigError::AbsoluteBeforeIdle)
         ));
     }
 
     #[test]
-    fn a_sealed_store_refuses_offline_access_when_it_loads() {
-        assert!(matches!(
-            sealed().check_with(true),
-            Err(ConfigError::OfflineAccessSealed)
-        ));
-        assert!(sealed().check_with(false).is_ok(), "without offline_access");
+    fn the_removed_sealed_store_is_refused_naming_the_memory_store() {
+        let section: SessionSection =
+            toml::from_str("store = \"sealed\"").expect("the removed value still reads");
+        let refused = section.check();
+        assert!(
+            matches!(refused, Err(ConfigError::SealedRemoved)),
+            "{refused:?}"
+        );
+        let shown = refused.err().map(|error| error.to_string());
+        assert!(
+            shown
+                .as_deref()
+                .is_some_and(|shown| shown.contains("session.store = \"memory\"")),
+            "{shown:?}"
+        );
     }
 
     #[test]
-    fn a_sealed_store_without_a_usable_key_is_refused() {
-        let none = SessionSection {
-            key: None,
-            ..sealed()
-        };
-        assert!(matches!(none.check_with(false), Err(ConfigError::NoKey)));
-        let short = SessionSection {
-            key: Some(key(32)),
-            ..sealed()
-        };
+    fn the_removed_sealing_key_is_refused_without_showing_it() {
+        let section: SessionSection =
+            toml::from_str(&format!("key = \"{SEALING_KEY}\"")).expect("the removed key reads");
+        let refused = section.check();
+        assert!(
+            matches!(
+                refused,
+                Err(ConfigError::SealingKeyRemoved { key: "session.key" })
+            ),
+            "{refused:?}"
+        );
+        let shown = format!("{section:?} {refused:?}");
+        assert!(!shown.contains(SEALING_KEY), "{shown}");
+        let section: SessionSection =
+            toml::from_str("key_file = \"/run/secrets/session-key\"").expect("reads");
         assert!(matches!(
-            short.check_with(false),
-            Err(ConfigError::KeyShort { found: 32 })
-        ));
-        let garbled = SessionSection {
-            key: Some(Secret::new("not base64 !")),
-            ..sealed()
-        };
-        assert!(matches!(
-            garbled.check_with(false),
-            Err(ConfigError::KeyBase64 { .. })
+            section.check(),
+            Err(ConfigError::SealingKeyRemoved {
+                key: "session.key_file"
+            })
         ));
     }
 
     #[test]
-    fn a_key_beside_a_memory_store_is_refused() {
-        let section = SessionSection {
-            key: Some(key(64)),
-            ..SessionSection::default()
-        };
-        assert!(matches!(
-            section.check_with(false),
-            Err(ConfigError::KeyUnused)
-        ));
+    fn a_memory_store_refuses_a_zero_bound() {
+        for (key, section) in [
+            (
+                "session.max_sign_ins",
+                SessionSection {
+                    max_sign_ins: 0,
+                    ..SessionSection::default()
+                },
+            ),
+            (
+                "session.max_sessions",
+                SessionSection {
+                    max_sessions: 0,
+                    ..SessionSection::default()
+                },
+            ),
+        ] {
+            let refused = section.check();
+            assert!(
+                matches!(refused, Err(ConfigError::Zero { key: named }) if named == key),
+                "{key}: {refused:?}"
+            );
+        }
     }
 
     #[test]
     fn no_secret_reaches_a_debug_rendering_or_an_error() {
-        let section = sealed();
-        let shown = format!(
-            "{section:?} {:?}",
-            section.check_with(false).expect("valid")
-        );
-        let raw = section.key.as_ref().expect("set").expose().to_owned();
-        assert!(!shown.contains(&raw), "{shown}");
         let oidc = OidcSection {
             issuer: SecretUrl::new("https://idp.example.org"),
             client_id: String::from("console"),

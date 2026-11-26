@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 //! The clock every lifetime is counted on: wall-clock milliseconds, so a
-//! sealed cookie opened by another instance reads the same times and a
 //! timeout of T lasts at least T.
 //!
 //! A store runs on [`Clock::system`] unless it is built with

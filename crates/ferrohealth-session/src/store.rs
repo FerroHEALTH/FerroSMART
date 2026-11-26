@@ -1,19 +1,13 @@
 // SPDX-FileCopyrightText: Cadasto B.V.
 // SPDX-License-Identifier: BUSL-1.1
 
-//! The two stores behind [`crate::sessions::Sessions`].
+//! The memory store behind [`crate::sessions::Sessions`].
 //!
-//! - **memory** keeps two bounded pools in the process. A pending sign-in
-//!   pool drops its oldest entry to admit a new one, so a flood of sign-in
-//!   starts costs at most its bound; the session pool refuses a new session
-//!   at its bound and never evicts a live one, so no sign-in traffic signs
-//!   anyone out.
-//! - **sealed** keeps each record whole in one cookie, encrypted and
-//!   authenticated with AES-256-GCM by the `cookie` crate's private jar, so
-//!   every instance holding the key opens it. A cookie that does not open,
-//!   or does not read as a record, is no session.
-//!
-//! No specification governs either store: our own design.
+//! It keeps two bounded pools in the process. The pending sign-in pool
+//! drops its oldest entry to admit a new one, so a flood of sign-in starts
+//! costs at most its bound; the session pool refuses a new session at its
+//! bound and never evicts a live one, so no sign-in traffic signs anyone
+//! out. No specification governs the store: our own design.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -21,18 +15,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 
 use crate::record::Record;
 use crate::sessions::{Occupancy, Pending, SessionError};
 
 /// How many random bytes an id carries: 256 bits.
 const ID_BYTES: usize = 32;
-
-/// The most bytes one `Set-Cookie` value may take: the 4096 bytes a browser
-/// keeps at the least (RFC 6265 §6.1).
-pub(crate) const COOKIE_LIMIT: usize = 4096;
 
 /// An opaque id of the memory store, the value of a cookie.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -251,36 +239,4 @@ impl Memory {
         .join();
         assert!(joined.is_err(), "the poisoning thread panics");
     }
-}
-
-/// `value` sealed under `key` as the cookie `name`'s value.
-pub(crate) fn seal(
-    key: &cookie::Key,
-    name: &str,
-    value: &impl Serialize,
-) -> Result<String, SessionError> {
-    let payload = serde_json::to_string(value).map_err(SessionError::Seal)?;
-    let mut jar = cookie::CookieJar::new();
-    jar.private_mut(key)
-        .add(cookie::Cookie::new(name.to_owned(), payload));
-    jar.get(name)
-        .map(|sealed| sealed.value().to_owned())
-        .ok_or(SessionError::Unsealed)
-}
-
-/// The value sealed in `sealed` under `key` as the cookie `name`'s.
-///
-/// A value that does not open, or does not read as a `T`, is `None`: on
-/// this seam every defect means the same thing, no session.
-pub(crate) fn open<T: DeserializeOwned>(
-    key: &cookie::Key,
-    name: &str,
-    sealed: String,
-) -> Option<T> {
-    let mut jar = cookie::CookieJar::new();
-    jar.add_original(cookie::Cookie::new(name.to_owned(), sealed));
-    let opened = jar.private(key).get(name)?;
-    // NOTE: no specification governs this: our own design; a payload that opens but does not
-    // read is a cookie from another version of the store, which is no session.
-    serde_json::from_str(opened.value()).ok()
 }

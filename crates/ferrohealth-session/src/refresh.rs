@@ -3,7 +3,7 @@
 
 //! The refresh of a session's access token before it expires (RFC 6749 §6).
 //!
-//! A session of the memory store that holds a refresh token outlives its
+//! A session that holds a refresh token outlives its
 //! access token; a request that finds the token within [`MARGIN`] of its
 //! expiry renews it first. One refresh per session runs at a time, so a
 //! refresh token the provider rotates is never spent twice. No specification
@@ -68,16 +68,17 @@ impl Sessions {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::Poisoned`] for an unusable memory store. A
+    /// Returns [`SessionError::Poisoned`] for an unusable store. A
     /// provider's refusal or failure is a [`Freshness`], never an error.
     pub async fn keep_fresh(
         &self,
         party: &RelyingParty,
         headers: &HeaderMap,
     ) -> Result<Freshness, SessionError> {
-        let (Some(memory), Some(id)) = (self.memory(), self.session_id(headers)) else {
+        let Some(id) = self.session_id(headers) else {
             return Ok(Freshness::Current);
         };
+        let memory = self.memory();
         let now = self.now();
         let gate = memory.with(
             &id,

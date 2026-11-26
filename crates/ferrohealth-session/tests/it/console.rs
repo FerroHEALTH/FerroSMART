@@ -12,10 +12,9 @@ use axum::body::Body;
 use axum::extract::{Extension, State};
 use axum::response::{IntoResponse as _, Response};
 use axum::routing::get;
-use base64::Engine as _;
 use ferrohealth_secret::secret::Secret;
 use ferrohealth_secret::secret_url::SecretUrl;
-use ferrohealth_session::config::{OidcSection, SessionSection, StoreKind};
+use ferrohealth_session::config::{OidcSection, SessionSection};
 use ferrohealth_session::cookies::CookieNames;
 use ferrohealth_session::record::{Credential, Held};
 use ferrohealth_session::resource::ForResource;
@@ -98,13 +97,13 @@ async fn resource(State(sign_in): State<SignIn<TestPages>>, headers: http::Heade
     }
 }
 
-/// A console signed in at `provider` over the store `store`.
-pub(crate) async fn console(provider: &Provider, store: StoreKind) -> Router {
-    console_of(sign_in(provider, store).await)
+/// A console signed in at `provider`.
+pub(crate) async fn console(provider: &Provider) -> Router {
+    console_of(sign_in(provider).await)
 }
 
-/// The sign-in of a console at `provider` over the store `store`.
-pub(crate) async fn sign_in(provider: &Provider, store: StoreKind) -> SignIn<TestPages> {
+/// The sign-in of a console at `provider`.
+pub(crate) async fn sign_in(provider: &Provider) -> SignIn<TestPages> {
     let oidc = OidcSection {
         issuer: SecretUrl::new(provider.uri()),
         client_id: String::from(CLIENT),
@@ -115,18 +114,9 @@ pub(crate) async fn sign_in(provider: &Provider, store: StoreKind) -> SignIn<Tes
     }
     .check()
     .expect("a valid [oidc]");
-    let key = (store == StoreKind::Sealed).then(|| {
-        let mut raw = [0_u8; 64];
-        aws_lc_rs::rand::fill(&mut raw).expect("the random source works");
-        Secret::new(base64::engine::general_purpose::STANDARD.encode(raw))
-    });
-    let settings = SessionSection {
-        store,
-        key,
-        ..SessionSection::default()
-    }
-    .check(&oidc)
-    .expect("a valid [session]");
+    let settings = SessionSection::default()
+        .check()
+        .expect("a valid [session]");
     let party = oidc
         .relying_party()
         .await
