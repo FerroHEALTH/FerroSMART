@@ -111,7 +111,8 @@ The consent page reached after the request lapsed.
 A login that came back to a browser that did not begin it.
 [Dark theme](img/error-other-browser-dark.png).
 
-The token response carries `access_token`, `token_type: Bearer`,
+The token response carries `access_token`, `token_type: Bearer` (a value
+compared without regard to case, RFC 6749 §5.1),
 `expires_in`, the granted `scope`, an `id_token` when `openid` was granted,
 a `refresh_token` when a refresh scope was, and the launch context:
 `patient` (or `ehrId` at an openEHR server), `encounter`, `fhirContext`,

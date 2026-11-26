@@ -5,9 +5,10 @@
 
 [FerroSMART](introduction.md)
 
-# Tutorial
+# Tutorials
 
 - [Quickstart](install/quickstart.md)
+- [Your first system client](tutorial/first-system-client.md)
 
 # How-to guides: integrate
 
