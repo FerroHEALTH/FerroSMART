@@ -1341,7 +1341,7 @@ dependencies = [
 
 [[package]]
 name = "ferrohealth-session"
-version = "0.31.0"
+version = "0.32.0"
 dependencies = [
  "aws-lc-rs",
  "axum",

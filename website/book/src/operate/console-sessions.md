@@ -46,9 +46,8 @@ No shared store is offered.
 | `absolute_timeout` | `12h` | How long a session lives from its sign-in, whatever the activity; at least `idle_timeout` |
 | `max_sessions` | 10000 | How many sessions are held; past it a new sign-in is refused |
 
-A configuration that still names `store = "sealed"`, `key` or `key_file`
-is refused when it loads, with a message that names `memory`. Delete those
-keys.
+`store` takes `memory` alone, and the section refuses a key it does not
+know.
 
 The crate's own documentation, with the `[oidc]` section, is on
 [docs.rs](https://docs.rs/ferrohealth-session).

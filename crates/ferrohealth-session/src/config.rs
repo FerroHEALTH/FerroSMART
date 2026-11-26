@@ -79,17 +79,6 @@ pub enum ConfigError {
     /// The absolute lifetime is shorter than the idle one.
     #[error("session.absolute_timeout must be at least session.idle_timeout")]
     AbsoluteBeforeIdle,
-    /// `store = "sealed"`, a store this release removed.
-    #[error(
-        "session.store = \"sealed\" is removed; set session.store = \"memory\", and route each session to one instance when the console runs as several"
-    )]
-    SealedRemoved,
-    /// `key` or `key_file`, the sealing key of the removed sealed store.
-    #[error("{key} is removed with the sealed store; delete it and set session.store = \"memory\"")]
-    SealingKeyRemoved {
-        /// The key.
-        key: &'static str,
-    },
     /// `oidc.tls` names TLS material and the section was checked without
     /// the console's TLS builder, the one reader of TLS material.
     #[error("oidc.tls names TLS material; check the section with the console's TLS builder")]
@@ -433,10 +422,6 @@ pub enum StoreKind {
     /// In the console's process, bounded; the cookie carries an opaque id.
     #[default]
     Memory,
-    /// The removed sealed store, which [`SessionSection::check`] refuses
-    /// with [`ConfigError::SealedRemoved`].
-    // TODO(#906): delete this variant and its refusal in the release after the removal.
-    Sealed,
 }
 
 /// `[session]`: the store and the lifetimes of the console's sessions.
@@ -460,14 +445,6 @@ pub struct SessionSection {
     /// How many sessions a `memory` store holds; past it a new one is
     /// refused.
     pub max_sessions: usize,
-    /// The sealing key of the removed sealed store, refused with
-    /// [`ConfigError::SealingKeyRemoved`].
-    // TODO(#906): delete `key` and `key_file` and their refusal in the release after the removal.
-    #[cfg_attr(feature = "schema", schemars(with = "Option<String>"))]
-    pub key: Option<Secret>,
-    /// The file of the removed sealing key, refused with
-    /// [`ConfigError::SealingKeyRemoved`].
-    pub key_file: Option<PathBuf>,
 }
 
 impl Default for SessionSection {
@@ -480,8 +457,6 @@ impl Default for SessionSection {
             idle_timeout: ConfigDuration::from_mins(30),
             absolute_timeout: ConfigDuration::from_hours(12),
             max_sessions: 10_000,
-            key: None,
-            key_file: None,
         }
     }
 }
@@ -527,23 +502,10 @@ impl SessionSection {
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::SealedRemoved`] for `store = "sealed"`,
-    /// [`ConfigError::SealingKeyRemoved`] for `key` or `key_file`,
-    /// [`ConfigError::Zero`] for a zero lifetime or bound, and
+    /// Returns [`ConfigError::Zero`] for a zero lifetime or bound, and
     /// [`ConfigError::AbsoluteBeforeIdle`] for an absolute lifetime shorter
     /// than the idle one.
     pub fn check(&self) -> Result<SessionSettings, ConfigError> {
-        if self.store == StoreKind::Sealed {
-            return Err(ConfigError::SealedRemoved);
-        }
-        for (key, set) in [
-            ("session.key", self.key.is_some()),
-            ("session.key_file", self.key_file.is_some()),
-        ] {
-            if set {
-                return Err(ConfigError::SealingKeyRemoved { key });
-            }
-        }
         for (key, value) in [
             ("session.sign_in_timeout", self.sign_in_timeout),
             ("session.idle_timeout", self.idle_timeout),
@@ -660,9 +622,6 @@ mod tests {
     use ferrohealth_smart::oidc::{OFFLINE_ACCESS, OPENID};
 
     use super::{ConfigError, OidcSection, SessionSection};
-
-    /// A synthetic sealing key of the removed sealed store.
-    const SEALING_KEY: &str = "c3ludGhldGljLXNlYWxpbmcta2V5LW9mLXRoZS1yZW1vdmVkLXN0b3Jl";
 
     #[test]
     fn the_sections_refuse_an_unknown_key() {
@@ -794,45 +753,17 @@ post_logout_redirect_uri = "https://u:LOGOUT_REDIRECT_PW@console.example.org/"
     }
 
     #[test]
-    fn the_removed_sealed_store_is_refused_naming_the_memory_store() {
-        let section: SessionSection =
-            toml::from_str("store = \"sealed\"").expect("the removed value still reads");
-        let refused = section.check();
-        assert!(
-            matches!(refused, Err(ConfigError::SealedRemoved)),
-            "{refused:?}"
-        );
-        let shown = refused.err().map(|error| error.to_string());
-        assert!(
-            shown
-                .as_deref()
-                .is_some_and(|shown| shown.contains("session.store = \"memory\"")),
-            "{shown:?}"
-        );
-    }
-
-    #[test]
-    fn the_removed_sealing_key_is_refused_without_showing_it() {
-        let section: SessionSection =
-            toml::from_str(&format!("key = \"{SEALING_KEY}\"")).expect("the removed key reads");
-        let refused = section.check();
-        assert!(
-            matches!(
-                refused,
-                Err(ConfigError::SealingKeyRemoved { key: "session.key" })
-            ),
-            "{refused:?}"
-        );
-        let shown = format!("{section:?} {refused:?}");
-        assert!(!shown.contains(SEALING_KEY), "{shown}");
-        let section: SessionSection =
-            toml::from_str("key_file = \"/run/secrets/session-key\"").expect("reads");
-        assert!(matches!(
-            section.check(),
-            Err(ConfigError::SealingKeyRemoved {
-                key: "session.key_file"
-            })
-        ));
+    fn the_sealed_store_and_its_keys_are_unknown() {
+        for text in [
+            "store = \"sealed\"",
+            "key = \"a-sealing-key\"",
+            "key_file = \"/run/secrets/session-key\"",
+        ] {
+            assert!(
+                toml::from_str::<SessionSection>(text).is_err(),
+                "{text} reads"
+            );
+        }
     }
 
     #[test]
