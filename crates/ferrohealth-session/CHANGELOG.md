@@ -14,7 +14,15 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.31.0] - Unreleased
+## [0.31.0] - 2026-11-26
+
+### Changed
+
+- Breaking: `SessionSection::check` takes no argument, and `SessionSection::check_with` is removed, since the offline-access check belonged to the sealed store; a console calls `config.session.check()`. `Sessions::occupancy` answers `Occupancy` in place of `Option<Occupancy>` (#904).
+
+### Removed
+
+- Breaking: the sealed session store is removed. The memory store is the only store: the session, its refresh token, its tokens for other resource servers and its justifications stay in the console's process and never reach the browser. A console runs as one instance, or routes each session to one replica at its ingress (sticky sessions), and a restart signs every operator out. For this release `[session] store = "sealed"` is refused at load with `ConfigError::SealedRemoved`, which names `memory`, and `key` and `key_file` with `ConfigError::SealingKeyRemoved`; the next release deletes them. Gone with it: `config::KEY_BYTES`, the `ConfigError` variants `NoKey`, `KeyUnused`, `KeyBase64`, `KeyShort` and `OfflineAccessSealed`, and the `SessionError` variants `Seal`, `Unsealed` and `TooLarge` (#904).
 
 ## [0.30.1] - 2026-11-26
 
@@ -541,7 +549,8 @@ FerroHEALTH operator consoles, over the relying party of `ferrohealth-smart`
   its request's `record::Held` and the `routes::Pages` trait a console draws
   a stopped sign-in through.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.30.1...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.31.0...HEAD
+[0.31.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.30.1...ferrohealth-session-v0.31.0
 [0.30.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.30.0...ferrohealth-session-v0.30.1
 [0.30.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.29.0...ferrohealth-session-v0.30.0
 [0.29.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.28.1...ferrohealth-session-v0.29.0
