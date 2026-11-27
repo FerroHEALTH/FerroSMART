@@ -394,6 +394,7 @@ screenshots() {
     if ! jq -e 'any(.[]; (.img // "") | startswith("data:image/png;base64,")) and all(.[]; has("upload") | not)' \
       <<< "$images" > /dev/null; then
       echo "oidf-lane: $plan $module is in REVIEW without the screenshot of FerroSMART's page" >&2
+      jq -c '[.[] | {msg, upload, img: ((.img // "") | .[0:40])}]' <<< "$images" >&2 || true
       failures=$((failures + 1))
     fi
   done < <(jq -r '.modules[] | [.testModule, (.instances[-1] // "")] | @tsv' "$LANE_DIR/plan-$plan.json")
