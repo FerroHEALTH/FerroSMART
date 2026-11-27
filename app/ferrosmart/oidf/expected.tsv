@@ -10,84 +10,84 @@
 # verifier module, of the wallet's presentation (accepted, refused). A failure,
 # and a login the module does not ask for, names its issue. Columns, tab
 # separated: plan, module, result, login, issue (- for none), reason.
-oidcc-client-test-plan	oidcc-client-test	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
+oidcc-client-test-plan	oidcc-client-test	PASSED	accepted	-	
 oidcc-client-test-plan	oidcc-client-test-nonce-invalid	PASSED	refused	-	
-oidcc-client-test-plan	oidcc-client-test-client-secret-basic	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
-oidcc-client-test-plan	oidcc-client-test-scope-userinfo-claims	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
-oidcc-client-test-plan	oidcc-client-test-kid-absent-single-jwks	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
+oidcc-client-test-plan	oidcc-client-test-client-secret-basic	PASSED	accepted	-	
+oidcc-client-test-plan	oidcc-client-test-scope-userinfo-claims	PASSED	accepted	-	
+oidcc-client-test-plan	oidcc-client-test-kid-absent-single-jwks	PASSED	accepted	-	
 oidcc-client-test-plan	oidcc-client-test-kid-absent-multiple-jwks	PASSED	refused	-	
 oidcc-client-test-plan	oidcc-client-test-missing-iat	PASSED	refused	-	
 oidcc-client-test-plan	oidcc-client-test-missing-aud	PASSED	refused	-	
 oidcc-client-test-plan	oidcc-client-test-invalid-aud	PASSED	refused	-	
 oidcc-client-test-plan	oidcc-client-test-idtoken-sig-none	SKIPPED	refused	-	the suite skips an unsigned ID Token in the code flow; FerroSMART refused it
-oidcc-client-test-plan	oidcc-client-test-idtoken-sig-rs256	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
+oidcc-client-test-plan	oidcc-client-test-idtoken-sig-rs256	PASSED	accepted	-	
 oidcc-client-test-plan	oidcc-client-test-missing-sub	PASSED	refused	-	
 oidcc-client-test-plan	oidcc-client-test-invalid-sig-rs256	PASSED	refused	-	
 oidcc-client-test-plan	oidcc-client-test-invalid-iss	PASSED	refused	-	
 oidcc-client-test-plan	oidcc-client-test-userinfo-invalid-sub	PASSED	refused	-	
-oidcc-client-test-plan	oidcc-client-test-userinfo-bearer-header	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
-oidcc-client-test-plan	oidcc-client-test-userinfo-bearer-body	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
+oidcc-client-test-plan	oidcc-client-test-userinfo-bearer-header	PASSED	accepted	-	
+oidcc-client-test-plan	oidcc-client-test-userinfo-bearer-body	FAILED	refused	933	the module takes the access token only from the form body (RFC 6750 §2.2, a MAY) and answers 400 to the Authorization header FerroSMART sends, which RFC 6750 §2.1 has every resource server support and OpenID Connect Core 1.0 §5.3.1 recommends; FerroSMART refuses a login whose UserInfo request fails (§5.3.3)
 oidcc-client-test-plan	oidcc-client-test-invalid-sig-es256	PASSED	refused	-	
-oidcc-client-test-plan	oidcc-client-test-aggregated-claims	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
-oidcc-client-test-plan	oidcc-client-test-distributed-claims	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
+oidcc-client-test-plan	oidcc-client-test-aggregated-claims	PASSED	accepted	-	
+oidcc-client-test-plan	oidcc-client-test-distributed-claims	INTERRUPTED	accepted	-	the module waits for the relying party to fetch the distributed claims' source (OpenID Connect Core 1.0 §5.6.2), which FerroSMART does not, as no claim it uses comes from one, so the driver stops the module once the login is accepted
 oidcc-client-test-plan	oidcc-client-test-discovery-openid-config	PASSED	started	-	
-oidcc-client-test-plan	oidcc-client-test-discovery-jwks-uri-keys	PASSED	accepted	-	
+oidcc-client-test-plan	oidcc-client-test-discovery-jwks-uri-keys	FAILED	refused	933	the module finishes once the key set is read, so FerroSMART's UserInfo request (OpenID Connect Core 1.0 §5.3) reaches a finished module, which answers 400 (Illegal test state change: FINISHED -> RUNNING), and FerroSMART refuses a login whose UserInfo request fails
 oidcc-client-test-plan	oidcc-client-test-discovery-issuer-mismatch	PASSED	no-start	-	
 oidcc-client-test-plan	oidcc-client-test-signing-key-rotation-just-before-signing	NOT-RUN	none	-	run-test-plan.py runs no key rotation module (conformance-suite issue 837)
 oidcc-client-test-plan	oidcc-client-test-signing-key-rotation	NOT-RUN	none	-	run-test-plan.py runs no key rotation module (conformance-suite issue 837)
 oidcc-client-test-plan	oidcc-client-test-discovery-webfinger-acct	PASSED	no-start	-	
 oidcc-client-test-plan	oidcc-client-test-discovery-webfinger-url	PASSED	no-start	-	
-oidcc-client-test-plan	oidcc-client-test-userinfo-signed	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
-oidcc-client-basic-certification-test-plan	oidcc-client-test	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
+oidcc-client-test-plan	oidcc-client-test-userinfo-signed	PASSED	accepted	-	
+oidcc-client-basic-certification-test-plan	oidcc-client-test	PASSED	accepted	-	
 oidcc-client-basic-certification-test-plan	oidcc-client-test-invalid-iss	PASSED	refused	-	
 oidcc-client-basic-certification-test-plan	oidcc-client-test-missing-sub	PASSED	refused	-	
 oidcc-client-basic-certification-test-plan	oidcc-client-test-invalid-aud	PASSED	refused	-	
 oidcc-client-basic-certification-test-plan	oidcc-client-test-missing-iat	PASSED	refused	-	
-oidcc-client-basic-certification-test-plan	oidcc-client-test-kid-absent-single-jwks	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
+oidcc-client-basic-certification-test-plan	oidcc-client-test-kid-absent-single-jwks	PASSED	accepted	-	
 oidcc-client-basic-certification-test-plan	oidcc-client-test-kid-absent-multiple-jwks	PASSED	refused	-	
-oidcc-client-basic-certification-test-plan	oidcc-client-test-idtoken-sig-rs256	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
+oidcc-client-basic-certification-test-plan	oidcc-client-test-idtoken-sig-rs256	PASSED	accepted	-	
 oidcc-client-basic-certification-test-plan	oidcc-client-test-idtoken-sig-none	SKIPPED	refused	-	the suite skips an unsigned ID Token in the code flow; FerroSMART refused it
 oidcc-client-basic-certification-test-plan	oidcc-client-test-invalid-sig-rs256	PASSED	refused	-	
 oidcc-client-basic-certification-test-plan	oidcc-client-test-userinfo-invalid-sub	PASSED	refused	-	
 oidcc-client-basic-certification-test-plan	oidcc-client-test-nonce-invalid	PASSED	refused	-	
-oidcc-client-basic-certification-test-plan	oidcc-client-test-scope-userinfo-claims	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
-oidcc-client-basic-certification-test-plan	oidcc-client-test-client-secret-basic	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
-oidcc-config-certification-test-plan	oidcc-discovery-endpoint-verification	WARNING	-	650	the discovery document names no userinfo_endpoint (OpenID Connect Discovery 1.0 §3, RECOMMENDED)
-oidcc-basic-certification-test-plan	oidcc-server	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-response-type-missing	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-userinfo-get	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-userinfo-post-header	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-userinfo-post-body	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-ensure-request-without-nonce-succeeds-for-code-flow	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-scope-profile	FAILED	-	650	the suite reads the profile and email claims from the UserInfo Endpoint; FerroSMART has none by #650 and returns them in the ID Token (OpenID Connect Core 1.0 §5.4)
-oidcc-basic-certification-test-plan	oidcc-scope-email	FAILED	-	650	the suite reads the profile and email claims from the UserInfo Endpoint; FerroSMART has none by #650 and returns them in the ID Token (OpenID Connect Core 1.0 §5.4)
-oidcc-basic-certification-test-plan	oidcc-scope-address	SKIPPED	-	650	FerroSMART has no UserInfo Endpoint, so the suite skips the module
-oidcc-basic-certification-test-plan	oidcc-scope-phone	SKIPPED	-	650	FerroSMART has no UserInfo Endpoint, so the suite skips the module
-oidcc-basic-certification-test-plan	oidcc-scope-all	SKIPPED	-	650	FerroSMART has no UserInfo Endpoint, so the suite skips the module
-oidcc-basic-certification-test-plan	oidcc-alternate-happy-flow	FAILED	-	650	the suite reads the profile and email claims from the UserInfo Endpoint; FerroSMART has none by #650 and returns them in the ID Token (OpenID Connect Core 1.0 §5.4)
-oidcc-basic-certification-test-plan	oidcc-display-page	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-display-popup	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-prompt-login	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-prompt-none-not-logged-in	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-prompt-none-logged-in	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-max-age-1	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-max-age-10000	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-ensure-request-with-unknown-parameter-succeeds	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-id-token-hint	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-login-hint	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-ui-locales	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-claims-locales	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-ensure-request-with-acr-values-succeeds	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-codereuse	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-codereuse-30seconds	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-ensure-registered-redirect-uri	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-ensure-post-request-succeeds	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-server-client-secret-post	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-claims-essential	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-ensure-request-object-with-redirect-uri	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-refresh-token	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
-oidcc-basic-certification-test-plan	oidcc-ensure-request-with-valid-pkce-succeeds	FAILED	-	650	FerroSMART has no UserInfo Endpoint, so the module stops before its authorization request
+oidcc-client-basic-certification-test-plan	oidcc-client-test-scope-userinfo-claims	PASSED	accepted	-	
+oidcc-client-basic-certification-test-plan	oidcc-client-test-client-secret-basic	PASSED	accepted	-	
+oidcc-config-certification-test-plan	oidcc-discovery-endpoint-verification	PASSED	-	-	
+oidcc-basic-certification-test-plan	oidcc-server	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-response-type-missing	PASSED	-	-	
+oidcc-basic-certification-test-plan	oidcc-userinfo-get	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-userinfo-post-header	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-userinfo-post-body	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-ensure-request-without-nonce-succeeds-for-code-flow	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-scope-profile	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-scope-email	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-scope-address	SKIPPED	-	-	FerroSMART lists no address scope in scopes_supported, so the suite skips the module (OpenID Connect Core 1.0 §5.4 makes the scope optional)
+oidcc-basic-certification-test-plan	oidcc-scope-phone	SKIPPED	-	-	FerroSMART lists no phone scope in scopes_supported, so the suite skips the module (OpenID Connect Core 1.0 §5.4 makes the scope optional)
+oidcc-basic-certification-test-plan	oidcc-scope-all	SKIPPED	-	-	FerroSMART lists no address or phone scope in scopes_supported, so the suite skips the module
+oidcc-basic-certification-test-plan	oidcc-alternate-happy-flow	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-display-page	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-display-popup	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-prompt-login	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-prompt-none-not-logged-in	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-prompt-none-logged-in	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-max-age-1	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-max-age-10000	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-ensure-request-with-unknown-parameter-succeeds	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-id-token-hint	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-login-hint	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-ui-locales	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-claims-locales	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-ensure-request-with-acr-values-succeeds	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-codereuse	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-codereuse-30seconds	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-ensure-registered-redirect-uri	FAILED	-	933	FerroSMART refuses an unregistered redirect URI with its own error page (RFC 6749 §4.1.2.1), and the suite waits for a screenshot of that page that the lane does not upload
+oidcc-basic-certification-test-plan	oidcc-ensure-post-request-succeeds	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-server-client-secret-post	FAILED	-	933	the plan runs this module with client_secret_post, and the lane configures no static client of that method for the suite
+oidcc-basic-certification-test-plan	oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-claims-essential	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-ensure-request-object-with-redirect-uri	FAILED	-	933	the request object carries a redirect URI the client did not register, so FerroSMART refuses it with its own error page (RFC 6749 §4.1.2.1), and the suite waits for a screenshot of that page that the lane does not upload
+oidcc-basic-certification-test-plan	oidcc-refresh-token	FAILED	-	933	the suite sends no S256 code_challenge, which SMART App Launch 2.2.0 (Considerations for PKCE Support) requires of every app, so FerroSMART refuses the authorization request with invalid_request
+oidcc-basic-certification-test-plan	oidcc-ensure-request-with-valid-pkce-succeeds	PASSED	-	-	
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-happy-flow	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-minimal-cnf-jwk	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
 oid4vp-1final-verifier-haip-test-plan	oid4vp-1final-verifier-request-uri-method-post	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
