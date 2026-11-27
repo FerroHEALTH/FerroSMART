@@ -11,7 +11,7 @@ authorization server.
 
 ```toml
 [dependencies]
-ferrohealth-smart = { version = "=0.35.0", features = ["axum", "openehr"] }
+ferrohealth-smart = { version = "=0.36.0", features = ["axum", "openehr"] }
 ```
 
 ## What it does
@@ -140,7 +140,7 @@ server and its dependencies are left out, so a browser client parses a
 scope string with the parser the resource server enforces it with:
 
 ```toml
-ferrohealth-smart = { version = "=0.35.0", default-features = false, features = ["openehr-scopes"] }
+ferrohealth-smart = { version = "=0.36.0", default-features = false, features = ["openehr-scopes"] }
 ```
 
 With the `axum` feature, **`guard::AuthLayer`** runs the credential check,
