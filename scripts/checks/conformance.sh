@@ -316,6 +316,8 @@ labels() {
   badge_caption_check "$tree/README.md" || failures=$((failures + 1))
   badge_color_check "$tree"/conformance/badges/*.json || failures=$((failures + 1))
   badge_length_readme "$tree/README.md" || failures=$((failures + 1))
+  badge_block_check "$tree/README.md" || failures=$((failures + 1))
+  badge_render_check "$tree/README.md" || failures=$((failures + 1))
   if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
     pq_locations "$tree" || failures=$((failures + 1))
   fi
@@ -501,6 +503,12 @@ self_test() {
   cp "$work/badge" "$tree/README.md"
   printf '[![x](https://img.shields.io/badge/CRA-information%%20for%%20all%%20users-blue?logo=x)](x)\n' >> "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a static badge past the length limits passes"; fi
+  cp "$work/badge" "$tree/README.md"
+  printf '<sub>a second line of prose</sub><br>\n[![x](https://img.shields.io/endpoint?url=conformance/badges/x.json)](x)\n' >> "$tree/README.md"
+  if labels "$tree" 2> /dev/null; then fail "a badge block with two lines of prose passes"; fi
+  cp "$work/badge" "$tree/README.md"
+  printf '<!-- m -->\n<br>\n[![x](https://img.shields.io/endpoint?url=conformance/badges/x.json)](x)\n' >> "$tree/README.md"
+  if labels "$tree" 2> /dev/null; then fail "a badge GitHub shows as text passes"; fi
   cp "$work/badge" "$tree/README.md"
   grep -vF "$badge_caption" "$work/badge" > "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a README without the conformance caption passes"; fi
