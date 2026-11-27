@@ -510,7 +510,13 @@ async fn to_consent_with(
     roles: &[&str],
     overrides: &[(&str, &str)],
 ) -> (String, String) {
-    let (status, headers, _) = smart.get(&authorize_path(overrides), None).await;
+    to_consent_at(smart, roles, &authorize_path(overrides)).await
+}
+
+/// Runs the flow from the authorization request `path` to the consent page
+/// and returns the cookie and the form token it drew.
+async fn to_consent_at(smart: &Smart, roles: &[&str], path: &str) -> (String, String) {
+    let (status, headers, _) = smart.get(path, None).await;
     assert_eq!(
         StatusCode::SEE_OTHER,
         status,
@@ -2617,6 +2623,7 @@ async fn a_token_response_is_readable_from_the_app_s_origin_alone() {
 mod assurance;
 mod consent_basis;
 mod core_op;
+mod dpop_binding;
 mod ehr_picker;
 mod encounter_picker;
 mod fhir_user_lookup;

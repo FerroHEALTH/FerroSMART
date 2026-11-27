@@ -25,6 +25,7 @@
 #                          of the two OpenID Provider plans, those the
 #                          suite passes (PASSED or WARNING)
 #   openid-connect-rp.json the same, of the two relying party plans
+#   fapi2-op.json          the same, of the FAPI 2.0 Security Profile plan
 #   smart-app-launch.json  app/ferrosmart/inferno/smart_stu2_2_expected.json:
 #                          the Inferno tests that pass, of all run and not
 #                          omitted, as Inferno scores them
@@ -238,6 +239,11 @@ render() {
     { echo "conformance: expected.tsv holds no relying party module" >&2; return 2; }
   read -r -a count <<< "$(head -n 1 <<< "$rp")"
   badge "OIDC Core 1.0 OIDF RP" "${count[0]}" "${count[1]}" passed openid > "$out/openid-connect-rp.json"
+  local fapi
+  fapi="$(oidf_counts "$expected" '^fapi2-security-profile-final-test-plan$')" ||
+    { echo "conformance: expected.tsv holds no FAPI 2.0 module" >&2; return 2; }
+  read -r -a count <<< "$(head -n 1 <<< "$fapi")"
+  badge "FAPI 2.0 OIDF OP" "${count[0]}" "${count[1]}" passed openid > "$out/fapi2-op.json"
   local results="$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
   # NOTE: inferno_core 1.4.3 result.rb:50, result_summarizer.rb and HelpModal.tsx:76: an omit
   # "does not affect passed or failed scores", and a group of passes and omits scores `pass`.
@@ -273,6 +279,11 @@ render() {
     printf '\n## OpenID Connect Core 1.0: relying party plans\n\n'
     printf "The client and client basic certification plans in\\n\`app/ferrosmart/oidf/expected.tsv\`.\\n\\n"
     oidf_section "$rp"
+    printf '\n## FAPI 2.0 Security Profile: authorization server plan\n\n'
+    printf "The FAPI 2.0 Security Profile Final plan in \`app/ferrosmart/oidf/expected.tsv\`,\\n"
+    printf 'with private_key_jwt, DPoP and OpenID Connect; its authorization requests\n'
+    printf 'carry the S256 PKCE challenge SMART App Launch 2.2.0 requires.\n\n'
+    oidf_section "$fapi"
     printf '\n## SMART App Launch %s\n\n' "$smart"
     printf "%s of the %s Inferno tests in\\n\`app/ferrosmart/inferno/smart_stu2_2_expected.json\` pass; an omitted test\\nis not counted.\\n" "$passed" "$tests"
     if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
@@ -306,6 +317,8 @@ labels() {
   badge_caption_check "$tree/README.md" || failures=$((failures + 1))
   badge_color_check "$tree"/conformance/badges/*.json || failures=$((failures + 1))
   badge_length_readme "$tree/README.md" || failures=$((failures + 1))
+  badge_block_check "$tree/README.md" || failures=$((failures + 1))
+  badge_render_check "$tree/README.md" || failures=$((failures + 1))
   if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
     pq_locations "$tree" || failures=$((failures + 1))
   fi
@@ -382,12 +395,12 @@ self_test() {
   printf '# c\nfamily_name\tyes\tfamily_name\tfamily_name\tfamily_name\tmaps\nportrait\tyes\tpicture\tportrait\tnot retained (x)\tdrops\n' \
     > "$tree/conformance/pid-attributes.tsv"
   printf '#[test]\nfn maps() {}\n' > "$tree/app/ferrosmart/pid.rs"
-  printf '# c\noid4vp-p\tm1\tPASSED\trefused\t-\t\noid4vp-p\tm2\tFAILED\trefused\t#1\tx\noid4vp-p\tm3\tREVIEW\taccepted\t-\t\noidcc-p\tm4\tPASSED\trefused\t-\t\n' \
-    > "$tree/app/ferrosmart/oidf/expected.tsv"
-  printf 'oidcc-basic-certification-test-plan\tm5\tFAILED\t-\t650\tx\noidcc-config-certification-test-plan\tm6\tWARNING\t-\t#650\tx\noidcc-basic-certification-test-plan\tm7\tSKIPPED\t-\t#9\tx\n' \
-    >> "$tree/app/ferrosmart/oidf/expected.tsv"
-  printf 'oidcc-client-test-plan\tm8\tPASSED\trefused\t-\t\noidcc-client-basic-certification-test-plan\tm9\tPASSED\trefused\t-\t\n' \
-    >> "$tree/app/ferrosmart/oidf/expected.tsv"
+  {
+    printf '# c\noid4vp-p\tm1\tPASSED\trefused\t-\t\noid4vp-p\tm2\tFAILED\trefused\t#1\tx\noid4vp-p\tm3\tREVIEW\taccepted\t-\t\noidcc-p\tm4\tPASSED\trefused\t-\t\n'
+    printf 'oidcc-basic-certification-test-plan\tm5\tFAILED\t-\t650\tx\noidcc-config-certification-test-plan\tm6\tWARNING\t-\t#650\tx\noidcc-basic-certification-test-plan\tm7\tSKIPPED\t-\t#9\tx\n'
+    printf 'oidcc-client-test-plan\tm8\tPASSED\trefused\t-\t\noidcc-client-basic-certification-test-plan\tm9\tPASSED\trefused\t-\t\n'
+    printf 'fapi2-security-profile-final-test-plan\tm11\tPASSED\t-\t-\t\nfapi2-security-profile-final-test-plan\tm12\tFAILED\t-\t966\tx\n'
+  } > "$tree/app/ferrosmart/oidf/expected.tsv"
   printf '[{"test_id":"a","result":"pass"},{"test_id":"b","result":"omit"},{"test_group_id":"g","result":"pass"}]' \
     > "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
   printf '| Item | Pin |\n|---|---|\n| SMART App Launch | 2.2.0 (STU 2.2) |\n| mdoc sources | the EUDI PID Rulebook 1.7 at commit x |\n' \
@@ -420,6 +433,8 @@ self_test() {
     fail "the relying party count"
   [[ "$(jq -r .color "$tree/conformance/badges/openid-connect-rp.json")" == brightgreen ]] ||
     fail "the relying party colour"
+  [[ "$(jq -r .message "$tree/conformance/badges/fapi2-op.json")" == "1/2 passed" ]] ||
+    fail "the FAPI 2.0 count"
   cp "$tree/app/ferrosmart/oidf/expected.tsv" "$work/badge"
   printf 'oidcc-client-test-plan\tm10\tFAILED|PASSED\trefused|accepted\t933\tx\n' >> "$tree/app/ferrosmart/oidf/expected.tsv"
   run "$tree" update > /dev/null || fail "a tree with a racing module is refused"
@@ -489,6 +504,12 @@ self_test() {
   cp "$work/badge" "$tree/README.md"
   printf '[![x](https://img.shields.io/badge/CRA-information%%20for%%20all%%20users-blue?logo=x)](x)\n' >> "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a static badge past the length limits passes"; fi
+  cp "$work/badge" "$tree/README.md"
+  printf '<sub>a second line of prose</sub><br>\n[![x](https://img.shields.io/endpoint?url=conformance/badges/x.json)](x)\n' >> "$tree/README.md"
+  if labels "$tree" 2> /dev/null; then fail "a badge block with two lines of prose passes"; fi
+  cp "$work/badge" "$tree/README.md"
+  printf '<!-- m -->\n<br>\n[![x](https://img.shields.io/endpoint?url=conformance/badges/x.json)](x)\n' >> "$tree/README.md"
+  if labels "$tree" 2> /dev/null; then fail "a badge GitHub shows as text passes"; fi
   cp "$work/badge" "$tree/README.md"
   grep -vF "$badge_caption" "$work/badge" > "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a README without the conformance caption passes"; fi

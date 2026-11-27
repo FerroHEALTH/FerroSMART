@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: BUSL-1.1
 # The OpenID Foundation conformance suite lane's pass list (#621,
 # scripts/oidf/lane.sh): every module of the four OpenID Connect plans and
-# of the OpenID4VP verifier plan (#817), the PID as an SD-JWT VC and, under
+# of the FAPI 2.0 Security Profile plan (#966) and of the OpenID4VP
+# verifier plan (#817), the PID as an SD-JWT VC and, under
 # the plan name with `.iso_mdl`, as an mdoc (#793), in the order the
 # suite runs them, with the result the suite gives it and, for a relying
 # party module, what FerroSMART made of the provider's answer (accepted,
@@ -112,3 +113,55 @@ oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-invalid-ses
 oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-revoked-credential	PASSED	refused	-	
 oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-credential-on-identifier-list	PASSED	refused	-	
 oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-credential-without-status	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-discovery-end-point-verification	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-happy-flow	FAILED	-	966	the second client's pushed request is refused; the suite's log of the module, kept with the lane's artifact, names the cause
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-user-rejects-authentication	FAILED	-	966	the module waits for the person to refuse at the authorization endpoint, and the lane's browser has no step that refuses: FerroSMART shows its consent page only on prompt=consent or for a client its policy does not approve
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-authorization-request-without-state-success	FAILED	-	966	SMART App Launch 2.2.0 (Obtain authorization code) requires state, which the module leaves out of the pushed request, so FerroSMART refuses it with invalid_request
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-authorization-request-without-nonce-success	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-authorization-request-with-64-char-nonce-success	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-other-scope-order-succeeds	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-test-claims-parameter-identity-claims	SKIPPED	-	966	FerroSMART does not support the optional claims request parameter (OpenID Connect Core 1.0 §5.5) and its metadata leaves out claims_parameter_supported, false by default (OpenID Connect Discovery 1.0 §3), so the suite skips the module
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-access-token-type-header-case-sensitivity	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-check-dpop-proof-nbf-exp	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-dpopproof-with-iat-10seconds-before-succeeds	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-dpopproof-with-iat-10seconds-after-succeeds	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-mismatched-dpop-jkt-fails	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-token-endpoint-fails-with-mismatched-dpop-proof-jkt	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-token-endpoint-fails-with-mismatched-dpop-jkt	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-dpopproof-at-par-endpoint-binding-success	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-dpop-auth-code-binding-success	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-different-nonce-inside-and-outside-request-object	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-different-state-inside-and-outside-request-object	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-authorization-request-with-long-nonce	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-authorization-request-with-long-state	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-state-only-outside-request-object-not-used	FAILED	-	966	SMART App Launch 2.2.0 (Obtain authorization code) requires state, which the module leaves out of the pushed request, so FerroSMART refuses it with invalid_request
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-request-object-without-redirect-uri-fails	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-plain-fapi-tolerate-unregistered-redirect-uri	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-unsigned-authorization-request-without-using-par-fails	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-redirect-uri-in-authorization-request	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-response-type-code-idtoken-fails	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-response-type-token-fails	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-client-id-in-token-endpoint	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-holder-of-key-required	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-authorization-code-is-bound-to-client	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-attempt-reuse-authorization-code-after-one-second	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-token-endpoint-fails-with-expired-auth-code	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-signed-client-assertion-with-RS256-fails	SKIPPED	-	966	the suite runs the module only for an RSA client key, and the lane's clients hold P-256 keys
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-client-assertion-in-token-endpoint	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-client-assertion-with-exp-is-5-minutes-in-past-fails	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-client-assertion-with-wrong-aud-fails	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-client-assertion-with-no-sub-fails	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-invalid-client-assertions-fail	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-dpop-negative-tests	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-refresh-token	FAILED	-	966	the refresh token request is refused; the suite's log of the module, kept with the lane's artifact, names the cause
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds	FAILED	-	966	FerroSMART takes each request_uri once (RFC 9126 §4: one-time use SHOULD be enforced, a repeat MAY be allowed), so the second use before the login completes is refused
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-attempt-reuse-request_uri	FAILED	-	966	FerroSMART refuses the request_uri with its own error page (RFC 9126 §4, RFC 6749 §4.1.2.1), and the suite waits for a screenshot of that page that the lane does not upload
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-attempt-to-use-expired-request_uri	FAILED	-	966	FerroSMART refuses the request_uri with its own error page (RFC 9126 §4, RFC 6749 §4.1.2.1), and the suite waits for a screenshot of that page that the lane does not upload
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-attempt-to-use-request_uri-for-different-client	FAILED	-	966	FerroSMART refuses the request_uri with its own error page (RFC 9126 §4, RFC 6749 §4.1.2.1), and the suite waits for a screenshot of that page that the lane does not upload
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-authorization-request-containing-request_uri-form-param	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-attempt-invalid-http-method	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-ensure-pkce-required	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-pkce-code-verifier-required	FAILED	-	966	FerroSMART answers a token request with no code_verifier invalid_request, the error OAuth 2.1 draft 17 §3.2.4 gives a request "missing a required parameter"; the suite expects invalid_grant
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-incorrect-pkce-code-verifier-rejected	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-plain-pkce-rejected	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-without-duplicate-parameters	PASSED	-	-	-

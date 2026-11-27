@@ -57,7 +57,13 @@ async fn revoked(
     from: IpAddr,
 ) -> Result<(), Refusal> {
     let form = read_form(headers, body)?;
-    let client = identify(state, headers, &form).await?;
+    let client = identify(
+        state,
+        headers,
+        &form,
+        crate::token::assertion::Endpoint::Token,
+    )
+    .await?;
     let token = form
         .get("token")
         .ok_or(Refusal::request("the request carries no token"))?;

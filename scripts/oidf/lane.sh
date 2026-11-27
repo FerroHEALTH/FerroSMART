@@ -14,7 +14,8 @@
 #                                that a module does not ask for names its
 #                                issue
 #   scripts/oidf/lane.sh run     start everything, run the four OpenID Connect
-#                                plans and compare each module with
+#                                plans and the FAPI 2.0 Security Profile plan
+#                                (#966), and compare each module with
 #                                expected.tsv
 #   scripts/oidf/lane.sh verifier run the OpenID4VP HAIP verifier plan (#817)
 #                                against FerroSMART's EUDI Wallet verifier the
@@ -56,6 +57,7 @@ plans=(
   "oidcc-client-basic-certification-test-plan[request_type=plain_http_request][client_registration=static_client] rp"
   "oidcc-config-certification-test-plan op"
   "oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client] op"
+  "fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][openid=openid_connect][fapi_profile=plain_fapi][authorization_request_type=simple][grant_management=disabled] fapi"
   "oid4vp-1final-verifier-haip-test-plan[credential_format=sd_jwt_vc][response_mode=direct_post.jwt] verifier"
   "oid4vp-1final-verifier-haip-test-plan[credential_format=iso_mdl][response_mode=direct_post.jwt] verifier"
 )
@@ -243,6 +245,11 @@ make_keys() {
     -days 1 -extfile "$dir/host.ext" -out "$dir/host.crt" 2> /dev/null
   rm -f "$dir/ca.key"
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/signing.pem" 2> /dev/null
+  # The ES256 key the FAPI 2.0 clients' ID Tokens are signed with, and each
+  # FAPI 2.0 client's ES256 assertion key (FAPI 2.0 Security Profile §5.4.1).
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$dir/signing-es256.pem" 2> /dev/null
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$dir/fapi-1.pem" 2> /dev/null
+  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$dir/fapi-2.pem" 2> /dev/null
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/assertion.pem" 2> /dev/null
   rm -f "$dir/backend.pem"
   "$root/target/debug/ferrosmart" key generate --out "$dir/backend.pem"
@@ -303,11 +310,12 @@ start_provider() {
   local op=("$root/target/debug/ferrosmart" --config "$lane/ferrosmart-op.toml"
     --set "server.tls.certificate_file=$LANE_DIR/host.crt"
     --set "server.tls.key_file=$LANE_DIR/host.key"
-    --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"
+    --set "ferrosmart.keys.private_key_files=[\"$LANE_DIR/signing.pem\", \"$LANE_DIR/signing-es256.pem\"]"
     --set "ferrosmart.backend.keys.private_key_file=$LANE_DIR/backend.pem"
     --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem"
     --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_op")
-  "${op[@]}" client apply "$lane"/op-clients/*.json > "$LANE_DIR/apply.log"
+  fapi_config "$password"
+  "${op[@]}" client apply "$lane"/op-clients/*.json "$LANE_DIR"/fapi-client-*.json > "$LANE_DIR/apply.log"
   # The suite's configuration takes the secrets FerroSMART issued its two
   # clients (RFC 7591 §3.2.1).
   local one two
@@ -330,7 +338,7 @@ run_plan() {
   local spec=$1 config=$2 plan id module instance info result login
   plan=$(plan_key "$spec")
   export OIDF_PLAN=$plan
-  [ "$config" = op ] || spec="$spec{sample-openid-client-nodejs}_"
+  case "$config" in op | fapi) ;; *) spec="$spec{sample-openid-client-nodejs}_" ;; esac
   # NOTE: run-test-plan.py's own verdict wants the suite's expected-failures file, a row
   # for each failing condition; the lane holds each module's result instead, so it is not read.
   (cd "$LANE_DIR" && "$OIDF_PYTHON" "$LANE_DIR/runner/run-test-plan.py" --no-parallel "$spec" "$config.json") \
@@ -347,9 +355,18 @@ run_plan() {
       info=$(get "$suite/api/info/$instance")
       # A module that was stopped has no result, or the suite's UNKNOWN.
       result=$(jq -r 'if (.result // "UNKNOWN") == "UNKNOWN" then .status else .result end' <<< "$info")
+      # The suite's own log of a module that did not pass, kept with the lane's artifact.
+      if [ "$result" != PASSED ]; then
+        get "$suite/api/log/$instance" > "$LANE_DIR/log-$plan-$module.json" || true
+        # Each failed condition with the two entries before it, in the job's log.
+        jq -r --arg module "$module" 'to_entries | map(select(.value.result == "FAILURE") | .key) as $failed
+          | .[] | select(.key as $k | any($failed[]; . - 2 <= $k and $k <= .)) | .value
+          | "oidf-lane: \($module): " + (del(._id, .testId, .testOwner, .time, .blockId) | tostring | .[0:1500])' \
+          "$LANE_DIR/log-$plan-$module.json" 2> /dev/null || true
+      fi
     fi
     login=-
-    if [ "$config" != op ]; then
+    if [ "$config" != op ] && [ "$config" != fapi ]; then
       login=$(awk -F'\t' -v module="$module" '$1 == module { print $2 }' "$LANE_DIR/logins-$plan.tsv" 2> /dev/null | tail -1)
     fi
     printf '%s\t%s\t%s\t%s\n' "$plan" "$module" "$result" "${login:-none}" >> "$LANE_DIR/actual.tsv"
@@ -439,6 +456,9 @@ run() {
   for plan in "${plans[@]}"; do
     if [ "${plan##* }" = op ]; then run_plan "${plan%% *}" op; fi
   done
+  for plan in "${plans[@]}"; do
+    if [ "${plan##* }" = fapi ]; then run_plan "${plan%% *}" fapi; fi
+  done
   compare
 }
 
@@ -475,21 +495,44 @@ certificate() {
 # and the PID provider's certificate under the anchor FerroSMART trusts,
 # whose key, with its certificate as `x5c`, the suite signs credentials with.
 make_verifier_keys() {
-  local dir=$1 text priv pub
+  local dir=$1
   certificate "$dir" rp-root '/CN=FerroSMART OIDF lane verifier root' '' ca
   certificate "$dir" access '/CN=FerroSMART OIDF lane verifier' rp-root
   certificate "$dir" pid-root '/CN=FerroSMART OIDF lane PID provider root' '' ca
   certificate "$dir" pid-issuer '/CN=OIDF conformance suite PID provider' pid-root
   openssl pkcs8 -topk8 -nocrypt -in "$dir/access.key" -out "$dir/access-pkcs8.pem"
   printf 'eyJhbGciOiJub25lIn0.eyJsYW5lIjoib2lkZiJ9.\n' > "$dir/registration.jwt"
-  text=$(openssl ec -in "$dir/pid-issuer.key" -noout -text 2> /dev/null)
+  ec_jwk "$dir/pid-issuer.key" oidf-lane-pid |
+    jq --arg c "$(openssl x509 -in "$dir/pid-issuer.crt" -outform der | openssl base64 -A)" '. + {x5c: [$c]}' \
+    > "$dir/pid-issuer.jwk"
+}
+
+# The private P-256 JWK of the PEM key FILE under the `kid` KID.
+ec_jwk() {
+  local file=$1 kid=$2 text priv pub
+  text=$(openssl ec -in "$file" -noout -text 2> /dev/null)
   priv=$(awk '/^priv:/ { f = 1; next } /^pub:/ { f = 0 } f' <<< "$text" | tr -d ' :\n')
   pub=$(awk '/^pub:/ { f = 1; next } /^ASN1 OID/ { f = 0 } f' <<< "$text" | tr -d ' :\n')
   jq -n --arg x "$(b64url_hex <<< "${pub:2:64}")" --arg y "$(b64url_hex <<< "${pub:66:64}")" \
-    --arg d "$(fixed_hex "$priv" 64 | b64url_hex)" \
-    --arg c "$(openssl x509 -in "$dir/pid-issuer.crt" -outform der | openssl base64 -A)" \
-    '{kty: "EC", crv: "P-256", alg: "ES256", use: "sig", kid: "oidf-lane-pid", x: $x, y: $y, d: $d, x5c: [$c]}' \
-    > "$dir/pid-issuer.jwk"
+    --arg d "$(fixed_hex "$priv" 64 | b64url_hex)" --arg kid "$kid" \
+    '{kty: "EC", crv: "P-256", alg: "ES256", use: "sig", kid: $kid, x: $x, y: $y, d: $d}'
+}
+
+# The FAPI 2.0 plan's two clients, registered with FerroSMART by the public
+# half of each client's key, and the suite's configuration holding the
+# private half and the person's PASSWORD.
+fapi_config() {
+  local password=$1 n jwk
+  for n in 1 2; do
+    jwk=$(ec_jwk "$LANE_DIR/fapi-$n.pem" "fapi-$n")
+    printf '%s\n' "$jwk" > "$LANE_DIR/fapi-$n.jwk"
+    jq --argjson key "$jwk" '.jwks.keys = [$key | del(.d)]' \
+      "$lane/fapi-clients/fapi-suite$([ "$n" = 1 ] || echo -2).json" > "$LANE_DIR/fapi-client-$n.json"
+  done
+  jq --slurpfile one "$LANE_DIR/fapi-1.jwk" --slurpfile two "$LANE_DIR/fapi-2.jwk" --arg password "$password" \
+    '.client.jwks.keys = $one | .client2.jwks.keys = $two
+      | ((.. | objects | select(has("commands")) | .commands[]) | select(.[2] == "password")) |= (.[3] = $password)' \
+    "$lane/fapi.json" > "$LANE_DIR/fapi.json"
 }
 
 # The suite's configuration of the verifier plan at the alias ALIAS.

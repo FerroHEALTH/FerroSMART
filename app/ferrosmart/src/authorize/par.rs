@@ -51,7 +51,13 @@ pub async fn par(State(state): State<Arc<AppState>>, headers: HeaderMap, body: B
 /// (RFC 9126 §2.1, §2.2).
 async fn push(state: &AppState, headers: &HeaderMap, body: &[u8]) -> Result<Response, Refusal> {
     let form = read_form(headers, body)?;
-    let client = crate::token::grants::identify(state, headers, &form).await?;
+    let client = crate::token::grants::identify(
+        state,
+        headers,
+        &form,
+        crate::token::assertion::Endpoint::Par,
+    )
+    .await?;
     // NOTE: RFC 9126 §2.1, `client_id` is required, and the request is the
     // authenticated client's own.
     if form.get("client_id") != Some(client.client_id.as_str()) {
@@ -80,7 +86,17 @@ async fn push(state: &AppState, headers: &HeaderMap, body: &[u8]) -> Result<Resp
         error: denial.error,
         description: denial.description,
     })?;
-    let parameters = kept(&form);
+    // NOTE: RFC 9449 §10.1, a DPoP header proof binds the code as dpop_jkt would, and
+    // a dpop_jkt that disagrees with it is refused.
+    let proved = crate::token::sender::proof_key(state, headers, PAR_ROUTE).await?;
+    let named = form.get("dpop_jkt");
+    if proved.is_some() && named.is_some() && proved.as_deref() != named {
+        return Err(Refusal {
+            error: "invalid_dpop_proof",
+            description: "the dpop_jkt is not the DPoP proof's key",
+        });
+    }
+    let parameters = kept(&form, proved.as_deref().filter(|_| named.is_none()));
     let reference =
         random().map_err(|error| server_error("no request_uri can be drawn", &error))?;
     let request_uri = format!("{REQUEST_URI_PREFIX}{reference}");
@@ -99,13 +115,17 @@ async fn push(state: &AppState, headers: &HeaderMap, body: &[u8]) -> Result<Resp
 }
 
 /// Returns the authorization request of `form` without its client
-/// authentication, form-encoded.
-fn kept(form: &Params) -> String {
+/// authentication, with `dpop_jkt` when a header proof named the key,
+/// form-encoded.
+fn kept(form: &Params, dpop_jkt: Option<&str>) -> String {
     let mut encoded = url::form_urlencoded::Serializer::new(String::new());
     for (name, value) in form.pairs() {
         if !AUTHENTICATION.contains(&name) {
             encoded.append_pair(name, value);
         }
+    }
+    if let Some(jkt) = dpop_jkt {
+        encoded.append_pair("dpop_jkt", jkt);
     }
     encoded.finish()
 }

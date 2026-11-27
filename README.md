@@ -24,14 +24,19 @@
 [![Signed releases](https://img.shields.io/badge/releases-signed-brightgreen?logo=github)](docs/release.md)
 [![SLSA Build L3](https://slsa.dev/images/gh-badge-level3.svg)](docs/release.md)
 
-**Conformance**<br>
-<sub>(self-tested and self-assessed counts; none is a certification)</sub><br>
-[![EUDI PID Rulebook 1.7, data identifiers handled, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fpid-rulebook.json)](docs/conformance.md)
-[![OpenID4VP 1.0, negative tests, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fopenid4vp.json)](docs/conformance.md)
-[![OpenID4VP 1.0, valid presentations, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fopenid4vp-accepted.json)](docs/conformance.md)
+<sub>Self-tested and self-assessed; none is a certification.</sub><br>
+**OpenID Foundation suite**<br>
 [![OpenID Connect Core 1.0, OIDF OP plans, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fopenid-connect-op.json)](docs/conformance.md)
 [![OpenID Connect Core 1.0, OIDF RP plans, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fopenid-connect-rp.json)](docs/conformance.md)
+[![FAPI 2.0 Security Profile, OIDF OP plan, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Ffapi2-op.json)](docs/conformance.md)
+[![OpenID4VP 1.0, negative tests, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fopenid4vp.json)](docs/conformance.md)
+[![OpenID4VP 1.0, valid presentations, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fopenid4vp-accepted.json)](docs/conformance.md)
+
+**SMART and EUDI**<br>
 [![SMART App Launch 2.2.0, Inferno tests, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fsmart-app-launch.json)](docs/conformance.md)
+[![EUDI PID Rulebook 1.7, data identifiers handled, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fpid-rulebook.json)](docs/conformance.md)
+
+**Security and compliance**<br>
 [![Post-quantum safe uses, self-assessed](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fpost-quantum.json)](docs/post-quantum.md)
 
 </div>

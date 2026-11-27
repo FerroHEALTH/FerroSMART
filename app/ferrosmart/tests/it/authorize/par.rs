@@ -236,3 +236,21 @@ async fn the_metadata_names_the_endpoint_and_the_servers_requirement() {
         smart.stop().await;
     }
 }
+
+// NOTE: RFC 9207 §3, a server whose authorization responses carry `iss` says so
+// in its metadata.
+#[tokio::test]
+async fn the_metadata_says_every_authorization_response_carries_iss() {
+    let smart = start("").await;
+    let path = smart.settings.metadata_path();
+    for document in [path.as_str(), "/.well-known/openid-configuration"] {
+        let (_, _, body) = smart.get(document, None).await;
+        let metadata: Value = serde_json::from_str(&body).expect("JSON");
+        assert_eq!(
+            json!(true),
+            metadata["authorization_response_iss_parameter_supported"],
+            "{document}"
+        );
+    }
+    smart.stop().await;
+}

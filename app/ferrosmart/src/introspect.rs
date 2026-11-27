@@ -197,7 +197,7 @@ async fn authenticated(
 ) -> Result<Client, Refused> {
     let client = match secret::presented(headers, form) {
         Ok(Some(presented)) => secret::authenticate(state, presented).await,
-        Ok(None) => assertion::authenticate(state, form).await,
+        Ok(None) => assertion::authenticate(state, form, assertion::Endpoint::Token).await,
         Err(refusal) => Err(refusal),
     };
     // NOTE: RFC 6749 §2.3 and §5.2, two methods at once is a malformed request and

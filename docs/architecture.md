@@ -2585,7 +2585,7 @@ document (13.8).
 | Key resolution: a `jku` header must equal the registered JWK Set URL, otherwise the registered keys; exactly one key matching `kid` and the `kty` of `alg` | SHALL | same | 2 |
 | A client's JWK Set is cached no longer than its `Cache-Control` allows | SHALL NOT exceed; SHOULD cache | same | 2 |
 | Any authentication failure answers `invalid_client` | SHALL | same; `rfc6749 §5.2` | 2 |
-| The assertion's `aud` is a single string equal to the token endpoint URL or the issuer identifier; `typ` is `JWT` or `client-authentication+jwt` (13.6 item 1, a recorded deviation from `rfc10070 §4`) | SHALL (SMART); MUST (RFC 10070) | `smart client-confidential-asymmetric`, Request and Signature Verification; `rfc7523 §3`; `rfc10070 §4` | 2 |
+| The assertion's `aud` is a single string equal to the token endpoint URL or the issuer identifier, and at the PAR endpoint the issuer alone (`rfc10070 §5`); `typ` is `JWT`, `client-authentication+jwt` or absent (13.6 item 1, a recorded deviation from `rfc10070 §4`) | SHALL (SMART); MUST (RFC 10070) | `smart client-confidential-asymmetric`, Request and Signature Verification; `rfc7523 §3`; `rfc10070 §4` | 2 |
 | The symmetric profile is not used for Backend Services | SHALL NOT | `smart client-confidential-symmetric`, Profile audience and scope | 2 |
 | Dynamic client registration is encouraged, not required | MAY | `smart app-launch`, Register App with EHR; `rfc7591 §3` | after 9 |
 
@@ -2717,8 +2717,15 @@ specification governs.
    (`rfc7523 §3` item 3, "a value that identifies the authorization server";
    `rfc10070 §4`), each compared by simple string comparison, and refuses an
    array and every other value (`rfc10070 §4`, "sole value"). It accepts
-   `typ` `JWT` (SMART 2.2) and `client-authentication+jwt` (`rfc10070 §4`)
-   and refuses an assertion with no `typ` or another one. This is fixed
+   `typ` `JWT` (SMART 2.2) and `client-authentication+jwt` (`rfc10070 §4`),
+   and an assertion with no `typ`, which `rfc10070` §3.2 does not
+   recommend refusing and the FAPI 2.0 plan of the OpenID Foundation sends
+   (#966); it refuses any other `typ`. At the pushed authorization
+   request endpoint, which SMART 2.2 does not define, the issuer is the
+   only audience accepted: `rfc10070 §5` replaces the `rfc9126 §2`
+   paragraph that let the token URL and the PAR URL stand there (#966). An
+   `iat` or `nbf` more than 30 seconds ahead is refused, within FAPI 2.0
+   §5.3.2.1 (accept up to 10 seconds, refuse past 60). This is fixed
    behaviour with no setting. Accepting the token URL deviates from
    `rfc10070 §4`'s server MUST; FerroHEALTH/FerroSMART#528 is the upstream
    report. `ferrohealth-smart`'s own client follows the same reading
@@ -3347,8 +3354,8 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 |---|---|---|
 | `client` | `client_id` | the RFC 7591 §2 metadata (`client_name`, `token_endpoint_auth_method`, `scope`, `grant_types`, `jwks` or `jwks_uri`, `redirect_uris`, `post_logout_redirect_uris`, `default_acr_values`, `require_pushed_authorization_requests`, the app's URLs), the secret's Argon2id hash, the upstream providers it may use, the resource servers its tokens may name (13.6 item 13), launch URI, `first_party`, `registered_by` (`admin` (13.27) or `self` (13.6 item 14)), disabled time |
 | `signing_key` | `kid` | state (`next`, `active`, `retiring`, `retired`) and the time it reached each one; the key itself stays in the files of `[ferrosmart.keys]` (13.11) |
-| `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
-| `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time, the basis of its consent (13.6 item 6) |
+| `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25, the `dpop_jkt` of 13.31), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
+| `authorization_code` | code hash | the grant it opens, the PKCE challenge, the `DPoP` key it is bound to (13.31), the redirect URI, expiry, redemption time, the basis of its consent (13.6 item 6) |
 | `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), the basis of its consent, the `DPoP` key a public client's refresh token is bound to (13.31), the standard claims its scope passes on, which the UserInfo Endpoint answers (`oidc core §5.3`; none without `openid`), creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
 | `refresh_token` | token hash | grant, predecessor, idle expiry, use time (set when rotated, kept for reuse detection), revocation |
 | `access_token` | `jti` | grant or client, `aud`, scope, `exp`, revocation, so introspection and revocation answer for a JWT |
@@ -5079,8 +5086,8 @@ The tests are `app/ferrosmart/tests/it/authorize/token_exchange.rs` and
 FerroSMART accepts pushed authorization requests (RFC 9126), which FAPI
 2.0 Security Profile §5.3.2.2 requires of an authorization server.
 `POST {issuer}/par` authenticates the client as the token endpoint does
-(`rfc9126 §2.1`; a client assertion's `aud` may also be the PAR endpoint's
-URL, §2), refuses a `request_uri` parameter, and checks the request as the
+(`rfc9126 §2.1`; a client assertion's `aud` is the issuer alone, as
+`rfc10070 §5` replaces §2's paragraph, 13.6 item 1), refuses a `request_uri` parameter, and checks the request as the
 authorization endpoint would: the client's grant, its registered redirect
 URI, `response_type`, `state`, the S256 challenge, the `aud` and the
 client's reach (13.6 item 13), `scope` and the OpenID Connect parameters.
@@ -5120,6 +5127,15 @@ bound to that key in its grant, and a refresh without a proof of it is
 client's refresh token is bound to its authentication instead (`rfc9449
 §5`). A client registered with `dpop_bound_access_tokens` that sends no
 proof is `invalid_request` (`rfc9449 §5.2`).
+
+The authorization code is bound to a key too (`rfc9449 §10`), which FAPI
+2.0 §5.3.2.1 requires: a `dpop_jkt` in the authorization request, pushed or
+not, is kept with the pending request and the code, and a `DPoP` header on
+`POST {issuer}/par` is checked against `POST` and the PAR URL and binds the
+code as `dpop_jkt` would, a `dpop_jkt` beside it that names another key
+being `invalid_dpop_proof` (`rfc9449 §10.1`). A bound code is redeemed only
+with a proof of its key; any other request is `invalid_dpop_proof`, and the
+code stays unredeemed (#972).
 
 Under `[server.tls]` with a `client_auth` the listener reads the client's
 certificate. A client registered with

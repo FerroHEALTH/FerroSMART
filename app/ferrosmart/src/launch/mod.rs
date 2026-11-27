@@ -42,7 +42,7 @@ use crate::launch::context::Context;
 use crate::server::AppState;
 use crate::store::StoreError;
 use crate::store::launch::NewLaunch;
-use crate::token::assertion::authenticate;
+use crate::token::assertion::{Endpoint, authenticate};
 use crate::token::{Refusal, no_store, server_error};
 
 /// The route of the launch API under the issuer.
@@ -382,7 +382,7 @@ async fn register(
     if url::form_urlencoded::parse(body).any(|(name, _)| !PARAMETERS.contains(&name.as_ref())) {
         return Err(refusal("invalid_request", "a parameter is not a launch parameter").into());
     }
-    let ehr = authenticate(state, &form).await?;
+    let ehr = authenticate(state, &form, Endpoint::Token).await?;
     let refused = |refusal: Refusal| NotRegistered {
         refusal,
         ehr: Some(ehr.client_id.clone()),

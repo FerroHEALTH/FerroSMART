@@ -273,6 +273,8 @@ async fn begin(
         state: client_state.to_owned(),
         nonce: params.get("nonce").map(str::to_owned),
         code_challenge: challenge.to_owned(),
+        // NOTE: RFC 9449 §10, the dpop_jkt parameter binds the code to the key it names.
+        dpop_jkt: params.get("dpop_jkt").map(str::to_owned),
         audience: audience.to_owned(),
         upstream_state,
         upstream_nonce,

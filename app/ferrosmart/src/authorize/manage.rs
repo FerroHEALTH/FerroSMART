@@ -58,6 +58,7 @@ pub async fn manage_get(State(state): State<Arc<AppState>>, headers: HeaderMap) 
         state: String::new(),
         nonce: None,
         code_challenge: String::new(),
+        dpop_jkt: None,
         audience: String::new(),
         upstream_state,
         upstream_nonce,
