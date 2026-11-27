@@ -51,6 +51,18 @@ mod shapes;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ConfigError {
+    /// `post_quantum_only` is on and the list `key` names `algorithm`, which
+    /// is no ML-DSA parameter set (RFC 9964 §5).
+    #[error(
+        "{key} names {algorithm}, which auth.post_quantum_only = true refuses: list ML-DSA-44, \
+         ML-DSA-65 or ML-DSA-87 alone, or leave the key unset"
+    )]
+    ClassicalAlgorithm {
+        /// The dotted key of the list.
+        key: String,
+        /// The first algorithm of it that is no ML-DSA parameter set.
+        algorithm: Algorithm,
+    },
     /// The `[auth.dpop]` settings break a rule.
     #[error("auth.dpop is refused")]
     Dpop {
@@ -411,6 +423,12 @@ pub struct AuthSection {
     /// the minimum version. The crate reads none of it: the product's
     /// [`TlsBuilder`] builds it once at start.
     pub tls: TlsClientSection,
+    /// Whether access token and `DPoP` proof signatures verify with ML-DSA
+    /// alone (RFC 9964 §5). On, every JWT issuer's `algorithms` and
+    /// `[auth.dpop] algorithms` left at their default become ML-DSA-44,
+    /// ML-DSA-65 and ML-DSA-87, an explicit ML-DSA list stays, and a list
+    /// naming any other algorithm refuses the section, naming its key.
+    pub post_quantum_only: bool,
 }
 
 /// How a bearer token is checked.

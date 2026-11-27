@@ -1035,3 +1035,65 @@ fn a_profile_key_on_the_issuer_table_itself_is_unknown() {
         toml::from_str("[issuer.own]\nissuer = \"https://idp.example.org\"\nmax_actor_chain = 2\n");
     assert!(old.is_err(), "profile keys sit in the profile table");
 }
+
+// NOTE: RFC 9964 §5, post_quantum_only narrows a default list to the three ML-DSA
+// parameter sets, keeps an ML-DSA list, and refuses a classical entry by its key.
+#[test]
+fn post_quantum_only_narrows_the_default_lists_to_ml_dsa() {
+    use ferrohealth_smart::jws::algorithm::{Algorithm, ML_DSA};
+    let resolved = one_issuer("post_quantum_only = true\n[dpop]\n")
+        .resolve(&[])
+        .expect("resolves");
+    let issuer = resolved.issuers.first().expect("an issuer");
+    assert_eq!(ML_DSA.to_vec(), issuer.algorithms);
+    assert_eq!(
+        ML_DSA.to_vec(),
+        resolved.dpop.as_ref().expect("the dpop table").algorithms
+    );
+    let kept = toml::from_str::<AuthSection>(
+        "post_quantum_only = true\n[issuer.i1]\nissuer = \"https://as.example.org\"\n\
+         audience = [\"a\"]\nalgorithms = [\"ML-DSA-65\"]\n",
+    )
+    .expect("the section parses")
+    .resolve(&[])
+    .expect("resolves");
+    assert_eq!(
+        vec![Algorithm::MlDsa65],
+        kept.issuers.first().expect("an issuer").algorithms
+    );
+    let off = one_issuer("[dpop]\n").resolve(&[]).expect("resolves");
+    assert!(
+        off.issuers
+            .first()
+            .expect("an issuer")
+            .algorithms
+            .contains(&Algorithm::Rs256),
+        "off, the default lists stay"
+    );
+}
+
+#[test]
+fn post_quantum_only_refuses_a_classical_algorithm_naming_its_key() {
+    let issuer = toml::from_str::<AuthSection>(
+        "post_quantum_only = true\n[issuer.i1]\nissuer = \"https://as.example.org\"\n\
+         audience = [\"a\"]\nalgorithms = [\"ML-DSA-65\", \"ES256\"]\n",
+    )
+    .expect("the section parses")
+    .resolve(&[]);
+    match issuer {
+        Err(ConfigError::ClassicalAlgorithm { key, algorithm }) => {
+            assert_eq!("auth.issuer.i1.algorithms", key);
+            assert_eq!(
+                ferrohealth_smart::jws::algorithm::Algorithm::Es256,
+                algorithm
+            );
+        }
+        other => panic!("a refusal: {other:?}"),
+    }
+    let dpop =
+        one_issuer("post_quantum_only = true\n[dpop]\nalgorithms = [\"ES256\"]\n").resolve(&[]);
+    assert!(
+        matches!(&dpop, Err(ConfigError::ClassicalAlgorithm { key, .. }) if key == "auth.dpop.algorithms"),
+        "{dpop:?}"
+    );
+}
