@@ -11,7 +11,7 @@
 #
 #   openssl rand -hex 16 | tr -d '\n' > secrets/keycloak_user_password
 #   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out secrets/upstream_assertion_key.pem
-#   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out secrets/backend_assertion_key.pem
+#   ferrosmart key generate --out secrets/backend_assertion_key.pem   # ML-DSA-65, the release binary
 #   chmod 0644 secrets/keycloak_user_password secrets/upstream_assertion_key.pem secrets/backend_assertion_key.pem
 #
 # The backend assertion key signs the client assertions of FerroSMART's own

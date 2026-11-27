@@ -234,7 +234,9 @@ pub(crate) fn config(text: &str, keys: &Keys) -> Config {
     if logs_in && !text.contains("[ferrosmart.backend") {
         environment.insert(
             String::from("FERROSMART__FERROSMART__BACKEND__KEYS__PRIVATE_KEY_FILE"),
-            ec_key(keys.dir.path(), "backend.pem").display().to_string(),
+            ml_dsa_key(keys.dir.path(), "backend.pem")
+                .display()
+                .to_string(),
         );
     }
     Config::from_sources(Some(text), &environment).expect("the configuration reads")

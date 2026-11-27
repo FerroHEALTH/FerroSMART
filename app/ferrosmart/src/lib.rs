@@ -25,6 +25,7 @@ pub mod config;
 pub mod discovery;
 pub mod form;
 pub mod introspect;
+pub mod keygen;
 pub mod launch;
 pub mod logout;
 pub mod pages;

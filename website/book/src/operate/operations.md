@@ -19,6 +19,7 @@ running a database well.
 | `ferrosmart client apply <file>...` | Writes each file's client document to the registry, creating the client or replacing the one with its `client_id`, each change with its audit record ([the client registry](../configure/clients.md#the-client-registry)) |
 | `ferrosmart client secret <client_id>` | Issues a confidential client that authenticates with a secret a new one, stores its Argon2id hash, records the change and prints the secret once (RFC 7591 §3.2.1) |
 | `ferrosmart subject --upstream <name> --sub <sub>` | Prints the FerroSMART `sub` of the person whose subject at the provider `<name>` is `<sub>`: the identifier a resource server binds the person by |
+| `ferrosmart key generate --out <file>` | Writes a fresh ML-DSA private key (`--algorithm`, `ML-DSA-65` by default) as PKCS#8 PEM to a new file readable by its owner alone, such as the key of `[ferrosmart.backend.keys]`; it reads no configuration |
 | `ferrosmart upstream registration <name>` | Prints what the provider `<name>` must be configured with: the redirect and logout URIs, the client authentication with its JWK Set URL, the scopes, the claims and the roles |
 
 [The command-line reference](../reference/cli.md) has every option. Each takes `--config <file>` and `--set key=value`
