@@ -269,6 +269,15 @@ pub enum UpstreamError {
         /// The method the entry names.
         method: &'static str,
     },
+    /// The provider's token endpoint lists the algorithms it takes a
+    /// client assertion in, and not the one the entry signs with.
+    #[error(
+        "the provider's token endpoint does not list `{algorithm}` among its client assertion algorithms"
+    )]
+    AssertionAlgorithm {
+        /// The algorithm the entry signs with.
+        algorithm: &'static str,
+    },
     /// A SAML provider's metadata cannot be read or used.
     #[error("the SAML provider's metadata cannot be used")]
     Saml(#[from] saml::SamlError),
@@ -374,6 +383,17 @@ impl OidcUpstream {
         {
             return Err(UpstreamError::Method { method });
         }
+        // NOTE: RFC 8414 §2, token_endpoint_auth_signing_alg_values_supported: an
+        // assertion algorithm the provider lists none of is refused at start.
+        if let (Authentication::PrivateKeyJwt(keys), Some(listed)) = (
+            &self.authentication,
+            &metadata.token_endpoint_auth_signing_alg_values_supported,
+        ) {
+            let algorithm = keys.signer.algorithm().name();
+            if !listed.iter().any(|name| name == algorithm) {
+                return Err(UpstreamError::AssertionAlgorithm { algorithm });
+            }
+        }
         let provider = Provider::from_metadata(&metadata)?;
         let party = RelyingParty::new(http, provider, self.client_id.clone(), callback)
             .with_scopes(self.scopes.iter().map(String::as_str))
@@ -449,6 +469,42 @@ impl Identity {
                 .get("acr")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
+        }
+    }
+}
+
+impl Identity {
+    /// Adds each claim of the UserInfo Response `userinfo` the login does
+    /// not carry yet; its `sub` is the ID Token's, which the relying party
+    /// checked (OpenID Connect Core 1.0 §5.3.2).
+    pub fn complete(&mut self, userinfo: serde_json::Map<String, serde_json::Value>) {
+        let text = |name: &str| {
+            userinfo
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        if self.name.is_none() {
+            self.name = text("name");
+        }
+        if self.preferred_username.is_none() {
+            self.preferred_username = text("preferred_username");
+        }
+        if self.display_name.is_none() {
+            self.display_name = [self.name.as_deref(), self.preferred_username.as_deref()]
+                .into_iter()
+                .flatten()
+                .map(str::trim)
+                .find(|name| !name.is_empty())
+                .map(str::to_owned);
+        }
+        for (name, value) in userinfo {
+            if !matches!(
+                name.as_str(),
+                "sub" | "iss" | "aud" | "name" | "preferred_username"
+            ) {
+                self.claims.entry(name).or_insert(value);
+            }
         }
     }
 }

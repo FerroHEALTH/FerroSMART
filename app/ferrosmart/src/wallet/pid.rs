@@ -4,8 +4,8 @@
 //! The PID's attributes as the person a SMART token names
 //! (`docs/architecture.md` §13.32).
 //!
-//! The attributes and their names in each format are the PID Rulebook 1.6
-//! §2.2, §2.3, §3.1.2 and §4.1.1 (Implementing Regulation (EU) 2024/2977
+//! The attributes and their names in each format are the PID Rulebook 1.7
+//! §2.2 to §2.6, §3.1.2 and §4.1.1 (Implementing Regulation (EU) 2024/2977
 //! Annex, as amended by 2026/1731). No specification says how a PID becomes
 //! the claims of an ID Token or the identifier a patient index resolves:
 //! that mapping is FerroSMART's own design.
@@ -16,99 +16,233 @@ use serde_json::{Map, Value};
 
 use super::Format;
 
-/// Where a PID attribute goes.
+/// What FerroSMART does with a PID attribute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
-    /// The ID Token claim of this name, under `profile`.
+    /// The ID Token claim of this name, under `profile` or `email`.
     Claim(&'static str),
     /// The identifier the patient index resolves to the patient.
     Identifier,
+    /// The Member State whose identifier system names the identifier, and
+    /// in whose name the person's `sub` is derived.
+    IdentifierCountry,
     /// Never asked for, and dropped on receipt: FerroSMART identifies the
     /// person without it, so it does not retain it (Implementing Regulation
     /// (EU) 2024/2977 Art 3a(3), inserted by 2026/1731; Regulation (EU)
     /// 2016/679 Art 5(1)(c)).
     NotRetained,
+    /// Never asked for by default and mapped to nothing, for the reason
+    /// given: FerroSMART uses it for no claim and no identifier, so it
+    /// collects it not (Regulation (EU) 2016/679 Art 5(1)(c)).
+    NotAsked(&'static str),
 }
 
-/// One attribute of the PID Rulebook.
+impl Target {
+    /// Returns the handling as `conformance/pid-attributes.tsv` names it.
+    #[must_use]
+    pub fn handling(self) -> String {
+        match self {
+            Self::Claim(name) => name.to_owned(),
+            Self::Identifier => String::from("identifier"),
+            Self::IdentifierCountry => String::from("identifier country"),
+            Self::NotRetained => String::from("not retained (CIR 2024/2977 Art 3a(3))"),
+            Self::NotAsked(reason) => format!("not asked ({reason})"),
+        }
+    }
+}
+
+/// One data identifier of the PID Rulebook.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Attribute {
-    /// The data identifier (PID Rulebook §2).
+    /// The data identifier (PID Rulebook §2, §4.1.1).
     pub data_identifier: &'static str,
     /// Whether Implementing Regulation (EU) 2024/2977 makes it mandatory
-    /// (PID Rulebook §2.2).
+    /// (PID Rulebook §2.2, §2.4).
     pub mandatory: bool,
     /// Its claim name in an SD-JWT VC (PID Rulebook §4.1.1).
     pub sd_jwt_vc: &'static str,
-    /// Its attribute identifier in an mdoc (PID Rulebook §3.1.2).
-    pub mdoc: &'static str,
-    /// Where FerroSMART maps it.
+    /// Its attribute identifier in an mdoc (PID Rulebook §3.1.2); none for
+    /// the one the Rulebook encodes only in an SD-JWT VC.
+    pub mdoc: Option<&'static str>,
+    /// What FerroSMART does with it.
     pub target: Target,
 }
 
 impl Attribute {
-    /// Returns its name in `format`.
+    /// Returns its name in `format`, when that format encodes it.
     #[must_use]
-    pub const fn name(&self, format: Format) -> &'static str {
+    pub const fn name(&self, format: Format) -> Option<&'static str> {
         match format {
-            Format::SdJwtVc => self.sd_jwt_vc,
+            Format::SdJwtVc => Some(self.sd_jwt_vc),
             Format::Mdoc => self.mdoc,
         }
     }
 }
 
-/// The mandatory attributes of the PID Rulebook §2.2 and the optional
-/// `personal_administrative_number` of §2.3, the attributes that name the
-/// person.
-pub const ATTRIBUTES: [Attribute; 7] = [
+/// The reason no address attribute is asked for.
+const NO_ADDRESS: &str = "no address claim: GDPR Art 5(1)(c)";
+
+/// Returns the attribute of `data_identifier`, mandatory or not, under the
+/// same name in both formats, handled by `target`.
+const fn same(data_identifier: &'static str, mandatory: bool, target: Target) -> Attribute {
     Attribute {
-        data_identifier: "family_name",
-        mandatory: true,
-        sd_jwt_vc: "family_name",
-        mdoc: "family_name",
-        target: Target::Claim("family_name"),
-    },
+        data_identifier,
+        mandatory,
+        sd_jwt_vc: data_identifier,
+        mdoc: Some(data_identifier),
+        target,
+    }
+}
+
+/// Returns the optional attribute `data_identifier`, under `sd_jwt_vc` in
+/// an SD-JWT VC and its own name in an mdoc, handled by `target`.
+const fn renamed(
+    data_identifier: &'static str,
+    sd_jwt_vc: &'static str,
+    target: Target,
+) -> Attribute {
     Attribute {
-        data_identifier: "given_name",
-        mandatory: true,
-        sd_jwt_vc: "given_name",
-        mdoc: "given_name",
-        target: Target::Claim("given_name"),
-    },
+        data_identifier,
+        mandatory: false,
+        sd_jwt_vc,
+        mdoc: Some(data_identifier),
+        target,
+    }
+}
+
+/// Every data identifier of the PID Rulebook, in its order.
+///
+/// The mandatory attributes (§2.2), the optional ones (§2.3), the mandatory
+/// and optional metadata (§2.4, §2.5), the Rulebook's own attributes
+/// (§2.6), and `resident_house_number`, which §4.1.1 adds to an SD-JWT VC
+/// alone.
+pub const ATTRIBUTES: [Attribute; 27] = [
+    same("family_name", true, Target::Claim("family_name")),
+    same("given_name", true, Target::Claim("given_name")),
     Attribute {
         data_identifier: "birth_date",
         mandatory: true,
         sd_jwt_vc: "birthdate",
-        mdoc: "birth_date",
+        mdoc: Some("birth_date"),
         target: Target::Claim("birthdate"),
     },
     Attribute {
         data_identifier: "birth_place",
         mandatory: true,
         sd_jwt_vc: "place_of_birth",
-        mdoc: "place_of_birth",
+        mdoc: Some("place_of_birth"),
         target: Target::Claim("place_of_birth"),
     },
     Attribute {
         data_identifier: "nationality",
         mandatory: true,
         sd_jwt_vc: "nationalities",
-        mdoc: "nationality",
+        mdoc: Some("nationality"),
         target: Target::Claim("nationalities"),
     },
     Attribute {
         data_identifier: "portrait",
         mandatory: true,
         sd_jwt_vc: "picture",
-        mdoc: "portrait",
+        mdoc: Some("portrait"),
         target: Target::NotRetained,
     },
+    renamed(
+        "resident_address",
+        "address.formatted",
+        Target::NotAsked(NO_ADDRESS),
+    ),
+    renamed(
+        "resident_country",
+        "address.country",
+        Target::NotAsked(NO_ADDRESS),
+    ),
+    renamed(
+        "resident_state",
+        "address.region",
+        Target::NotAsked(NO_ADDRESS),
+    ),
+    renamed(
+        "resident_city",
+        "address.locality",
+        Target::NotAsked(NO_ADDRESS),
+    ),
+    renamed(
+        "resident_postal_code",
+        "address.postal_code",
+        Target::NotAsked(NO_ADDRESS),
+    ),
+    renamed(
+        "resident_street",
+        "address.street_address",
+        Target::NotAsked(NO_ADDRESS),
+    ),
+    same("personal_administrative_number", false, Target::Identifier),
+    renamed(
+        "family_name_birth",
+        "birth_family_name",
+        Target::NotAsked("no birth-name claim: GDPR Art 5(1)(c)"),
+    ),
+    renamed(
+        "given_name_birth",
+        "birth_given_name",
+        Target::NotAsked("no birth-name claim: GDPR Art 5(1)(c)"),
+    ),
+    same(
+        "sex",
+        false,
+        Target::NotAsked("no claim: OIDC gender has another value range, Rulebook §4.1.1"),
+    ),
+    renamed("email_address", "email", Target::Claim("email")),
+    renamed(
+        "mobile_phone_number",
+        "phone_number",
+        Target::NotAsked("no phone claim: GDPR Art 5(1)(c)"),
+    ),
+    same(
+        "issuing_authority",
+        true,
+        Target::NotAsked(
+            "the provider's certificate under the PID providers list names it, Rulebook §6",
+        ),
+    ),
+    same("issuing_country", true, Target::IdentifierCountry),
+    renamed(
+        "expiry_date",
+        "date_of_expiry",
+        Target::NotAsked("the technical validity and the status list decide, Rulebook §2.5, §7"),
+    ),
+    same(
+        "document_number",
+        false,
+        Target::NotAsked("names the PID, not the person: GDPR Art 5(1)(c)"),
+    ),
+    same(
+        "issuing_jurisdiction",
+        false,
+        Target::NotAsked("issuing_country names the identifier's system"),
+    ),
+    renamed(
+        "issuance_date",
+        "date_of_issuance",
+        Target::NotAsked("the technical validity and the status list decide, Rulebook §2.5, §7"),
+    ),
+    same(
+        "trust_anchor",
+        false,
+        Target::NotAsked("the anchors come from the PID providers list, never a PID, Rulebook §6"),
+    ),
+    same(
+        "attestation_legal_category",
+        false,
+        Target::NotAsked("the credential type and the PID providers list say it is a PID"),
+    ),
     Attribute {
-        data_identifier: "personal_administrative_number",
+        data_identifier: "resident_house_number",
         mandatory: false,
-        sd_jwt_vc: "personal_administrative_number",
-        mdoc: "personal_administrative_number",
-        target: Target::Identifier,
+        sd_jwt_vc: "address.house_number",
+        mdoc: None,
+        target: Target::NotAsked(NO_ADDRESS),
     },
 ];
 
@@ -118,7 +252,7 @@ pub const ATTRIBUTES: [Attribute; 7] = [
 pub fn not_retained(name: &str) -> bool {
     ATTRIBUTES.iter().any(|attribute| {
         attribute.target == Target::NotRetained
-            && (attribute.sd_jwt_vc == name || attribute.mdoc == name)
+            && (attribute.sd_jwt_vc == name || attribute.mdoc == Some(name))
     })
 }
 
@@ -144,18 +278,21 @@ pub fn person_claims(claims: &Map<String, Value>, format: Format) -> Map<String,
             let Target::Claim(name) = attribute.target else {
                 return None;
             };
-            let value = claims.get(attribute.name(format))?;
+            let value = claims.get(attribute.name(format)?)?;
             shaped(name, value).then(|| (name.to_owned(), value.clone()))
         })
         .collect()
 }
 
-/// Whether `value` has the shape the PID Rulebook gives the claim `name`:
-/// text, `place_of_birth` an object of text members (§3.1.4, §4.1.1),
+/// Whether `value` has the shape the PID Rulebook gives the claim `name`.
+///
+/// Text, `birthdate` a full date `YYYY-MM-DD` (§3.1.2, §4.1.1),
+/// `place_of_birth` an object of text members (§3.1.4, §4.1.1),
 /// `nationalities` an array of alpha-2 codes (§3.1.3).
 #[must_use]
 pub fn shaped(name: &str, value: &Value) -> bool {
     match name {
+        "birthdate" => value.as_str().is_some_and(full_date),
         "place_of_birth" => value.as_object().is_some_and(|place| {
             !place.is_empty()
                 && place.iter().all(|(member, text)| {
@@ -168,6 +305,15 @@ pub fn shaped(name: &str, value: &Value) -> bool {
         }),
         _ => value.as_str().is_some_and(|text| !text.trim().is_empty()),
     }
+}
+
+/// Whether `text` has the form of an RFC 3339 `full-date`, `YYYY-MM-DD`.
+fn full_date(text: &str) -> bool {
+    text.len() == 10
+        && text.bytes().enumerate().all(|(at, byte)| match at {
+            4 | 7 => byte == b'-',
+            _ => byte.is_ascii_digit(),
+        })
 }
 
 /// Whether `code` is an ISO 3166-1 alpha-2 code's form: two capital letters.
@@ -314,13 +460,12 @@ mod tests {
     }
 
     #[test]
-    fn the_table_holds_the_rulebook_mandatory_attributes_and_the_administrative_number() {
-        let mandatory: Vec<&str> = ATTRIBUTES
+    fn the_table_holds_every_data_identifier_of_the_rulebook_in_its_order() {
+        let identifiers: Vec<&str> = ATTRIBUTES
             .iter()
-            .filter(|attribute| attribute.mandatory)
             .map(|attribute| attribute.data_identifier)
             .collect();
-        // NOTE: PID Rulebook 1.6 §2.2, the mandatory attributes of CIR 2024/2977.
+        // NOTE: PID Rulebook 1.7 §2.2 to §2.6, and §4.1.1's resident_house_number.
         assert_eq!(
             vec![
                 "family_name",
@@ -328,7 +473,47 @@ mod tests {
                 "birth_date",
                 "birth_place",
                 "nationality",
-                "portrait"
+                "portrait",
+                "resident_address",
+                "resident_country",
+                "resident_state",
+                "resident_city",
+                "resident_postal_code",
+                "resident_street",
+                "personal_administrative_number",
+                "family_name_birth",
+                "given_name_birth",
+                "sex",
+                "email_address",
+                "mobile_phone_number",
+                "issuing_authority",
+                "issuing_country",
+                "expiry_date",
+                "document_number",
+                "issuing_jurisdiction",
+                "issuance_date",
+                "trust_anchor",
+                "attestation_legal_category",
+                "resident_house_number",
+            ],
+            identifiers
+        );
+        let mandatory: Vec<&str> = ATTRIBUTES
+            .iter()
+            .filter(|attribute| attribute.mandatory)
+            .map(|attribute| attribute.data_identifier)
+            .collect();
+        // NOTE: PID Rulebook 1.7 §2.2 and §2.4, the mandatory attributes and metadata.
+        assert_eq!(
+            vec![
+                "family_name",
+                "given_name",
+                "birth_date",
+                "birth_place",
+                "nationality",
+                "portrait",
+                "issuing_authority",
+                "issuing_country"
             ],
             mandatory
         );
@@ -338,6 +523,60 @@ mod tests {
             .map(|attribute| attribute.data_identifier)
             .collect();
         assert_eq!(vec!["personal_administrative_number"], identifiers);
+    }
+
+    /// Returns the presented claims of `format` holding every attribute
+    /// FerroSMART does not ask for, each with a well-formed text value.
+    fn unused(format: Format) -> Map<String, Value> {
+        ATTRIBUTES
+            .iter()
+            .filter(|attribute| matches!(attribute.target, Target::NotAsked(_)))
+            .filter_map(|attribute| attribute.name(format))
+            .map(|name| (name.to_owned(), json!("synthetic")))
+            .collect()
+    }
+
+    // NOTE: Regulation (EU) 2016/679 Art 5(1)(c), what no claim or identifier uses is
+    // not asked for, and maps to nothing when a wallet sends it.
+    #[test]
+    fn an_attribute_it_does_not_use_is_neither_asked_nor_mapped() {
+        for format in [Format::SdJwtVc, Format::Mdoc] {
+            assert!(
+                person_claims(&unused(format), format).is_empty(),
+                "{format:?}"
+            );
+        }
+        let section = crate::upstream::wallet::WalletSection::default();
+        for (format, asked) in [
+            (Format::SdJwtVc, &section.claims),
+            (Format::Mdoc, &section.mdoc_claims),
+        ] {
+            for name in asked {
+                let target = ATTRIBUTES
+                    .iter()
+                    .find(|attribute| attribute.name(format) == Some(name.as_str()))
+                    .map(|attribute| attribute.target);
+                assert!(
+                    matches!(
+                        target,
+                        Some(Target::Claim(_) | Target::Identifier | Target::IdentifierCountry)
+                    ),
+                    "the default request asks {name} of an {format:?}, which it uses for nothing"
+                );
+            }
+        }
+    }
+
+    // NOTE: PID Rulebook 1.7 §4.1.1, email_address is OpenID Connect Core 1.0 §5.1's
+    // email in an SD-JWT VC; an mdoc names it email_address (§3.1.2).
+    #[test]
+    fn the_email_address_reaches_the_email_claim_from_either_format() {
+        let sd_jwt = object(json!({"email": "eva@example.org"}));
+        let mdoc = object(json!({"email_address": "eva@example.org"}));
+        let expected = object(json!({"email": "eva@example.org"}));
+        assert_eq!(expected, person_claims(&sd_jwt, Format::SdJwtVc));
+        assert_eq!(expected, person_claims(&mdoc, Format::Mdoc));
+        assert!(person_claims(&mdoc, Format::SdJwtVc).is_empty());
     }
 
     #[test]
@@ -375,6 +614,7 @@ mod tests {
         let claims = object(json!({
             "family_name": "",
             "given_name": 7,
+            "birthdate": "12-02-1978",
             "place_of_birth": {"planet": "Earth"},
             "nationalities": ["nl"],
         }));
@@ -432,24 +672,20 @@ mod tests {
     #[test]
     fn the_conformance_table_is_the_mapping() {
         let table = include_str!("../../../../conformance/pid-attributes.tsv");
-        let rows: Vec<Vec<&str>> = table
+        let rows: Vec<Vec<String>> = table
             .lines()
             .filter(|line| !line.starts_with('#') && !line.is_empty())
-            .map(|line| line.split('\t').take(5).collect())
+            .map(|line| line.split('\t').take(5).map(str::to_owned).collect())
             .collect();
-        let expected: Vec<Vec<&str>> = ATTRIBUTES
+        let expected: Vec<Vec<String>> = ATTRIBUTES
             .iter()
             .map(|attribute| {
                 vec![
-                    attribute.data_identifier,
-                    if attribute.mandatory { "yes" } else { "no" },
-                    attribute.sd_jwt_vc,
-                    attribute.mdoc,
-                    match attribute.target {
-                        Target::Claim(name) => name,
-                        Target::Identifier => "identifier",
-                        Target::NotRetained => "not retained (CIR 2024/2977 Art 3a(3))",
-                    },
+                    attribute.data_identifier.to_owned(),
+                    String::from(if attribute.mandatory { "yes" } else { "no" }),
+                    attribute.sd_jwt_vc.to_owned(),
+                    attribute.mdoc.unwrap_or("-").to_owned(),
+                    attribute.target.handling(),
                 ]
             })
             .collect();

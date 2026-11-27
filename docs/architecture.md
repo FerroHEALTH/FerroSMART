@@ -2640,7 +2640,8 @@ document (13.8).
 | ID Tokens signed with `RS256` | SHALL | same; `discovery §3` | 2 |
 | ID Token claims `iss`, `sub`, `aud`, `exp`, `iat`, `nonce` when sent, `auth_time` when `max_age` is requested | REQUIRED | `oidc core §2`, `§3.1.2.1` | 3 |
 | `profile` and `email` request `name`, `preferred_username`, `given_name`, `family_name`, `birthdate`, `email` and `email_verified`, and a wallet login adds `place_of_birth` and `nationalities` under `profile` (13.32); FerroSMART passes the upstream ID Token's values into its own ID Token when granted, never into an access token, and leaves out what the upstream did not send (owner, 2026-11-19, #676) | MAY (an OP may decline) | `oidc core §5.1`, `§5.4` | 3 |
-| `claims`, request objects and UserInfo | MAY | `smart scopes-and-launch-context`, Scopes for requesting identity data | not built: no UserInfo Endpoint, which `oidc core §15.2` requires only of a Dynamic OP (owner decision of 2026-11-19, #650) |
+| UserInfo | MAY | `smart scopes-and-launch-context`, Scopes for requesting identity data; `oidc core §5.3`; `discovery §3` (`userinfo_endpoint` RECOMMENDED) | met: `GET`, `POST {issuer}/userinfo` answers the claims of the ID Token issued with the token, listed as `userinfo_endpoint` (#933, reversing #650) |
+| `claims` and request objects | MAY | `smart scopes-and-launch-context`, Scopes for requesting identity data | not built: `oidc core §15.2` requires them only of a Dynamic OP (#650) |
 | What every OpenID Provider implements (`oidc core §15.1`) | MUST | `oidc core §15.1` | met, 13.25 |
 
 **Refresh tokens**
@@ -3315,6 +3316,7 @@ differently.
 | `GET`, `POST /consent`, `/picker` | the consent and picker pages | our own design |
 | `POST /token` | the token endpoint | `rfc6749 §3.2` |
 | `POST /introspect` | RFC 7662 | `rfc7662 §2` |
+| `GET`, `POST /userinfo` | the UserInfo Endpoint (`userinfo_endpoint`): an active access token FerroSMART issued under a person's grant with `openid`, by `Bearer` or, bound, by `DPoP` with its proof and over the certificate it is bound to, answers `sub`, `fhirUser` and the standard claims its scope passes on, the ID Token's claims; a refusal is the RFC 6750 §3 challenge | `oidc core §5.3`; `rfc6750 §2.1`, `§3`; `rfc9449 §7`; `rfc8705 §3` |
 | `POST /revoke` | RFC 7009 | `rfc7009 §2` |
 | `POST /launch` | the EHR launch API | our own design (13.6) |
 | `GET /manage` | the apps holding the user's consent or live access, each with Disconnect (`management_endpoint`) | `smart conformance`, Metadata |
@@ -3344,7 +3346,7 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 | `signing_key` | `kid` | state (`next`, `active`, `retiring`, `retired`) and the time it reached each one; the key itself stays in the files of `[ferrosmart.keys]` (13.11) |
 | `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
 | `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time, the basis of its consent (13.6 item 6) |
-| `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), the basis of its consent, the `DPoP` key a public client's refresh token is bound to (13.31), creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
+| `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), the basis of its consent, the `DPoP` key a public client's refresh token is bound to (13.31), the standard claims its scope passes on, which the UserInfo Endpoint answers (`oidc core §5.3`; none without `openid`), creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
 | `refresh_token` | token hash | grant, predecessor, idle expiry, use time (set when rotated, kept for reuse detection), revocation |
 | `access_token` | `jti` | grant or client, `aud`, scope, `exp`, revocation, so introspection and revocation answer for a JWT |
 | `launch` | launch hash | EHR client, the app's `client_id`, `aud`, context, expiry, use time |
@@ -3387,13 +3389,14 @@ private_key_files = [                         # in the order they take over; eac
 rotation_period = "90d"                       # how long a key signs before the next takes over
 
 [ferrosmart.backend]                          # FerroSMART's own Backend Services client, its client_id the issuer; needed with a login at a FHIR base (13.33)
-algorithm = "ES384"                           # or "RS384"
+algorithm = "ES384"                           # or "RS384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"
 [ferrosmart.backend.keys]                     # its assertion ring, sharing no key with [ferrosmart.keys]
 private_key_file = "/run/secrets/backend-assertion.pem"
 
 [[ferrosmart.resource]]                       # each base an `aud` may name; at least one
 base = "https://ehr.example.org/fhir"
 kind = "fhir"                                 # or "openehr"
+# access_token_signing_alg = "ML-DSA-65"      # the algorithm its access tokens are signed with; RS256 by default (13.11)
 # subject_namespace = "examples"              # openEHR only: the EHR subjects' namespace the picker looks up in
 # fhir_base = "https://ehr.example.org/fhir"  # openEHR only: the platform's FHIR base the picker finds the patient at
 # subject_system = "urn:example:mrn"          # with fhir_base: the Patient.identifier system that names the EHR's subject
@@ -3588,8 +3591,13 @@ presets or the commands: our own design.
   `id_token_signing_alg_values_supported` names both. A client's
   `id_token_signed_response_alg` (OpenID Connect Dynamic Client
   Registration 1.0 §2), `RS256` by default, picks the algorithm of its ID
-  Tokens and of its access tokens alike, which no specification names for
-  an access token: our own design (#887). A registration naming another
+  Tokens. An access token is signed with the algorithm its resource server
+  verifies, which no specification names: the `[[ferrosmart.resource]]`
+  table's `access_token_signing_alg`, `RS256` by default, since RFC 9068
+  §2.1 has every resource server verify it, and `ML-DSA-65` for a server
+  that verifies it, such as a FerroHEALTH product on `ferrohealth-smart`;
+  a value no key of the pool signs is refused at start (#935, our own
+  design). A registration naming another
   algorithm, or one no key signs, is `invalid_client_metadata`. Names
   follow RFC 9864's fully-specified registrations; `none` and HMAC never
   sign.
@@ -4208,7 +4216,9 @@ redacted in every rendering. A table naming both is refused at load, and
 a secret anywhere else is an unknown key. At start FerroSMART reads the
 provider's `token_endpoint_auth_methods_supported` (`rfc8414 §2`,
 `client_secret_basic` when absent) and refuses a provider that does not
-list the method. Choose the secret only for a provider that offers no
+list the method, and refuses a `private_key_jwt` entry whose algorithm a
+listed `token_endpoint_auth_signing_alg_values_supported` leaves out, so
+an entry signs ML-DSA (`rfc9964`) where the provider lists it (#935). Choose the secret only for a provider that offers no
 `private_key_jwt` for a web client: OAuth 2.1 and FAPI 2.0 prefer
 asymmetric client authentication, a secret can leak from a configuration
 file, and FerroSMART holds keys already.
@@ -4554,10 +4564,11 @@ module cannot see the relying party refuse, so the login column carries
 the check: the lane knows what each module asks of the login, from the
 module's own summary in the suite, and a login the module does not ask
 for names its issue. A happy-path module finishes at the suite only after
-a UserInfo request (`oidc core §5.3`), which FerroSMART never makes: it
-reads the person from the ID Token. The driver therefore stops such a
-module once the login is accepted, and the suite records it
-`INTERRUPTED`. One configuration, `app/ferrosmart/oidf/ferrosmart-rp.toml`,
+a UserInfo request (`oidc core §5.3`): FerroSMART makes one after the code
+exchange whenever the provider names a `userinfo_endpoint`, refuses the
+login when its `sub` is not the ID Token's (`§5.3.2`), and lets its claims
+complete the ID Token's (#933). A module still waiting once the login is
+over is stopped, and the suite records it `INTERRUPTED`. One configuration, `app/ferrosmart/oidf/ferrosmart-rp.toml`,
 names no client authentication, and the driver adds the one the module
 fixes (13.22): `client_secret_basic` with the secret
 `app/ferrosmart/oidf/rp.json` registers, from a file, for the Basic
@@ -4566,17 +4577,16 @@ for every other module. The suite's runner never runs the two key-rotation
 modules (its own `ignored_modules`), and the lane records them as not run.
 
 **As the OpenID Provider**, the suite is the static client `oidf-suite`, a
-confidential symmetric client, and Keycloak is FerroSMART's upstream.
-FerroSMART has no UserInfo Endpoint, so every module of the Basic plan
-stops before its authorization request and the configuration module
-warns. The owner decided on 2026-11-19 (#650) that FerroSMART builds none:
-`oidc core §15.1` does not list it, `§15.2` requires it only of a Dynamic
-OP, and SMART App Launch 2.2.0 makes it a MAY. The modules would stop at
-the authorization request even with one, since they send neither the PKCE
-challenge nor the `aud` SMART App Launch 2.2.0 requires, so the Basic OP
-plan does not apply to a SMART authorization server and its 36 modules
-stay held as failures under #650. What `§15.1` requires of every OP is
-tested through the endpoints instead (13.25).
+confidential symmetric client, and Keycloak is FerroSMART's upstream; the
+suite's browser logs in at Keycloak's form with the person's password the
+lane makes for the run. FerroSMART serves the UserInfo Endpoint (13.8,
+#933, which reverses the decision of #650 that it builds none):
+`oidc core §5.3` defines it as the provider's source of the claims, and
+`discovery §3` RECOMMENDS `userinfo_endpoint`. A module whose authorization
+request carries no S256 PKCE challenge is refused, since SMART App Launch
+2.2.0 requires one of every app (13.6), and `expected.tsv` names that
+reason for each module it stops. What `§15.1` requires of every OP is also
+tested through the endpoints (13.25).
 
 What the lane found: the relying party accepted an ID Token without
 `iat` (#646) and refused one without `kid` whose key set holds a single
@@ -4638,6 +4648,14 @@ The tests are in `app/ferrosmart/tests/it/authorize/core_op.rs`.
 | `auth_time` | every ID Token carries `auth_time`, the upstream ID Token's own, or the time the upstream login returned when it names none; a refresh keeps it | `oidc core §15.1`, `§2` | `the_id_token_is_rs256_and_carries_the_upstream_login_s_auth_time` |
 | `max_age` | goes to the upstream login; an upstream `auth_time` older than `max_age`, or none, begins the upstream login again with `prompt=login`, once, and a login still older answers `login_required`; `max_age=0` is `prompt=login`; a value that is no number of seconds is `invalid_request` | `oidc core §15.1`, `§3.1.2.1`, `§3.1.2.6` | `an_upstream_login_older_than_max_age_is_begun_again_with_prompt_login` |
 | `acr_values` | an eIDAS URI it names is the level the login must reach, a miss answered `unmet_authentication_requirements`; the provider is asked for its values at that level; any other value is taken and ignored; the ID Token and the access token carry `acr`, and the documents name `acr_values_supported` (13.28) | `oidc core §15.1`, `§3.1.2.1`; `rfc9470 §5`, `§7` | `acr_values_naming_an_eidas_level_holds_the_login_to_it`, `display_locales_and_acr_values_are_taken` |
+
+`oidc core §15.1` does not list the UserInfo Endpoint, and `§15.2` requires
+it only of a Dynamic OP; FerroSMART serves it anyway (13.8, #933), because
+`§5.3` makes it the provider's source of the claims, `discovery §3`
+RECOMMENDS `userinfo_endpoint`, and the OpenID Foundation's Basic OP plan
+reads the claims there (13.24). It answers what the ID Token issued with
+the token carries, so it exposes nothing new. The tests are in
+`app/ferrosmart/tests/it/authorize/userinfo.rs`.
 
 ### 13.26 Upstream providers: SAML 2.0
 
@@ -5103,7 +5121,9 @@ carries `x5t#S256`, the SHA-256 of the leaf certificate's DER encoding
 `invalid_request`, which RFC 8705 §3.4 leaves to the server. Introspection
 answers the token's `cnf` (`rfc9449 §6.2`, `rfc8705 §3.2`). The metadata
 names `dpop_signing_alg_values_supported`, the proof algorithms the check
-admits (`rfc9449 §5.1`), and `tls_client_certificate_bound_access_tokens`,
+admits (`rfc9449 §5.1`): `ferrohealth-smart`'s defaults with ML-DSA-44,
+ML-DSA-65 and ML-DSA-87 beside them, a proof of those carrying its `AKP`
+key (`rfc9964`, #935), and `tls_client_certificate_bound_access_tokens`,
 `true` when the listener asks for a certificate (`rfc8705 §3.3`).
 
 ### 13.32 Upstream providers: the EUDI Wallet
@@ -5323,22 +5343,38 @@ was verified.
 
 **The PID as the SMART person.** No specification says how a PID becomes
 the claims of an ID Token or a SMART patient context: the mapping is our
-own design (#857), over the attribute names of the PID Rulebook 1.6. Of
-the mandatory attributes (Rulebook §2.2) and the administrative number
-(§2.3), `app/ferrosmart/src/wallet/pid.rs` maps each by its name in the
-format presented (§3.1.2, §4.1.1):
+own design (#857), over the data identifiers of the PID Rulebook 1.7, the
+version `docs/VERSIONS.md` pins (#932: 1.7 adds to 1.6 only the §5
+requirement that a Wallet Unit never signs a relying party's transactional
+data with the PID key, which FerroSMART never asks for, so no section the
+code cites moved). `app/ferrosmart/src/wallet/pid.rs` holds every data
+identifier of §2.2 to §2.6, with the `resident_house_number` §4.1.1 adds to
+an SD-JWT VC alone, and reads each by its name in the format presented
+(§3.1.2, §4.1.1) (#934):
 
-| Attribute | SD-JWT VC | mdoc | Where it goes |
+| Data identifier | SD-JWT VC | mdoc | What FerroSMART does |
 |---|---|---|---|
-| `family_name` | `family_name` | `family_name` | `family_name`, under `profile` (`oidc core §5.1`) |
-| `given_name` | `given_name` | `given_name` | `given_name`, under `profile` |
-| `birth_date` | `birthdate` | `birth_date` | `birthdate`, under `profile` |
+| `family_name`, `given_name` | the same | the same | the claim of that name, under `profile` (`oidc core §5.1`) |
+| `birth_date` | `birthdate` | `birth_date` | `birthdate`, under `profile`, when it is a full date `YYYY-MM-DD` |
 | `birth_place` | `place_of_birth` | `place_of_birth` | `place_of_birth`, under `profile`, the name the Rulebook takes from OpenID Connect for Identity Assurance |
 | `nationality` | `nationalities` | `nationality` | `nationalities`, under `profile`, likewise |
+| `email_address` | `email` | `email_address` | `email`, under `email`, the OpenID Connect claim the Rulebook names (§4.1.1); not asked for by default |
 | `portrait` | `picture` | `portrait` | not retained: never asked for, and dropped on receipt |
 | `personal_administrative_number` | the same | the same | the identifier the patient index resolves |
+| `issuing_country` (§2.4) | the same | the same | names the Member State whose identifier system the number is in, and the person's `sub`; a PID without it is refused |
+| `issuing_authority` (§2.4) | the same | the same | not asked: the provider's certificate under the list of PID providers names the issuer (§6) |
+| `resident_address`, `resident_country`, `resident_state`, `resident_city`, `resident_postal_code`, `resident_street`, `resident_house_number` | `address.*` | the same, none for the house number | not asked: no token carries an address |
+| `family_name_birth`, `given_name_birth` | `birth_family_name`, `birth_given_name` | the same | not asked: no claim carries a birth name |
+| `sex` | the same | the same | not asked: no claim carries it, and OpenID Connect's `gender` has another value range (§4.1.1) |
+| `mobile_phone_number` | `phone_number` | the same | not asked: no token carries a phone number |
+| `expiry_date`, `issuance_date` | `date_of_expiry`, `date_of_issuance` | the same | not asked: the technical validity period and the status list decide whether a presented PID holds (§2.5, §7) |
+| `document_number` | the same | the same | not asked: it names the PID, not the person |
+| `issuing_jurisdiction` | the same | the same | not asked: `issuing_country` names the identifier's system |
+| `trust_anchor` | the same | the same | not asked: the anchors come from the list of PID providers, never from a PID (§6) |
+| `attestation_legal_category` | the same | the same | not asked: the credential type and the list of PID providers say it is a PID |
 
-A value of another shape than the Rulebook gives it maps to nothing.
+What no claim or identifier uses is not asked for by default and maps to
+nothing (Regulation (EU) 2016/679 Art 5(1)(c)). A value of another shape than the Rulebook gives it maps to nothing.
 FerroSMART identifies the person without the portrait, so as a
 wallet-relying party it does not retain it (Implementing Regulation (EU)
 2024/2977 Art 3a(3), inserted by 2026/1731; Regulation (EU) 2016/679
@@ -5346,8 +5382,9 @@ Art 5(1)(c)). A `claims` or `mdoc_claims` naming `picture` or `portrait` is
 refused at start, an mdoc carrying it is `unrequested_credential`, and an
 SD-JWT VC that discloses it unasked has it dropped before the login reads
 its claims, so no stored login, token or audit record carries it. The
-README's PID badge counts each attribute of the table whose handling a
-named test in `conformance/pid-attributes.tsv` holds. The
+README's PID badge counts, of every data identifier of the pinned
+Rulebook, those whose handling a named test in
+`conformance/pid-attributes.tsv` holds. The
 identifier is the number in the system
 `[ferrosmart.upstream.openid4vp.identifier_systems]` names for its
 `issuing_country`, typed by `identifier_type` (HL7 v2 table 0203, `NI` by
@@ -5429,7 +5466,9 @@ sequenceDiagram
   client a resource server's `ferrosmart` preset reads as the authorization
   server itself (`issuer_client_is_person`, 3.13). `[ferrosmart.backend]`
   names the assertion algorithm (`ES384` or `RS384`,
-  the two `smart client-authentication-asymmetric` has a server validate)
+  the two `smart client-authentication-asymmetric` has a server validate,
+  or `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87`, which the token endpoint
+  it authenticates to, FerroSMART's own, also lists, `rfc8414 §2`, #935)
   and the `[ferrosmart.backend.keys]` ring, which shares no key with
   `[ferrosmart.keys]` (RFC 8725 §3.12). A deployment that logs people in
   at a FHIR base needs it, and a configuration without it is refused at

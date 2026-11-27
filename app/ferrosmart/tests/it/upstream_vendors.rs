@@ -81,7 +81,9 @@ struct Contract {
 /// `v2-oauth2-auth-code-flow.md` (Request an access token with a
 /// `client_secret`) supports. The claims are those
 /// `id-token-claims-reference.md` (Payload claims) lists for a v2.0 ID
-/// Token, with the app roles and the `extn.` optional claim.
+/// Token, with the app roles and the `extn.` optional claim. Entra serves its
+/// UserInfo Endpoint at `https://graph.microsoft.com/oidc/userinfo`; the stub
+/// serves it under the tenant, since no case reaches the network.
 fn entra() -> Contract {
     Contract {
         example: ENTRA,
@@ -102,7 +104,7 @@ fn entra() -> Contract {
                 "scopes_supported": ["openid", "profile", "email", "offline_access"],
                 "subject_types_supported": ["pairwise"],
                 "id_token_signing_alg_values_supported": ["RS256"],
-                "userinfo_endpoint": "https://graph.microsoft.com/oidc/userinfo"
+                "userinfo_endpoint": format!("{tenant}/oidc/userinfo")
             })
         },
         jwks: |path| format!("{}/discovery/v2.0/keys", path.trim_end_matches("/v2.0")),
@@ -263,6 +265,27 @@ impl Provider {
             .expect(1)
             .mount(&self.server)
             .await;
+        // NOTE: OpenID Connect Core 1.0 §5.3, a provider naming a UserInfo Endpoint
+        // is asked for the claims about the ID Token's subject.
+        if let Some(endpoint) = (contract.metadata)(&self.issuer)
+            .get("userinfo_endpoint")
+            .and_then(Value::as_str)
+        {
+            let userinfo = Url::parse(endpoint).expect("a URL").path().to_owned();
+            Mock::given(matchers::method("GET"))
+                .and(matchers::path(userinfo))
+                .and(matchers::header(
+                    "authorization",
+                    "Bearer synthetic-upstream-access-token",
+                ))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({ "sub": contract.claims.get("sub") })),
+                )
+                .expect(1)
+                .mount(&self.server)
+                .await;
+        }
     }
 }
 
@@ -728,6 +751,64 @@ async fn the_entra_id_multitenant_authority_is_refused() {
         ),
         "{refused:?}"
     );
+}
+
+// NOTE: RFC 8414 §2, token_endpoint_auth_signing_alg_values_supported: an entry
+// whose assertion algorithm the provider does not list is refused at start.
+#[tokio::test]
+async fn an_assertion_algorithm_the_provider_does_not_list_is_refused() {
+    for (listed, refused) in [
+        (json!(["ML-DSA-65"]), true),
+        (json!(["PS256", "ML-DSA-65"]), false),
+    ] {
+        let keys = Keys::new();
+        let mut config = example_config(ENTRA, &keys, None);
+        let server = MockServer::start().await;
+        let authority = format!("{}/tenant/v2.0", server.uri());
+        Mock::given(matchers::method("GET"))
+            .and(matchers::path(
+                "/tenant/v2.0/.well-known/openid-configuration",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "issuer": authority,
+                "authorization_endpoint": format!("{}/tenant/oauth2/v2.0/authorize", server.uri()),
+                "token_endpoint": format!("{}/tenant/oauth2/v2.0/token", server.uri()),
+                "jwks_uri": format!("{}/tenant/discovery/v2.0/keys", server.uri()),
+                "token_endpoint_auth_methods_supported": ["private_key_jwt"],
+                "token_endpoint_auth_signing_alg_values_supported": listed
+            })))
+            .mount(&server)
+            .await;
+        config
+            .ferrosmart
+            .upstream
+            .first_mut()
+            .and_then(|upstream| upstream.oidc.as_mut())
+            .expect("a provider")
+            .issuer = authority.clone();
+        let settings = config.resolve().expect("the configuration resolves");
+        let ferrosmart::upstream::Protocol::Oidc(oidc) =
+            &settings.upstreams.first().expect("an upstream").protocol
+        else {
+            panic!("the provider speaks OpenID Connect");
+        };
+        let party = oidc
+            .relying_party(Url::parse("https://smart.example.org/callback").expect("a URL"))
+            .await;
+        if refused {
+            assert!(
+                matches!(
+                    &party,
+                    Err(ferrosmart::upstream::UpstreamError::AssertionAlgorithm {
+                        algorithm: "PS256"
+                    })
+                ),
+                "{party:?}"
+            );
+        } else {
+            assert!(party.is_ok(), "{party:?}");
+        }
+    }
 }
 
 /// Returns the DER of the PEM certificate `pem`.

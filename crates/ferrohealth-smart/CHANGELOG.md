@@ -11,6 +11,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.36.0] - Unreleased
+
 ## [0.35.0] - 2026-11-25
 
 ML-DSA signatures (RFC 9964) and one JWS module in place of `jsonwebtoken`.

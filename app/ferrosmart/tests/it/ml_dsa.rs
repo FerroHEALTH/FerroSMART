@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 //! ML-DSA (RFC 9964) at FerroSMART: ML-DSA-65 token signing keys beside
-//! the RSA ones, published and named in discovery, a client registered
-//! with `id_token_signed_response_alg` `ML-DSA-65` getting tokens a
-//! resource server verifies through ferrohealth-smart, and client
-//! assertions and signed launches by a client's `AKP` key.
+//! the RSA ones, published and named in discovery, a resource server set
+//! to ML-DSA-65 getting access tokens it verifies through
+//! ferrohealth-smart, the ID Token following the client's registration,
+//! and client assertions and signed launches by a client's `AKP` key.
 
 use std::sync::Arc;
 
@@ -67,13 +67,34 @@ impl Server {
         Self::with_client(algorithm, ec_key).await
     }
 
+    /// Starts the server of [`Server::start`] whose resource server takes
+    /// access tokens signed `resource_algorithm`.
+    async fn for_resource(algorithm: &str, resource_algorithm: &str) -> Self {
+        Self::build(algorithm, ec_key, Some(resource_algorithm)).await
+    }
+
     /// Starts the server of [`Server::start`] with `export`'s key written
     /// by `write`.
     async fn with_client(
         algorithm: &str,
         write: fn(&std::path::Path, &str) -> std::path::PathBuf,
     ) -> Self {
+        Self::build(algorithm, write, None).await
+    }
+
+    /// Starts the server of [`Server::with_client`] whose resource server
+    /// names `resource_algorithm`, when there is one.
+    async fn build(
+        algorithm: &str,
+        write: fn(&std::path::Path, &str) -> std::path::PathBuf,
+        resource_algorithm: Option<&str>,
+    ) -> Self {
         let keys = Keys::new();
+        let resource = resource_algorithm.map_or_else(String::new, |named| {
+            format!(
+                "[[ferrosmart.resource]]\nbase = {RESOURCE:?}\naccess_token_signing_alg = {named:?}\n"
+            )
+        });
         let read = |path: std::path::PathBuf, kid: &str| {
             let pem = std::fs::read(path).expect("the key reads");
             AssertionKey::from_pem(&pem, None, Some(kid.to_owned())).expect("a client key")
@@ -84,7 +105,7 @@ impl Server {
         let ehr_set = crate::support::inline(&json!({"keys": [ehr.public_jwk()]}));
         let database = Database::create().await;
         let text = format!(
-            "[ferrosmart]\nissuer = {ISSUER:?}\n{}[ferrosmart.database]\nurl = {:?}\n\
+            "[ferrosmart]\nissuer = {ISSUER:?}\n{}[ferrosmart.database]\nurl = {:?}\n{resource}\
              [[client]]\nclient_id = \"export\"\ntoken_endpoint_auth_method = \"private_key_jwt\"\njwks = {set}\n\
              scope = [\"system/Observation.rs\"]\ngrant_types = [\"client_credentials\"]\n\
              id_token_signed_response_alg = {algorithm:?}\n\
@@ -268,8 +289,8 @@ async fn an_ml_dsa_signed_launch_is_redeemed() {
 }
 
 #[tokio::test]
-async fn an_ml_dsa_65_client_gets_tokens_a_resource_server_verifies() {
-    let server = Server::start("ML-DSA-65").await;
+async fn a_resource_server_set_to_ml_dsa_65_gets_tokens_it_verifies() {
+    let server = Server::for_resource("RS256", "ML-DSA-65").await;
     let jwks = server.jwks().await;
     let algorithms: Vec<&str> = jwks["keys"]
         .as_array()
@@ -290,7 +311,11 @@ async fn an_ml_dsa_65_client_gets_tokens_a_resource_server_verifies() {
         .expect("a JWS")
         .header()
         .clone();
-    assert_eq!(Algorithm::MlDsa65, header.alg, "the client's algorithm");
+    assert_eq!(
+        Algorithm::MlDsa65,
+        header.alg,
+        "the resource server's algorithm, whatever the client's registration"
+    );
     let refused = crate::support::read_at_resource_server(
         &jwks,
         ISSUER,
@@ -306,6 +331,20 @@ async fn an_ml_dsa_65_client_gets_tokens_a_resource_server_verifies() {
     );
     let caller = read_with_ml_dsa(&jwks, &token).await.expect("admitted");
     assert_eq!(Some("export"), caller.client_id());
+    server.stop().await;
+}
+
+// NOTE: RFC 9068 §2.1 and OpenID Connect Core 1.0 §2, the access token follows the
+// resource server that verifies it; the client's registration chooses the ID Token's.
+#[tokio::test]
+async fn an_ml_dsa_65_client_gets_rs256_access_tokens_for_a_resource_server_that_names_none() {
+    let server = Server::start("ML-DSA-65").await;
+    let token = server.token().await;
+    let header = ferrohealth_smart::jws::compact::decode(&token)
+        .expect("a JWS")
+        .header()
+        .clone();
+    assert_eq!(Algorithm::Rs256, header.alg);
     server.stop().await;
 }
 
@@ -381,6 +420,27 @@ fn a_pool_without_an_rsa_key_or_with_another_key_type_is_refused() {
         config(&text, &keys).resolve(),
         Err(Error::TokenKeyType { .. })
     ));
+}
+
+#[test]
+fn a_resource_server_naming_an_algorithm_no_key_signs_is_refused() {
+    let keys = Keys::new();
+    let text = format!(
+        "[ferrosmart]\nissuer = {ISSUER:?}\n[[ferrosmart.resource]]\nbase = {RESOURCE:?}\n\
+         access_token_signing_alg = \"ML-DSA-65\"\n"
+    );
+    assert!(matches!(
+        config(&text, &keys).resolve(),
+        Err(Error::Resource { .. })
+    ));
+    let text = format!(
+        "[ferrosmart]\nissuer = {ISSUER:?}\n{}[[ferrosmart.resource]]\nbase = {RESOURCE:?}\n\
+         access_token_signing_alg = \"ML-DSA-65\"\n",
+        both(&keys)
+    );
+    let settings = config(&text, &keys).resolve().expect("resolves");
+    assert_eq!(Algorithm::MlDsa65, settings.token_algorithm(RESOURCE));
+    assert_eq!(Algorithm::Rs256, settings.token_algorithm(ISSUER));
 }
 
 #[tokio::test]

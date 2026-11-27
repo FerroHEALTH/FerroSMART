@@ -452,6 +452,7 @@ async fn paired() -> (Server, String) {
             roles: &[],
             acr: None,
             dpop_jkt: None,
+            person_claims: None,
         })
         .await
         .expect("recorded");

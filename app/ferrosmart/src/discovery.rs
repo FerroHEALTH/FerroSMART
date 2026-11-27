@@ -69,7 +69,7 @@ pub fn metadata(settings: &Settings, login: bool) -> ServerMetadata {
         registration_endpoint: Some(settings.endpoint(crate::admin::register::REGISTER_ROUTE)),
         // NOTE: RFC 9449 §5.1, the algorithms the token endpoint takes a DPoP proof in.
         dpop_signing_alg_values_supported: Some(
-            ferrohealth_smart::sender::proof::ProofSettings::new(settings.issuer_url.clone())
+            crate::token::sender::proof_settings(settings)
                 .algorithms
                 .iter()
                 .map(|algorithm| algorithm.name().to_owned())
@@ -96,6 +96,9 @@ pub fn metadata(settings: &Settings, login: bool) -> ServerMetadata {
         ]);
         metadata.response_types_supported = strings(&["code"]);
         metadata.code_challenge_methods_supported = strings(&["S256"]);
+        // NOTE: OpenID Connect Discovery 1.0 §3, userinfo_endpoint is RECOMMENDED; the
+        // login is what issues the tokens it answers.
+        metadata.userinfo_endpoint = Some(settings.endpoint(crate::userinfo::USERINFO_ROUTE));
         let mut scopes: Vec<String> = APP_LAUNCH_SCOPES
             .iter()
             .map(|&scope| scope.to_owned())
