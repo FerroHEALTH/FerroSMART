@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: Cadasto B.V.
 # SPDX-License-Identifier: BUSL-1.1
-# The PID Rulebook 1.6 attributes FerroSMART handles (#857, #859, #879): the
-# mandatory attributes of section 2.2 and the administrative number of
-# section 2.3, each with its SD-JWT VC and mdoc name, how FerroSMART handles
-# it (a claim name, `identifier`, or `not retained` for the portrait, which
-# Implementing Regulation (EU) 2024/2977 Art 3a(3) keeps a wallet-relying
-# party from retaining), and the test that holds it. The unit test
+# Every data identifier of the PID Rulebook 1.7 (#857, #859, #879, #934): the
+# attributes and metadata of sections 2.2 to 2.6 and the
+# resident_house_number section 4.1.1 adds to an SD-JWT VC, each with its
+# SD-JWT VC and mdoc name (- where the format has none), how FerroSMART
+# handles it (a claim name; `identifier`; `identifier country`, the Member
+# State whose system names the identifier; `not retained` with the law; or
+# `not asked` with the reason), and the test that holds it. The unit test
 # wallet::pid::tests::the_conformance_table_is_the_mapping holds the first
 # five columns to app/ferrosmart/src/wallet/pid.rs, and
 # scripts/checks/conformance.sh counts a row for the README badge only when
@@ -17,4 +18,24 @@ birth_date	yes	birthdate	birth_date	birthdate	every_mapped_attribute_reaches_its
 birth_place	yes	place_of_birth	place_of_birth	place_of_birth	every_mapped_attribute_reaches_its_claim_from_an_sd_jwt_vc
 nationality	yes	nationalities	nationality	nationalities	every_mapped_attribute_reaches_its_claim_from_an_mdoc
 portrait	yes	picture	portrait	not retained (CIR 2024/2977 Art 3a(3))	the_portrait_is_never_asked_for_kept_or_forwarded
+resident_address	no	address.formatted	resident_address	not asked (no address claim: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+resident_country	no	address.country	resident_country	not asked (no address claim: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+resident_state	no	address.region	resident_state	not asked (no address claim: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+resident_city	no	address.locality	resident_city	not asked (no address claim: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+resident_postal_code	no	address.postal_code	resident_postal_code	not asked (no address claim: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+resident_street	no	address.street_address	resident_street	not asked (no address claim: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
 personal_administrative_number	no	personal_administrative_number	personal_administrative_number	identifier	the_administrative_number_is_named_in_its_member_state_system
+family_name_birth	no	birth_family_name	family_name_birth	not asked (no birth-name claim: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+given_name_birth	no	birth_given_name	given_name_birth	not asked (no birth-name claim: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+sex	no	sex	sex	not asked (no claim: OIDC gender has another value range, Rulebook §4.1.1)	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+email_address	no	email	email_address	email	the_email_address_reaches_the_email_claim_from_either_format
+mobile_phone_number	no	phone_number	mobile_phone_number	not asked (no phone claim: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+issuing_authority	yes	issuing_authority	issuing_authority	not asked (the provider's certificate under the PID providers list names it, Rulebook §6)	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+issuing_country	yes	issuing_country	issuing_country	identifier country	an_identifier_needs_its_number_country_and_system
+expiry_date	no	date_of_expiry	expiry_date	not asked (the technical validity and the status list decide, Rulebook §2.5, §7)	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+document_number	no	document_number	document_number	not asked (names the PID, not the person: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+issuing_jurisdiction	no	issuing_jurisdiction	issuing_jurisdiction	not asked (issuing_country names the identifier's system)	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+issuance_date	no	date_of_issuance	issuance_date	not asked (the technical validity and the status list decide, Rulebook §2.5, §7)	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+trust_anchor	no	trust_anchor	trust_anchor	not asked (the anchors come from the PID providers list, never a PID, Rulebook §6)	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+attestation_legal_category	no	attestation_legal_category	attestation_legal_category	not asked (the credential type and the PID providers list say it is a PID)	an_attribute_it_does_not_use_is_neither_asked_nor_mapped
+resident_house_number	no	address.house_number	-	not asked (no address claim: GDPR Art 5(1)(c))	an_attribute_it_does_not_use_is_neither_asked_nor_mapped

@@ -5334,22 +5334,38 @@ was verified.
 
 **The PID as the SMART person.** No specification says how a PID becomes
 the claims of an ID Token or a SMART patient context: the mapping is our
-own design (#857), over the attribute names of the PID Rulebook 1.6. Of
-the mandatory attributes (Rulebook §2.2) and the administrative number
-(§2.3), `app/ferrosmart/src/wallet/pid.rs` maps each by its name in the
-format presented (§3.1.2, §4.1.1):
+own design (#857), over the data identifiers of the PID Rulebook 1.7, the
+version `docs/VERSIONS.md` pins (#932: 1.7 adds to 1.6 only the §5
+requirement that a Wallet Unit never signs a relying party's transactional
+data with the PID key, which FerroSMART never asks for, so no section the
+code cites moved). `app/ferrosmart/src/wallet/pid.rs` holds every data
+identifier of §2.2 to §2.6, with the `resident_house_number` §4.1.1 adds to
+an SD-JWT VC alone, and reads each by its name in the format presented
+(§3.1.2, §4.1.1) (#934):
 
-| Attribute | SD-JWT VC | mdoc | Where it goes |
+| Data identifier | SD-JWT VC | mdoc | What FerroSMART does |
 |---|---|---|---|
-| `family_name` | `family_name` | `family_name` | `family_name`, under `profile` (`oidc core §5.1`) |
-| `given_name` | `given_name` | `given_name` | `given_name`, under `profile` |
-| `birth_date` | `birthdate` | `birth_date` | `birthdate`, under `profile` |
+| `family_name`, `given_name` | the same | the same | the claim of that name, under `profile` (`oidc core §5.1`) |
+| `birth_date` | `birthdate` | `birth_date` | `birthdate`, under `profile`, when it is a full date `YYYY-MM-DD` |
 | `birth_place` | `place_of_birth` | `place_of_birth` | `place_of_birth`, under `profile`, the name the Rulebook takes from OpenID Connect for Identity Assurance |
 | `nationality` | `nationalities` | `nationality` | `nationalities`, under `profile`, likewise |
+| `email_address` | `email` | `email_address` | `email`, under `email`, the OpenID Connect claim the Rulebook names (§4.1.1); not asked for by default |
 | `portrait` | `picture` | `portrait` | not retained: never asked for, and dropped on receipt |
 | `personal_administrative_number` | the same | the same | the identifier the patient index resolves |
+| `issuing_country` (§2.4) | the same | the same | names the Member State whose identifier system the number is in, and the person's `sub`; a PID without it is refused |
+| `issuing_authority` (§2.4) | the same | the same | not asked: the provider's certificate under the list of PID providers names the issuer (§6) |
+| `resident_address`, `resident_country`, `resident_state`, `resident_city`, `resident_postal_code`, `resident_street`, `resident_house_number` | `address.*` | the same, none for the house number | not asked: no token carries an address |
+| `family_name_birth`, `given_name_birth` | `birth_family_name`, `birth_given_name` | the same | not asked: no claim carries a birth name |
+| `sex` | the same | the same | not asked: no claim carries it, and OpenID Connect's `gender` has another value range (§4.1.1) |
+| `mobile_phone_number` | `phone_number` | the same | not asked: no token carries a phone number |
+| `expiry_date`, `issuance_date` | `date_of_expiry`, `date_of_issuance` | the same | not asked: the technical validity period and the status list decide whether a presented PID holds (§2.5, §7) |
+| `document_number` | the same | the same | not asked: it names the PID, not the person |
+| `issuing_jurisdiction` | the same | the same | not asked: `issuing_country` names the identifier's system |
+| `trust_anchor` | the same | the same | not asked: the anchors come from the list of PID providers, never from a PID (§6) |
+| `attestation_legal_category` | the same | the same | not asked: the credential type and the list of PID providers say it is a PID |
 
-A value of another shape than the Rulebook gives it maps to nothing.
+What no claim or identifier uses is not asked for by default and maps to
+nothing (Regulation (EU) 2016/679 Art 5(1)(c)). A value of another shape than the Rulebook gives it maps to nothing.
 FerroSMART identifies the person without the portrait, so as a
 wallet-relying party it does not retain it (Implementing Regulation (EU)
 2024/2977 Art 3a(3), inserted by 2026/1731; Regulation (EU) 2016/679
@@ -5357,8 +5373,9 @@ Art 5(1)(c)). A `claims` or `mdoc_claims` naming `picture` or `portrait` is
 refused at start, an mdoc carrying it is `unrequested_credential`, and an
 SD-JWT VC that discloses it unasked has it dropped before the login reads
 its claims, so no stored login, token or audit record carries it. The
-README's PID badge counts each attribute of the table whose handling a
-named test in `conformance/pid-attributes.tsv` holds. The
+README's PID badge counts, of every data identifier of the pinned
+Rulebook, those whose handling a named test in
+`conformance/pid-attributes.tsv` holds. The
 identifier is the number in the system
 `[ferrosmart.upstream.openid4vp.identifier_systems]` names for its
 `issuing_country`, typed by `identifier_type` (HL7 v2 table 0203, `NI` by
