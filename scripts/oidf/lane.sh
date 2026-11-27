@@ -355,6 +355,8 @@ run_plan() {
       info=$(get "$suite/api/info/$instance")
       # A module that was stopped has no result, or the suite's UNKNOWN.
       result=$(jq -r 'if (.result // "UNKNOWN") == "UNKNOWN" then .status else .result end' <<< "$info")
+      # The suite's own log of a module that did not pass, kept with the lane's artifact.
+      [ "$result" = PASSED ] || get "$suite/api/log/$instance" > "$LANE_DIR/log-$plan-$module.json" || true
     fi
     login=-
     if [ "$config" != op ] && [ "$config" != fapi ]; then
@@ -522,7 +524,7 @@ fapi_config() {
   done
   jq --slurpfile one "$LANE_DIR/fapi-1.jwk" --slurpfile two "$LANE_DIR/fapi-2.jwk" --arg password "$password" \
     '.client.jwks.keys = $one | .client2.jwks.keys = $two
-      | (.browser[].tasks[].commands[] | select(.[2] == "password")) |= (.[3] = $password)' \
+      | ((.. | objects | select(has("commands")) | .commands[]) | select(.[2] == "password")) |= (.[3] = $password)' \
     "$lane/fapi.json" > "$LANE_DIR/fapi.json"
 }
 

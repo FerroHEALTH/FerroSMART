@@ -7,12 +7,16 @@
   "client": {
     "client_id": "fapi-suite",
     "scope": "openid fhirUser profile email offline_access",
-    "jwks": { "keys": ["made for the run"] }
+    "jwks": {
+      "keys": ["made for the run"]
+    }
   },
   "client2": {
     "client_id": "fapi-suite-2",
     "scope": "openid fhirUser profile email offline_access",
-    "jwks": { "keys": ["made for the run"] }
+    "jwks": {
+      "keys": ["made for the run"]
+    }
   },
   "resource": {
     "resourceUrl": "https://localhost.emobix.co.uk:9443/userinfo"
@@ -32,6 +36,14 @@
           ]
         },
         {
+          "task": "Approve at FerroSMART's consent page",
+          "optional": true,
+          "match": "https://localhost.emobix.co.uk:9443/consent*",
+          "commands": [
+            ["click", "xpath", "//button[@value='approve']"]
+          ]
+        },
+        {
           "task": "Verify Complete",
           "match": "*/test/*/callback*",
           "commands": [
@@ -40,5 +52,40 @@
         }
       ]
     }
-  ]
+  ],
+  "override": {
+    "fapi2-security-profile-final-user-rejects-authentication": {
+      "browser": [
+        {
+          "match": "https://localhost.emobix.co.uk:9443/authorize*",
+          "tasks": [
+            {
+              "task": "Log in at Keycloak",
+              "optional": true,
+              "match": "http://localhost:8180/realms/ferrosmart/protocol/openid-connect/auth*",
+              "commands": [
+                ["text", "id", "username", "clinician"],
+                ["text", "id", "password", "issued for the run"],
+                ["click", "id", "kc-login"]
+              ]
+            },
+            {
+              "task": "Deny at FerroSMART's consent page",
+              "match": "https://localhost.emobix.co.uk:9443/consent*",
+              "commands": [
+                ["click", "xpath", "//button[@value='deny']"]
+              ]
+            },
+            {
+              "task": "Verify Complete",
+              "match": "*/test/*/callback*",
+              "commands": [
+                ["wait", "id", "submission_complete", 10]
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
 }
