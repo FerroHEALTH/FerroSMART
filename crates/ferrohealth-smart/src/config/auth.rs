@@ -25,6 +25,7 @@ use crate::config::read::secret;
 use crate::config::shown;
 use crate::federation::FederationSection;
 use crate::federation::person::AttributesSection;
+use crate::jws::algorithm::Algorithm;
 use crate::kind::IssuerKind;
 use crate::party::config::PartySection;
 use crate::profile::Profile;
@@ -160,6 +161,12 @@ impl AuthSection {
         builder: Option<&dyn TlsBuilder>,
         bases: &[&str],
     ) -> Result<Resolved, ConfigError> {
+        if self.post_quantum_only {
+            let mut narrowed = self.clone();
+            narrowed.narrow_to_ml_dsa()?;
+            narrowed.post_quantum_only = false;
+            return narrowed.resolve_over(builder, bases);
+        }
         self.check_discovery()?;
         let basic_users = self
             .basic
@@ -241,6 +248,34 @@ impl AuthSection {
             resolved.described_issuer = Some(SecretUrl::new(issuer));
         }
         Ok(resolved)
+    }
+
+    /// Narrows the signature algorithms of the section to ML-DSA (RFC 9964
+    /// §5) for `post_quantum_only`.
+    ///
+    /// A list at its default becomes [`crate::jws::algorithm::ML_DSA`], an
+    /// ML-DSA list stays, and
+    /// a list naming any other algorithm is refused. An issuer under
+    /// `mode = "introspection"` keeps its list, since its authorization
+    /// server checks its tokens.
+    fn narrow_to_ml_dsa(&mut self) -> Result<(), ConfigError> {
+        let issuer_default = IssuerEntry::default().algorithms;
+        for (name, entry) in &mut self.issuer {
+            if entry.mode == AuthMode::Introspection {
+                continue;
+            }
+            narrow(&mut entry.algorithms, &issuer_default, || {
+                format!("auth.issuer.{name}.algorithms")
+            })?;
+        }
+        if let Some(dpop) = &mut self.dpop {
+            narrow(
+                &mut dpop.algorithms,
+                &DpopSection::default().algorithms,
+                || String::from("auth.dpop.algorithms"),
+            )?;
+        }
+        Ok(())
     }
 
     /// Refuses a capability SMART does not define, a listed scope outside
@@ -572,6 +607,7 @@ impl Default for AuthSection {
             basic: None,
             dpop: None,
             tls: TlsClientSection::default(),
+            post_quantum_only: false,
         }
     }
 }
@@ -584,5 +620,26 @@ impl Default for BasicSection {
             // by default because the user list changes only at a restart.
             cache_ttl: ferrohealth_config::units::Duration::from_mins(5),
         }
+    }
+}
+
+/// Replaces `list` with [`crate::jws::algorithm::ML_DSA`] when it equals
+/// `default`, and refuses it
+/// under `key` when it names an algorithm that is no ML-DSA parameter set.
+fn narrow(
+    list: &mut Vec<Algorithm>,
+    default: &[Algorithm],
+    key: impl FnOnce() -> String,
+) -> Result<(), ConfigError> {
+    if list.as_slice() == default {
+        *list = crate::jws::algorithm::ML_DSA.to_vec();
+        return Ok(());
+    }
+    match list.iter().find(|algorithm| !algorithm.is_ml_dsa()) {
+        Some(algorithm) => Err(ConfigError::ClassicalAlgorithm {
+            key: key(),
+            algorithm: *algorithm,
+        }),
+        None => Ok(()),
     }
 }

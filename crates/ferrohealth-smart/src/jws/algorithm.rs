@@ -73,6 +73,9 @@ pub(crate) enum KeyKind {
     MlDsa,
 }
 
+/// The ML-DSA parameter sets of JOSE (RFC 9964 §5).
+pub const ML_DSA: [Algorithm; 3] = [Algorithm::MlDsa44, Algorithm::MlDsa65, Algorithm::MlDsa87];
+
 impl Algorithm {
     /// Returns every algorithm.
     #[must_use]

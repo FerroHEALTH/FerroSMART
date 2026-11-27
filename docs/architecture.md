@@ -1767,6 +1767,7 @@ capabilities = []                    # SMART capabilities the discovery document
 scopes_supported = []                # the scopes the product honours, listed in the discovery document
 # described_issuer = "sso"           # the name of the issuer the discovery document describes; unset for the one eligible issuer (3.8)
 product_scope = ""                   # the product's own scope: `__name` or a full URI
+post_quantum_only = false            # true: default issuer and DPoP algorithm lists become ML-DSA-44/65/87, a classical entry refuses the start (rfc9964 §5, #945)
 
 [auth.issuer.sso]                    # one table per issuer, by name; none with Basic users: a Basic-only surface
 issuer = "https://smart.example.org"
