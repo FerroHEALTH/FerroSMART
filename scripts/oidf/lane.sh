@@ -382,7 +382,8 @@ run_plan() {
 }
 
 # Every module the suite holds in REVIEW carries the screenshot of
-# FerroSMART's page and no placeholder left open; any other fails the lane.
+# FerroSMART's page and no placeholder left open, uploaded by the lane or
+# filled by the suite's scripted browser; any other fails the lane.
 screenshots() {
   local plan=$1 module instance images failures=0
   local -a auth=()
@@ -392,7 +393,8 @@ screenshots() {
       continue
     images=$(curl -sS --cacert "$LANE_DIR/trust.pem" "${auth[@]}" "$suite/api/log/$instance/images")
     if ! jq -e 'any(.[]; (.img // "") | startswith("data:image/png;base64,")) and all(.[]; has("upload") | not)' \
-      <<< "$images" > /dev/null; then
+      <<< "$images" > /dev/null &&
+      ! get "$suite/api/log/$instance" | jq -e 'any(.[]; .src == "BROWSER" and .msg == "All placeholders filled by scripted browser")' > /dev/null; then
       echo "oidf-lane: $plan $module is in REVIEW without the screenshot of FerroSMART's page" >&2
       jq -c '[.[] | {msg, upload, img: ((.img // "") | .[0:40])}]' <<< "$images" >&2 || true
       failures=$((failures + 1))
