@@ -163,6 +163,33 @@ pub enum OidcError {
     /// The ID Token's `nonce` is absent or not the one the sign-in sent.
     #[error("the ID Token's nonce is not the sign-in's")]
     Nonce,
+    /// The UserInfo Endpoint answered anything other than `200`, with the
+    /// `error` of its `WWW-Authenticate` challenge when it carried one
+    /// (OpenID Connect Core 1.0 §5.3.3, RFC 6750 §3).
+    #[error("the UserInfo Endpoint answered {status}{}", challenge_clause(error.as_deref()))]
+    UserInfo {
+        /// The status it answered.
+        status: StatusCode,
+        /// The challenge's `error`, when it named one.
+        error: Option<String>,
+    },
+    /// The UserInfo Endpoint's `200` body is neither a JSON object nor a
+    /// signed JWT (OpenID Connect Core 1.0 §5.3.2).
+    #[error("the UserInfo Endpoint answered a body that is no UserInfo Response")]
+    UserInfoBody,
+    /// The signed UserInfo Response does not verify, or its `iss` or `aud`
+    /// is not the provider's or this client's (OpenID Connect Core 1.0
+    /// §5.3.2).
+    #[error("the signed UserInfo Response does not verify")]
+    UserInfoSignature {
+        /// What the verifier reported.
+        #[source]
+        source: JwtError,
+    },
+    /// The UserInfo Response's `sub` is not the ID Token's, so its claims
+    /// must not be used (OpenID Connect Core 1.0 §5.3.2).
+    #[error("the UserInfo Response names another subject than the ID Token")]
+    UserInfoSubject,
     /// The revocation endpoint answered anything other than `200` (RFC 7009
     /// §2.2).
     #[error("the revocation endpoint answered {status}")]
@@ -243,6 +270,11 @@ impl OidcError {
     }
 }
 
+/// Returns the clause a UserInfo refusal's display gives its challenge.
+fn challenge_clause(error: Option<&str>) -> String {
+    error.map_or_else(String::new, |error| format!(": {error}"))
+}
+
 /// Returns the OAuth clause of a refusal's display.
 fn oauth_clause(error: Option<&OAuthError>) -> String {
     error.map_or_else(String::new, |error| format!(": {error}"))
@@ -258,6 +290,7 @@ pub struct Provider {
     jwks_uri: Url,
     end_session_endpoint: Option<Url>,
     revocation_endpoint: Option<Url>,
+    userinfo_endpoint: Option<Url>,
 }
 
 impl Provider {
@@ -298,6 +331,10 @@ impl Provider {
                 metadata.revocation_endpoint.as_deref(),
                 "revocation_endpoint",
             )?,
+            userinfo_endpoint: optional(
+                metadata.userinfo_endpoint.as_deref(),
+                "userinfo_endpoint",
+            )?,
         })
     }
 
@@ -335,6 +372,12 @@ impl Provider {
     #[must_use]
     pub const fn revocation_endpoint(&self) -> Option<&Url> {
         self.revocation_endpoint.as_ref()
+    }
+
+    /// Returns the UserInfo Endpoint, when the provider publishes one.
+    #[must_use]
+    pub const fn userinfo_endpoint(&self) -> Option<&Url> {
+        self.userinfo_endpoint.as_ref()
     }
 }
 
@@ -763,6 +806,77 @@ impl RelyingParty {
         }
     }
 
+    /// Asks the provider's UserInfo Endpoint for the claims about the person
+    /// of `signed_in` (OpenID Connect Core 1.0 §5.3), and returns none when
+    /// the provider publishes no such endpoint.
+    ///
+    /// The access token goes in the `Authorization` header with `GET`, the
+    /// form §5.3.1 recommends. A JSON answer is read as it is; a signed one
+    /// (`application/jwt`) is checked against the provider's key set, with
+    /// the provider as `iss` and this client in `aud`. Either way its `sub`
+    /// must be the ID Token's before any claim of it is used (§5.3.2).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OidcError::Discovery`] when the endpoint cannot be reached
+    /// or its body passes the size cap, [`OidcError::UserInfo`] for an answer
+    /// other than `200`, [`OidcError::UserInfoBody`] for a body that is no
+    /// JSON object or JWT, the key errors of the ID Token check and
+    /// [`OidcError::UserInfoSignature`] for a signed answer that does not
+    /// verify, and [`OidcError::UserInfoSubject`] for another `sub`.
+    pub async fn userinfo(
+        &self,
+        signed_in: &SignedIn,
+    ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, OidcError> {
+        let Some(endpoint) = self.provider.userinfo_endpoint.as_ref() else {
+            return Ok(None);
+        };
+        let transport = |source| DiscoveryError::Transport {
+            url: endpoint.clone(),
+            source,
+        };
+        let mut response = self
+            .http
+            .client()
+            .get(endpoint.clone())
+            .header(http::header::ACCEPT, "application/json, application/jwt")
+            .bearer_auth(signed_in.access_token.expose())
+            .send()
+            .await
+            .map_err(transport)?;
+        let status = response.status();
+        if status != StatusCode::OK {
+            let error = response
+                .headers()
+                .get(http::header::WWW_AUTHENTICATE)
+                .and_then(|value| value.to_str().ok())
+                .and_then(challenge_error);
+            return Err(OidcError::UserInfo { status, error });
+        }
+        let signed = response
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/jwt"));
+        let body = crate::metadata::capped_body(&mut response, endpoint).await?;
+        let claims: serde_json::Map<String, serde_json::Value> = if signed {
+            let (jws, key) = self.signing_key(body.trim()).await?;
+            self.verified(&jws, &key, &["sub"])
+                .map_err(|source| OidcError::UserInfoSignature { source })?
+        } else {
+            crate::metadata::repeats_no_name(body.as_bytes())
+                .map_err(|_repeated| OidcError::UserInfoBody)?;
+            serde_json::from_str(&body).map_err(|_shape| OidcError::UserInfoBody)?
+        };
+        // NOTE: OpenID Connect Core 1.0 §5.3.2: a `sub` that is not exactly the ID
+        // Token's, or none, means the response values MUST NOT be used.
+        match claims.get("sub").and_then(serde_json::Value::as_str) {
+            Some(subject) if subject == signed_in.claims.subject => Ok(Some(claims)),
+            _ => Err(OidcError::UserInfoSubject),
+        }
+    }
+
     /// Posts `grant` to the token endpoint and reads its bearer token answer
     /// (RFC 6749 §3.2, §5.1, §5.2).
     async fn token_request(&self, grant: &[(&str, &str)]) -> Result<TokenResponse, OidcError> {
@@ -961,6 +1075,26 @@ struct KeySet {
 /// Whether `a` and `b` are equal, compared in constant time.
 fn equal(a: &str, b: &str) -> bool {
     aws_lc_rs::constant_time::verify_slices_are_equal(a.as_bytes(), b.as_bytes()).is_ok()
+}
+
+/// Returns the `error` a `Bearer` challenge names (RFC 6750 §3), when it
+/// is a code of the RFC 6749 §5.2 character set.
+fn challenge_error(challenge: &str) -> Option<String> {
+    let (scheme, parameters) = challenge.trim().split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    parameters.split(',').find_map(|parameter| {
+        let (name, value) = parameter.split_once('=')?;
+        let value = value.trim().trim_matches('"');
+        let code = name.trim().eq_ignore_ascii_case("error")
+            && !value.is_empty()
+            && value.len() <= 64
+            && value
+                .bytes()
+                .all(|byte| matches!(byte, 0x20..=0x21 | 0x23..=0x5B | 0x5D..=0x7E));
+        code.then(|| value.to_owned())
+    })
 }
 
 /// Returns the scopes a `scope` member names (RFC 6749 §3.3).

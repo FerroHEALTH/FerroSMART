@@ -5,7 +5,7 @@
   "redirect_uris": [
     "https://localhost.emobix.co.uk:8443/test/a/ferrosmart-op/callback"
   ],
-  "scope": "openid fhirUser offline_access",
+  "scope": "openid fhirUser profile email offline_access",
   "resources": [
     "https://localhost.emobix.co.uk:9443/fhir"
   ],

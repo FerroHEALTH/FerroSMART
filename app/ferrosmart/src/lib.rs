@@ -38,4 +38,5 @@ pub mod signing;
 pub mod store;
 pub mod token;
 pub mod upstream;
+pub mod userinfo;
 pub mod wallet;

@@ -71,6 +71,9 @@ pub struct NewGrant<'a> {
     /// The `DPoP` key a public client's refresh tokens are bound to (RFC
     /// 9449 §5).
     pub dpop_jkt: Option<&'a str>,
+    /// The standard claims the granted scope passes on, which the UserInfo
+    /// Endpoint answers; none when `openid` is not granted.
+    pub person_claims: Option<&'a crate::store::PersonClaims>,
 }
 
 /// What introspection reads of a grant.
@@ -203,8 +206,8 @@ impl Store {
     pub async fn create_grant(&self, grant: &NewGrant<'_>) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO authorization_grant (id, client_id, subject, fhir_user, audience, scope, \
-             context, auth_time, access, upstream_session, roles, basis, acr, dpop_jkt) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+             context, auth_time, access, upstream_session, roles, basis, acr, dpop_jkt, person_claims) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
         )
         .bind(grant.id)
         .bind(grant.client_id)
@@ -220,6 +223,7 @@ impl Store {
         .bind(grant.basis)
         .bind(grant.acr.map(AssuranceLevel::as_str))
         .bind(grant.dpop_jkt)
+        .bind(grant.person_claims.map(sqlx::types::Json))
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -246,6 +250,23 @@ impl Store {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Returns the standard claims the grant `grant_id` keeps for the
+    /// UserInfo Endpoint, empty when it keeps none.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Database`] when the query fails.
+    pub async fn person_claims(
+        &self,
+        grant_id: &str,
+    ) -> Result<crate::store::PersonClaims, StoreError> {
+        let claims: Option<Option<sqlx::types::Json<crate::store::PersonClaims>>> =
+            sqlx::query_scalar("SELECT person_claims FROM authorization_grant WHERE id = $1")
+                .bind(grant_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(claims.flatten().map(|claims| claims.0).unwrap_or_default())
     }
 
     /// Returns the access token `jti`, with its grant.

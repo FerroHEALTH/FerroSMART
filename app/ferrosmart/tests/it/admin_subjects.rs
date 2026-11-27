@@ -43,6 +43,7 @@ async fn granted(
             roles: &[],
             acr: None,
             dpop_jkt: None,
+            person_claims: None,
         })
         .await
         .expect("recorded");

@@ -93,6 +93,7 @@ async fn the_sweep_deletes_lapsed_refresh_tokens_and_keeps_a_fresh_grant() {
             roles: &[],
             acr: None,
             dpop_jkt: None,
+            person_claims: None,
         })
         .await
         .expect("recorded");
