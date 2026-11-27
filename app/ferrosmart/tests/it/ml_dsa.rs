@@ -69,7 +69,7 @@ struct Server {
     /// The client's assertion key.
     client: AssertionKey,
     /// The keys, kept for the case's length.
-    _keys: Keys,
+    keys: Keys,
     /// The database.
     database: Database,
     /// The store.
@@ -172,7 +172,7 @@ impl Server {
             state,
             ehr,
             client,
-            _keys: keys,
+            keys,
             database,
             store,
         }
@@ -567,7 +567,7 @@ async fn a_client_assertion_without_typ_authenticates() {
     use ferrohealth_smart::jws::compact::Header;
     use ferrohealth_smart::jws::key::{PrivateKey, SigningKey};
     let server = Server::with_client("RS256", crate::support::p256_key).await;
-    let pem = std::fs::read(server._keys.dir.path().join("client.pem")).expect("the key reads");
+    let pem = std::fs::read(server.keys.dir.path().join("client.pem")).expect("the key reads");
     let key = SigningKey::new(
         PrivateKey::from_pem(&pem).expect("a P-256 key"),
         Algorithm::Es256,
