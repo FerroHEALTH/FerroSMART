@@ -267,7 +267,10 @@ impl Provider {
             .await;
         // NOTE: OpenID Connect Core 1.0 §5.3, a provider naming a UserInfo Endpoint
         // is asked for the claims about the ID Token's subject.
-        if let Some(endpoint) = (contract.metadata)(&self.issuer)["userinfo_endpoint"].as_str() {
+        if let Some(endpoint) = (contract.metadata)(&self.issuer)
+            .get("userinfo_endpoint")
+            .and_then(Value::as_str)
+        {
             let userinfo = Url::parse(endpoint).expect("a URL").path().to_owned();
             Mock::given(matchers::method("GET"))
                 .and(matchers::path(userinfo))
@@ -277,7 +280,7 @@ impl Provider {
                 ))
                 .respond_with(
                     ResponseTemplate::new(200)
-                        .set_body_json(json!({ "sub": contract.claims["sub"] })),
+                        .set_body_json(json!({ "sub": contract.claims.get("sub") })),
                 )
                 .expect(1)
                 .mount(&self.server)
