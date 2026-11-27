@@ -105,7 +105,7 @@ itself. A deployment that logs people in at a FHIR server needs this table.
 
 | Key | Default | What it is |
 |---|---|---|
-| `algorithm` | `ES384` | The JWS algorithm of its client assertions: `ES384`, `RS384`, or `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87` (RFC 9964), which FerroSMART's own token endpoint takes |
+| `algorithm` | `ML-DSA-65` | The JWS algorithm of its client assertions: `ML-DSA-65`, `ML-DSA-44` or `ML-DSA-87` (RFC 9964), which FerroSMART's own token endpoint takes, or `ES384` or `RS384`. `ferrosmart key generate --out <file>` writes an ML-DSA-65 key |
 | `[ferrosmart.backend.keys]` | required | The assertion ring: `private_key_file` (a P-384 key for `ES384`, an RSA key for `RS384`, an ML-DSA key of that parameter set for ML-DSA), `kid`, `next_private_key_file`, `previous_private_key_file` and `previous_key_overlap`, as the upstream assertion ring has them. It may share no key with the token keys |
 
 ## `[[ferrosmart.resource]]`

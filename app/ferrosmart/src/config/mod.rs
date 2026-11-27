@@ -509,10 +509,10 @@ impl Default for KeysSection {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BackendSection {
-    /// The JWS algorithm of its client assertions: `ES384` or `RS384`, the
-    /// two SMART App Launch 2.2.0's asymmetric client profile names, or
-    /// `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87` (RFC 9964), which its own
-    /// token endpoint also takes.
+    /// The JWS algorithm of its client assertions: `ML-DSA-65` by default,
+    /// or `ML-DSA-44` or `ML-DSA-87` (RFC 9964), which its own token
+    /// endpoint takes, or `ES384` or `RS384`, the two SMART App Launch
+    /// 2.2.0's asymmetric client profile names.
     pub algorithm: String,
     /// `[ferrosmart.backend.keys]`: the ring that signs its assertions,
     /// sharing no key with `[ferrosmart.keys]`.
@@ -522,7 +522,7 @@ pub struct BackendSection {
 impl Default for BackendSection {
     fn default() -> Self {
         Self {
-            algorithm: String::from("ES384"),
+            algorithm: String::from("ML-DSA-65"),
             keys: KeysSection::default(),
         }
     }

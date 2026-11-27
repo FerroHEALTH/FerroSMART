@@ -22,6 +22,7 @@ Commands:
   client       Works on the registered clients
   subject      Prints the FerroSMART `sub` of the person `--sub` names at the provider `--upstream` names, which a resource server binds them by
   upstream     Works on the upstream providers
+  key          Works on key files
   help         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -241,6 +242,54 @@ Arguments:
 Options:
       --config <PATH>
           The TOML configuration file; unset, the product's `_CONFIG` variable names it
+
+      --set <KEY=VALUE>
+          One configuration key set over the file and the environment, as `key=value`; repeatable
+
+  -h, --help
+          Print help
+```
+
+## `ferrosmart key`
+
+```text
+Works on key files
+
+Usage: ferrosmart key [OPTIONS] <COMMAND>
+
+Commands:
+  generate  Writes a fresh ML-DSA private key as PKCS#8 PEM to a new file, readable by its owner alone
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --config <PATH>
+          The TOML configuration file; unset, the product's `_CONFIG` variable names it
+
+      --set <KEY=VALUE>
+          One configuration key set over the file and the environment, as `key=value`; repeatable
+
+  -h, --help
+          Print help
+```
+
+## `ferrosmart key generate`
+
+```text
+Writes a fresh ML-DSA private key as PKCS#8 PEM to a new file, readable by its owner alone
+
+Usage: ferrosmart key generate [OPTIONS] --out <OUT>
+
+Options:
+      --algorithm <ALGORITHM>
+          `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87`
+          
+          [default: ML-DSA-65]
+
+      --config <PATH>
+          The TOML configuration file; unset, the product's `_CONFIG` variable names it
+
+      --out <OUT>
+          The file to create
 
       --set <KEY=VALUE>
           One configuration key set over the file and the environment, as `key=value`; repeatable

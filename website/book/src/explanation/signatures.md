@@ -19,7 +19,7 @@ fails to parse.
 | Access tokens | `RS256`, or `ML-DSA-65` for a resource server whose `access_token_signing_alg` names it | The token keys, `[ferrosmart.keys]`, published at `{issuer}/jwks` |
 | ID Tokens | `RS256`, or `ML-DSA-65` for a client whose `id_token_signed_response_alg` names it | The token keys |
 | Client assertions to an upstream OpenID Provider | `RS256` by default, as the provider's registration names; ML-DSA where the provider lists it | The assertion keys, published at `{issuer}/upstream-jwks` |
-| Client assertions of FerroSMART's own Backend Services client | `ES384`, `RS384`, or ML-DSA-44, ML-DSA-65 or ML-DSA-87 | The backend keys |
+| Client assertions of FerroSMART's own Backend Services client | `ML-DSA-65` by default; ML-DSA-44, ML-DSA-87, `ES384` or `RS384` | The backend keys |
 | SAML `AuthnRequest` and `ArtifactResolve` | RSA, or ECDSA on P-256 or P-384 | `[ferrosmart.saml] signing_key_file` |
 | OpenID4VP request objects | `ES256` | The wallet-relying party access key |
 

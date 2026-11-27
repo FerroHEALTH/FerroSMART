@@ -61,6 +61,27 @@ pub enum Command {
         #[command(subcommand)]
         command: UpstreamCommand,
     },
+    /// Works on key files.
+    Key {
+        /// The job to run.
+        #[command(subcommand)]
+        command: KeyCommand,
+    },
+}
+
+/// The `key` jobs.
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+pub enum KeyCommand {
+    /// Writes a fresh ML-DSA private key as PKCS#8 PEM to a new file,
+    /// readable by its owner alone.
+    Generate {
+        /// `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87`.
+        #[arg(long, default_value = "ML-DSA-65")]
+        algorithm: String,
+        /// The file to create.
+        #[arg(long)]
+        out: std::path::PathBuf,
+    },
 }
 
 /// The `upstream` jobs.
@@ -93,7 +114,7 @@ pub enum ClientCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, ClientCommand, Command, UpstreamCommand};
+    use super::{Cli, ClientCommand, Command, KeyCommand, UpstreamCommand};
     use clap::{CommandFactory, Parser};
     use ferrohealth_server::cli::{Common, ConfigCommand};
 
@@ -121,6 +142,15 @@ mod tests {
                 Command::Client {
                     command: ClientCommand::Apply {
                         files: vec!["admin.json".into(), "app.json".into()],
+                    },
+                },
+            ),
+            (
+                vec!["ferrosmart", "key", "generate", "--out", "backend.pem"],
+                Command::Key {
+                    command: KeyCommand::Generate {
+                        algorithm: String::from("ML-DSA-65"),
+                        out: "backend.pem".into(),
                     },
                 },
             ),

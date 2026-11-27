@@ -77,7 +77,8 @@ ZITADEL_API=http://localhost:8280 ADMIN_PAT_FILE="$LANE_DIR/zitadel/admin.pat" \
   "$example/bootstrap.sh"
 
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$LANE_DIR/signing.pem" 2> /dev/null
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out "$LANE_DIR/backend.pem" 2> /dev/null
+rm -f "$LANE_DIR/backend.pem"
+"$root/target/debug/ferrosmart" key generate --out "$LANE_DIR/backend.pem"
 ferrosmart=("$root/target/debug/ferrosmart" --config "$LANE_DIR/out/ferrosmart.toml"
   --set server.listen=127.0.0.1:8080
   --set "ferrosmart.keys.private_key_files=$LANE_DIR/signing.pem"

@@ -790,7 +790,7 @@ fn a_login_at_a_fhir_base_needs_the_backend_client() {
         with_backend(&text, "openehr").resolve().is_ok(),
         "no FHIR base, no backend client"
     );
-    let key = ec_key(keys.dir.path(), "backend.pem");
+    let key = crate::support::ml_dsa_key(keys.dir.path(), "backend.pem");
     let backend = format!(
         "[ferrosmart.backend.keys]\nprivate_key_file = {:?}\n",
         key.display().to_string()
