@@ -57,6 +57,9 @@ pub struct Settings {
     pub resources: Vec<String>,
     /// The base URLs among them that serve openEHR.
     pub openehr_resources: Vec<String>,
+    /// The algorithm of each base whose access tokens are not signed
+    /// `RS256`.
+    pub token_algorithms: BTreeMap<String, Algorithm>,
     /// The subject namespace of each openEHR base that names one.
     pub subject_namespaces: BTreeMap<String, String>,
     /// The FHIR base each openEHR base that names one is paired with.
@@ -152,6 +155,17 @@ impl Settings {
                 .any(|index| index.base == base)
     }
 
+    /// Returns the algorithm the access tokens for `audience` are signed
+    /// with: the one its `[[ferrosmart.resource]]` names, else `RS256`,
+    /// which every resource server verifies (RFC 9068 §2.1).
+    #[must_use]
+    pub fn token_algorithm(&self, audience: &str) -> Algorithm {
+        self.token_algorithms
+            .get(audience)
+            .copied()
+            .unwrap_or(Algorithm::Rs256)
+    }
+
     /// Returns the path of the RFC 8414 §3 metadata: the well-known suffix
     /// inserted between the host and the issuer's path.
     #[must_use]
@@ -238,6 +252,7 @@ impl Config {
                 .filter(|resource| resource.kind == crate::config::ResourceKind::Openehr)
                 .map(|resource| resource.base.clone())
                 .collect(),
+            token_algorithms: token_algorithms(&section.resource, &keys)?,
             subject_namespaces: subject_namespaces(&section.resource)?,
             pairings: pairings(&section.resource)?,
             purposes: purposes(&section.resource)?,
@@ -320,12 +335,19 @@ fn backend(
             Ok(None)
         };
     };
-    // NOTE: SMART App Launch 2.2.0, Client Authentication: Asymmetric, the server
-    // validates RS384 and ES384.
+    // NOTE: RFC 8414 §2, the token endpoint it authenticates to, FerroSMART's own,
+    // lists RS384, ES384 and the ML-DSA algorithms (RFC 9964).
     let algorithm = match backend.algorithm.as_str() {
         "ES384" => Algorithm::Es384,
         "RS384" => Algorithm::Rs384,
-        _ => return Err(rule("`algorithm` is `ES384` or `RS384`")),
+        "ML-DSA-44" => Algorithm::MlDsa44,
+        "ML-DSA-65" => Algorithm::MlDsa65,
+        "ML-DSA-87" => Algorithm::MlDsa87,
+        _ => {
+            return Err(rule(
+                "`algorithm` is `ES384`, `RS384`, `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87`",
+            ));
+        }
     };
     let ring = key_ring(&backend.keys, &BACKEND_KEYS, algorithm)?;
     if signs_tokens(&ring, tokens) {
@@ -562,6 +584,29 @@ fn resources(sections: &[crate::config::ResourceSection]) -> Result<Vec<String>,
         bases.push(section.base.clone());
     }
     Ok(bases)
+}
+
+/// Returns the algorithm of each base in `sections` that names one other
+/// than `RS256`, once a key of `keys` signs it.
+fn token_algorithms(
+    sections: &[crate::config::ResourceSection],
+    keys: &SigningKeys,
+) -> Result<BTreeMap<String, Algorithm>, Error> {
+    let mut algorithms = BTreeMap::new();
+    for section in sections {
+        let Some(algorithm) = section.access_token_signing_alg else {
+            continue;
+        };
+        if keys.ring(algorithm).is_none() {
+            return Err(Error::Resource {
+                rule: "`access_token_signing_alg` names an algorithm a key of `[ferrosmart.keys]` signs",
+            });
+        }
+        if algorithm != Algorithm::Rs256 {
+            algorithms.insert(section.base.clone(), algorithm);
+        }
+    }
+    Ok(algorithms)
 }
 
 /// Returns the subject namespace of each openEHR base in `sections` that

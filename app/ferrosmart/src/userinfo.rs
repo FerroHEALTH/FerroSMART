@@ -17,7 +17,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use ferrohealth_smart::sender::ClientCertificate;
-use ferrohealth_smart::sender::proof::{self, ProofCheck, ProofSettings};
+use ferrohealth_smart::sender::proof::{self, ProofCheck};
 use http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use serde_json::{Map, Value};
 
@@ -245,7 +245,7 @@ async fn constrained(
         (Scheme::Bearer, None) => Ok(()),
         (Scheme::Dpop, Some(jkt)) => {
             let check = ProofCheck::new(
-                ProofSettings::new(state.settings().issuer_url.clone()),
+                crate::token::sender::proof_settings(state.settings()),
                 crate::token::sender::replays(state),
             )
             .map_err(|error| {
