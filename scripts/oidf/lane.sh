@@ -244,7 +244,8 @@ make_keys() {
   rm -f "$dir/ca.key"
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/signing.pem" 2> /dev/null
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/assertion.pem" 2> /dev/null
-  openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out "$dir/backend.pem" 2> /dev/null
+  rm -f "$dir/backend.pem"
+  "$root/target/debug/ferrosmart" key generate --out "$dir/backend.pem"
   chmod 0644 "$dir/host.key" "$dir"/*.pem
   cat /etc/ssl/certs/ca-certificates.crt "$dir/ca.crt" > "$dir/trust.pem"
   # The suite's configurations: the relying party's registers the assertion

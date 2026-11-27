@@ -55,7 +55,8 @@ FerroSMART signs an access token with ML-DSA-65 when its resource server's
 `access_token_signing_alg` names it, and an ID Token when the client's
 registration does. It accepts client assertions, signed launches and DPoP
 proofs signed with ML-DSA by an `AKP` key, signs its own Backend Services
-assertions with ML-DSA when `[ferrosmart.backend] algorithm` names it, and
+assertions with ML-DSA-65 by default (`ferrosmart key generate` writes the
+key), and
 signs an upstream client assertion with ML-DSA when the provider lists it
 (RFC 9964). RS256 stays beside
 it, since RFC 9068 §2.1 has an authorization server support it, and RS384
@@ -111,7 +112,7 @@ The TLS certificate authentication row belongs to `ferrohealth-server`
 | DPoP proof verification by an AKP key | ML-DSA-44, ML-DSA-65, ML-DSA-87 | yes | RFC 9964 | `app/ferrosmart/src/token/sender.rs, app/ferrosmart/src/userinfo.rs, crates/ferrohealth-smart/src/sender/proof.rs` |
 | DPoP proof verification by an RSA or EC key | RS256, RS384, PS256, PS384, ES256, ES384 | no | the client's: it signs with its own key (RFC 9449 §4.2) | `app/ferrosmart/src/token/sender.rs, app/ferrosmart/src/userinfo.rs, crates/ferrohealth-smart/src/sender/proof.rs` |
 | Backend Services assertions FerroSMART signs with an ML-DSA key | ML-DSA-44, ML-DSA-65 or ML-DSA-87 | yes | RFC 9964 | `app/ferrosmart/src/config/settings.rs` |
-| Backend Services assertions FerroSMART signs with an RSA or EC key | ES384 or RS384 | no | the deployment's: [ferrosmart.backend] algorithm, ES384 by default | `app/ferrosmart/src/config/settings.rs` |
+| Backend Services assertions FerroSMART signs with an RSA or EC key | ES384 or RS384 | no | the deployment's: [ferrosmart.backend] algorithm set to ES384 or RS384 in place of the default ML-DSA-65 | `app/ferrosmart/src/config/settings.rs` |
 | Upstream OpenID Provider client assertions by an ML-DSA key the provider lists | ML-DSA-44, ML-DSA-65 or ML-DSA-87 | yes | RFC 9964 | `app/ferrosmart/src/upstream/mod.rs, app/ferrosmart/src/config/settings.rs` |
 | Upstream OpenID Provider client assertions by an RSA or EC key | RS256 by default, as the provider's registration names | no | the provider's: the algorithm its registration names, held to its token_endpoint_auth_signing_alg_values_supported (RFC 8414 §2) | `app/ferrosmart/src/upstream/mod.rs` |
 | Upstream ID token verification | RS256 to PS512, ES256, ES384, EdDSA | no | the upstream provider's: OpenID Connect Core 1.0 §3.1.3.7 items 6 and 7, the alg it signs with, RS256 by default; RFC 9964 once it signs ML-DSA | `crates/ferrohealth-smart/src/oidc.rs` |

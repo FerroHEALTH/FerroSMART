@@ -65,8 +65,8 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
 openssl rand -hex 16 | tr -d '\n' > "$root/secrets/keycloak_user_password"
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
   -out "$root/secrets/upstream_assertion_key.pem" 2> /dev/null
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 \
-  -out "$root/secrets/backend_assertion_key.pem" 2> /dev/null
+rm -f "$root/secrets/backend_assertion_key.pem"
+"$FERROSMART_BINARY" key generate --out "$root/secrets/backend_assertion_key.pem"
 chmod 0644 "$root/secrets/database_url" "$root/secrets/signing_key.pem" \
   "$root/secrets/keycloak_user_password" "$root/secrets/upstream_assertion_key.pem" \
   "$root/secrets/backend_assertion_key.pem"

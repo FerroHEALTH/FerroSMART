@@ -12,7 +12,7 @@
 #   openssl rand -hex 16 | tr -d '\n' > secrets/zitadel_masterkey
 #   printf 'A1!%s' "$(openssl rand -hex 12)" > secrets/zitadel_user_password
 #   openssl rand -hex 32 | tr -d '\n' > secrets/zitadel_login_cookie_secret
-#   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out secrets/backend_assertion_key.pem
+#   ferrosmart key generate --out secrets/backend_assertion_key.pem   # ML-DSA-65, the release binary
 #   chmod 0644 secrets/backend_assertion_key.pem
 #
 # The masterkey encrypts ZITADEL's keys; the user password is the

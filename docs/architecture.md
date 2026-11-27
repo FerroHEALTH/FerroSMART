@@ -3392,7 +3392,7 @@ private_key_files = [                         # in the order they take over; eac
 rotation_period = "90d"                       # how long a key signs before the next takes over
 
 [ferrosmart.backend]                          # FerroSMART's own Backend Services client, its client_id the issuer; needed with a login at a FHIR base (13.33)
-algorithm = "ES384"                           # or "RS384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"
+algorithm = "ML-DSA-65"                       # or "ML-DSA-44", "ML-DSA-87", "ES384", "RS384"; `ferrosmart key generate` writes an ML-DSA key
 [ferrosmart.backend.keys]                     # its assertion ring, sharing no key with [ferrosmart.keys]
 private_key_file = "/run/secrets/backend-assertion.pem"
 
@@ -5468,10 +5468,12 @@ sequenceDiagram
 - **The client.** Its `client_id` is FerroSMART's issuer identifier, the
   client a resource server's `ferrosmart` preset reads as the authorization
   server itself (`issuer_client_is_person`, 3.13). `[ferrosmart.backend]`
-  names the assertion algorithm (`ES384` or `RS384`,
-  the two `smart client-authentication-asymmetric` has a server validate,
-  or `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87`, which the token endpoint
-  it authenticates to, FerroSMART's own, also lists, `rfc8414 §2`, #935)
+  names the assertion algorithm (`ML-DSA-65` by default, or `ML-DSA-44`
+  or `ML-DSA-87`, which the token endpoint it authenticates to,
+  FerroSMART's own, lists, `rfc8414 §2`, #935, #961; or `ES384` or
+  `RS384`, the two `smart client-authentication-asymmetric` has a server
+  validate). `ferrosmart key generate` writes an ML-DSA key as PKCS#8 PEM
+  (`rfc9881 §6`) through `aws-lc-rs`, so no OpenSSL is needed
   and the `[ferrosmart.backend.keys]` ring, which shares no key with
   `[ferrosmart.keys]` (RFC 8725 §3.12). A deployment that logs people in
   at a FHIR base needs it, and a configuration without it is refused at

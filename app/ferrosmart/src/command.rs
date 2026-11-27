@@ -15,7 +15,7 @@ use ferrohealth_telemetry::section::TelemetrySection;
 use ferrohealth_telemetry::telemetry::{Console, InitError, Service, Telemetry};
 use ihe_atna::atna::forwarder::Forwarder;
 
-use crate::cli::{Cli, ClientCommand, Command, UpstreamCommand};
+use crate::cli::{Cli, ClientCommand, Command, KeyCommand, UpstreamCommand};
 use crate::config::Config;
 use crate::config::settings::Settings;
 use crate::server::AppState;
@@ -49,6 +49,14 @@ pub async fn dispatch(cli: Cli) -> Result<ExitCode, Failure> {
         Command::Upstream {
             command: UpstreamCommand::Registration { name },
         } => return registration(&cli.config, &name),
+        Command::Key {
+            command: KeyCommand::Generate { algorithm, out },
+        } => {
+            crate::keygen::write(&algorithm, &out).map_err(|error| {
+                Failure::from(error).with_context(format!("no key written to {}", out.display()))
+            })?;
+            return Ok(ExitCode::SUCCESS);
+        }
     };
     let loaded = Config::load(&cli.config).and_then(|loaded| {
         loaded

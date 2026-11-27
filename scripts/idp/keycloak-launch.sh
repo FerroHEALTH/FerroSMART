@@ -32,7 +32,8 @@ fail() {
 fhir_user="http://localhost:8090/fhir/Practitioner/example"
 password=$(openssl rand -hex 16)
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$LANE_DIR/signing.pem" 2> /dev/null
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-384 -out "$LANE_DIR/backend.pem" 2> /dev/null
+rm -f "$LANE_DIR/backend.pem"
+"$root/target/debug/ferrosmart" key generate --out "$LANE_DIR/backend.pem"
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$LANE_DIR/assertion.pem" 2> /dev/null
 psql "$LANE_PG/postgres" -qc 'CREATE DATABASE ferrosmart_keycloak'
 

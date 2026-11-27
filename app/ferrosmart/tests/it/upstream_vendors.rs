@@ -349,7 +349,8 @@ fn example_config(example: &str, keys: &Keys, database: Option<&Database>) -> Co
         .backend
         .as_mut()
         .expect("the example names FerroSMART's Backend Services client");
-    backend.keys.private_key_file = Some(crate::support::ec_key(keys.dir.path(), "backend.pem"));
+    backend.keys.private_key_file =
+        Some(crate::support::ml_dsa_key(keys.dir.path(), "backend.pem"));
     config
 }
 
