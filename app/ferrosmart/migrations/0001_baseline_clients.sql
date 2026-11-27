@@ -41,7 +41,7 @@ CREATE TABLE client (
     -- client's access tokens too.
     id_token_signed_response_alg text NOT NULL DEFAULT 'RS256'
         CONSTRAINT client_id_token_signed_response_alg_check
-        CHECK (id_token_signed_response_alg IN ('RS256', 'ML-DSA-65')),
+        CHECK (id_token_signed_response_alg IN ('RS256', 'PS256', 'ES256', 'EdDSA', 'ML-DSA-65')),
     -- A private_key_jwt client has a JWK Set by URL or by value; no other has one.
     CONSTRAINT client_keys_check
         CHECK ((token_endpoint_auth_method = 'private_key_jwt')

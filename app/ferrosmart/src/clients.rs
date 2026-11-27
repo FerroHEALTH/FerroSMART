@@ -656,16 +656,18 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
     })
 }
 
-/// Returns the algorithm the client `section` has its tokens signed with.
-// NOTE: OpenID Connect Dynamic Client Registration 1.0 §2, RS256 when omitted;
-// no specification names an access token's algorithm: our own design signs it alike.
+/// Returns the algorithm the client `section` has its ID Tokens signed with.
+// NOTE: OpenID Connect Dynamic Client Registration 1.0 §2, RS256 when omitted.
 fn signing_algorithm(section: &ClientMetadata) -> Result<Algorithm, ClientError> {
     match section.id_token_signed_response_alg.as_str() {
         "" | "RS256" => Ok(Algorithm::Rs256),
+        "PS256" => Ok(Algorithm::Ps256),
+        "ES256" => Ok(Algorithm::Es256),
+        "EdDSA" => Ok(Algorithm::EdDsa),
         "ML-DSA-65" => Ok(Algorithm::MlDsa65),
         _ => Err(ClientError::Rule {
             client_id: section.client_id.clone(),
-            rule: "`id_token_signed_response_alg` is `RS256` or `ML-DSA-65`",
+            rule: "`id_token_signed_response_alg` is `RS256`, `PS256`, `ES256`, `EdDSA` or `ML-DSA-65`",
         }),
     }
 }
@@ -941,7 +943,9 @@ fn check_set(client_id: &str, set: &Value) -> Result<(), ClientError> {
                 .iter()
                 .all(|member| text(member).is_some()),
             Some("AKP") => ["alg", "pub"].iter().all(|member| text(member).is_some()),
-            _ => return Err(fault("is no RSA, EC or AKP key")),
+            // NOTE: RFC 8037 §2, an OKP key carries `crv` and `x`; Ed25519 signs EdDSA.
+            Some("OKP") => ["crv", "x"].iter().all(|member| text(member).is_some()),
+            _ => return Err(fault("is no RSA, EC, OKP or AKP key")),
         };
         if !bare {
             return Err(fault("lacks a bare key member"));

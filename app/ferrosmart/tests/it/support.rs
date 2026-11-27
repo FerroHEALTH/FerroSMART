@@ -89,6 +89,28 @@ pub(crate) fn ec_key(dir: &Path, name: &str) -> PathBuf {
     path
 }
 
+/// Writes a fresh P-256 key to `dir/name` and returns its path.
+pub(crate) fn p256_key(dir: &Path, name: &str) -> PathBuf {
+    let rng = aws_lc_rs::rand::SystemRandom::new();
+    let der =
+        EcdsaKeyPair::generate_pkcs8(&aws_lc_rs::signature::ECDSA_P256_SHA256_FIXED_SIGNING, &rng)
+            .expect("a key pair");
+    let path = dir.join(name);
+    std::fs::write(&path, pem(der.as_ref())).expect("the key is written");
+    path
+}
+
+/// Writes a fresh Ed25519 key to `dir/name` and returns its path.
+pub(crate) fn ed25519_key(dir: &Path, name: &str) -> PathBuf {
+    let der = aws_lc_rs::signature::Ed25519KeyPair::generate_pkcs8v1(
+        &aws_lc_rs::rand::SystemRandom::new(),
+    )
+    .expect("a key pair");
+    let path = dir.join(name);
+    std::fs::write(&path, pem(der.as_ref())).expect("the key is written");
+    path
+}
+
 /// Writes a fresh ML-DSA-65 key (RFC 9881 §6, the seed form) to
 /// `dir/name` and returns its path.
 pub(crate) fn ml_dsa_key(dir: &Path, name: &str) -> PathBuf {

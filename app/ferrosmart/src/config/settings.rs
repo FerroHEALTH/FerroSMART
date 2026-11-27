@@ -470,9 +470,25 @@ fn signing_keys(
     access_token_lifetime: Duration,
 ) -> Result<SigningKeys, Error> {
     const KEY: &str = "ferrosmart.keys.private_key_files";
-    let mut pool: Vec<AssertionKey> = Vec::with_capacity(section.private_key_files.len());
-    for path in &section.private_key_files {
-        let key = token_key(KEY, path)?;
+    const PS256_KEY: &str = "ferrosmart.keys.ps256_private_key_files";
+    let mut pool: Vec<AssertionKey> = Vec::with_capacity(
+        section
+            .private_key_files
+            .len()
+            .saturating_add(section.ps256_private_key_files.len()),
+    );
+    let named = section
+        .private_key_files
+        .iter()
+        .map(|path| token_key(KEY, path))
+        .chain(
+            section
+                .ps256_private_key_files
+                .iter()
+                .map(|path| ps256_key(PS256_KEY, path)),
+        );
+    for key in named {
+        let key = key?;
         if pool.iter().any(|other| other.kid() == key.kid()) {
             return Err(Error::RepeatedKey {
                 kid: key.kid().to_owned(),
@@ -497,9 +513,29 @@ fn signing_keys(
     SigningKeys::new(pool, schedule).map_err(|_no_rs256| Error::NoRs256Key)
 }
 
+/// Reads the RSA key at `path`, which `key` names, to sign PS256 (RFC 7518
+/// §3.5), a key of its own so each key signs one algorithm (RFC 8725 §3.1).
+fn ps256_key(key: &'static str, path: &Path) -> Result<AssertionKey, Error> {
+    let pem = std::fs::read(path).map_err(|source| Error::KeyFile {
+        key,
+        path: path.to_owned(),
+        source,
+    })?;
+    let read =
+        AssertionKey::from_pem(&pem, None, None).map_err(|source| Error::Key { key, source })?;
+    if !read.algorithm().is_rsa() {
+        return Err(Error::TokenKeyType {
+            path: path.to_owned(),
+        });
+    }
+    read.with_algorithm(Algorithm::Ps256)
+        .map_err(|source| Error::Key { key, source })
+}
+
 /// Reads the token signing key at `path`, which `key` names: an RSA key
-/// signs RS256 (RFC 9068 §2.1), an ML-DSA-65 key signs ML-DSA-65 (RFC 9964
-/// §5, RFC 9881 §6).
+/// signs RS256 (RFC 9068 §2.1), a P-256 key ES256 (RFC 7518 §3.4), an
+/// Ed25519 key `EdDSA` (RFC 8037 §3.1) and an ML-DSA-65 key ML-DSA-65 (RFC
+/// 9964 §5, RFC 9881 §6).
 fn token_key(key: &'static str, path: &Path) -> Result<AssertionKey, Error> {
     let pem = std::fs::read(path).map_err(|source| Error::KeyFile {
         key,
@@ -509,7 +545,7 @@ fn token_key(key: &'static str, path: &Path) -> Result<AssertionKey, Error> {
     let read =
         AssertionKey::from_pem(&pem, None, None).map_err(|source| Error::Key { key, source })?;
     match read.algorithm() {
-        Algorithm::MlDsa65 => Ok(read),
+        Algorithm::MlDsa65 | Algorithm::Es256 | Algorithm::EdDsa => Ok(read),
         algorithm if algorithm.is_rsa() => read
             .with_algorithm(Algorithm::Rs256)
             .map_err(|source| Error::Key { key, source }),

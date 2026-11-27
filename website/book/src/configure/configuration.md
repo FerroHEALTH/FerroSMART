@@ -90,7 +90,8 @@ client's `id_token_signed_response_alg` which signs its ID Tokens.
 
 | Key | Default | What it is |
 |---|---|---|
-| `private_key_files` | required | The PEM files of the keys, RSA (PKCS#8 or PKCS#1) or ML-DSA-65 (PKCS#8, RFC 9881), in the order they take over; at least one RSA key; each is published under its RFC 7638 thumbprint |
+| `private_key_files` | required | The PEM files of the keys, in the order they take over: RSA (PKCS#8 or PKCS#1) signing `RS256`, at least one; P-256 signing `ES256`; Ed25519 signing `EdDSA`; ML-DSA-65 (PKCS#8, RFC 9881) signing `ML-DSA-65`. Each is published under its RFC 7638 thumbprint |
+| `ps256_private_key_files` | none | The PEM files of RSA keys that sign `PS256`, none of them among `private_key_files` |
 | `rotation_period` | `90d` | How long a key signs before the next one takes over; at least `access_token_lifetime` plus an hour and a minute |
 
 ## `[ferrosmart.backend]`
