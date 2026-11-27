@@ -16,20 +16,24 @@ fails to parse.
 
 | What | Algorithm | Key |
 |---|---|---|
-| Access tokens and ID Tokens | `RS256`, or `ML-DSA-65` for a client whose `id_token_signed_response_alg` names it | The token keys, `[ferrosmart.keys]`, published at `{issuer}/jwks` |
-| Client assertions to an upstream OpenID Provider | `RS256` by default, as the provider's registration names | The assertion keys, published at `{issuer}/upstream-jwks` |
-| Client assertions of FerroSMART's own Backend Services client | `ES384` or `RS384` | The backend keys |
+| Access tokens | `RS256`, or `ML-DSA-65` for a resource server whose `access_token_signing_alg` names it | The token keys, `[ferrosmart.keys]`, published at `{issuer}/jwks` |
+| ID Tokens | `RS256`, or `ML-DSA-65` for a client whose `id_token_signed_response_alg` names it | The token keys |
+| Client assertions to an upstream OpenID Provider | `RS256` by default, as the provider's registration names; ML-DSA where the provider lists it | The assertion keys, published at `{issuer}/upstream-jwks` |
+| Client assertions of FerroSMART's own Backend Services client | `ES384`, `RS384`, or ML-DSA-44, ML-DSA-65 or ML-DSA-87 | The backend keys |
 | SAML `AuthnRequest` and `ArtifactResolve` | RSA, or ECDSA on P-256 or P-384 | `[ferrosmart.saml] signing_key_file` |
 | OpenID4VP request objects | `ES256` | The wallet-relying party access key |
 
-`RS256` signs every client's tokens by default, since RFC 9068 §2.1 and
-OpenID Connect Discovery 1.0 §3 have every authorization server support it.
-A client that can verify ML-DSA registers `"id_token_signed_response_alg":
-"ML-DSA-65"` (OpenID Connect Dynamic Client Registration 1.0 §2), and its
-access tokens and ID Tokens are then signed with ML-DSA-65 (RFC 9964), which
-needs an ML-DSA-65 key in `[ferrosmart.keys]`. One ring per algorithm signs
-both kinds of token; their `typ` (`at+jwt` against `JWT`) keeps an ID Token
-from passing as an access token.
+`RS256` signs every token by default, since RFC 9068 §2.1 and OpenID
+Connect Discovery 1.0 §3 have every authorization server support it. An
+access token is signed for the resource server that verifies it: set
+`access_token_signing_alg = "ML-DSA-65"` on a `[[ferrosmart.resource]]`
+that verifies ML-DSA (RFC 9964), as a FerroHEALTH product on
+`ferrohealth-smart` does. A client that can verify ML-DSA registers
+`"id_token_signed_response_alg": "ML-DSA-65"` (OpenID Connect Dynamic
+Client Registration 1.0 §2) for its ID Tokens. Either needs an ML-DSA-65
+key in `[ferrosmart.keys]`. One ring per algorithm signs both kinds of
+token; their `typ` (`at+jwt` against `JWT`) keeps an ID Token from passing
+as an access token.
 
 ## What FerroSMART accepts
 

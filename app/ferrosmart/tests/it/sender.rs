@@ -275,6 +275,10 @@ async fn the_metadata_names_the_proof_algorithms() {
         .as_array()
         .expect("a list");
     assert!(algorithms.contains(&json!("ES256")), "{algorithms:?}");
+    // NOTE: RFC 9449 §5.1 and RFC 9964, the server lists the ML-DSA algorithms too.
+    for algorithm in ["ML-DSA-44", "ML-DSA-65", "ML-DSA-87"] {
+        assert!(algorithms.contains(&json!(algorithm)), "{algorithms:?}");
+    }
     assert_eq!(
         json!(false),
         metadata["tls_client_certificate_bound_access_tokens"]
@@ -394,5 +398,43 @@ async fn a_certificate_bound_token_reaches_userinfo_only_with_its_certificate() 
         status,
         "the certificate holds; no person"
     );
+    server.stop().await;
+}
+
+/// Returns a `DPoP` proof for a token request signed by a fresh ML-DSA-65
+/// key carried as its `AKP` `jwk` (RFC 9964 §3), and the key's thumbprint.
+fn ml_dsa_proof() -> (String, String) {
+    use ferrohealth_smart::jws::algorithm::Algorithm;
+    use ferrohealth_smart::jws::compact::Header;
+    use ferrohealth_smart::jws::key::{PrivateKey, SigningKey};
+    let dir = tempfile::tempdir().expect("a directory");
+    let pem = std::fs::read(crate::support::ml_dsa_key(dir.path(), "dpop.pem")).expect("the key");
+    let key = SigningKey::new(
+        PrivateKey::from_pem(&pem).expect("an ML-DSA key"),
+        Algorithm::MlDsa65,
+    )
+    .expect("a signing key");
+    let mut header = Header::new(Algorithm::MlDsa65);
+    header.typ = Some(String::from("dpop+jwt"));
+    header.jwk = Some(key.public_jwk().clone());
+    let claims = json!({
+        "jti": format!("ml-dsa-{}", std::process::id()), "htm": "POST",
+        "htu": format!("{ISSUER}/token"), "iat": jiff::Timestamp::now().as_second()
+    });
+    let proof = ferrohealth_smart::jws::compact::encode(&header, &claims, &key).expect("signs");
+    (proof, key.public_jwk().thumbprint())
+}
+
+// NOTE: RFC 9449 §4.3 check 5 and RFC 9964, a proof signed with ML-DSA-65 by its AKP
+// key binds the token to that key (§6.1).
+#[tokio::test]
+async fn an_ml_dsa_proof_binds_the_token_to_its_key() {
+    let server = Server::start().await;
+    let (proof, jkt) = ml_dsa_proof();
+    let (status, _, body) = post(&server, &backend(&server), Some(&proof), None).await;
+    assert_eq!(StatusCode::OK, status, "{body}");
+    assert_eq!(json!("DPoP"), body["token_type"]);
+    let token = body["access_token"].as_str().expect("a token");
+    assert_eq!(json!({"jkt": jkt}), claims(token)["cnf"]);
     server.stop().await;
 }

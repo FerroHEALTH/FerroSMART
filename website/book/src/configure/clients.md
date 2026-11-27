@@ -58,7 +58,7 @@ registers itself sends too. `resources`, `launch_uri`, `upstreams` and
 | `upstreams` | The identity providers its people log in at; every provider when absent |
 | `default_acr_values` | The eIDAS level-of-assurance URIs a request without `acr_values` asks for (OpenID Connect Dynamic Client Registration 1.0 §2) |
 | `require_pushed_authorization_requests` | `true` when the app may start an authorization request only by pushing it to `POST {issuer}/par` (RFC 9126 §6); `false` by default |
-| `id_token_signed_response_alg` | `RS256` (the default) or `ML-DSA-65`: the algorithm the client's ID Tokens and access tokens are signed with (OpenID Connect Dynamic Client Registration 1.0 §2); `ML-DSA-65` needs an ML-DSA-65 key in `[ferrosmart.keys]` |
+| `id_token_signed_response_alg` | `RS256` (the default) or `ML-DSA-65`: the algorithm the client's ID Tokens are signed with; its access tokens follow the resource server's `access_token_signing_alg` (OpenID Connect Dynamic Client Registration 1.0 §2); `ML-DSA-65` needs an ML-DSA-65 key in `[ferrosmart.keys]` |
 | `dpop_bound_access_tokens` | `true` when every token request of the client carries a `DPoP` proof (RFC 9449 §5.2); `false` by default |
 | `tls_client_certificate_bound_access_tokens` | `true` when the client's tokens are bound to the certificate of its mutual-TLS connection, which every token request then presents (RFC 8705 §3.4); `false` by default |
 | `launch_uri` | Optional: the app's launch URL, absolute `https`, by which an EHR's [launch registration](../integrate/ehr-launch.md) may name the app (`app_launch_uri`), as a SMART Task does; compared after RFC 3986 normalization, one client per URL |

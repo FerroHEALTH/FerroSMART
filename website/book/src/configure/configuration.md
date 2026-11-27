@@ -84,8 +84,9 @@ share one. Migrations ship in the binary and run at start
 The keys that sign every access token and ID Token, each in turn
 ([keys and rotation](../operate/keys.md)): RSA keys under `RS256`, which
 are required, and ML-DSA-65 keys (RFC 9964) beside them. The keys of each
-algorithm rotate on their own, and a client's
-`id_token_signed_response_alg` decides which signs its tokens.
+algorithm rotate on their own. A resource server's
+`access_token_signing_alg` decides which signs its access tokens, and a
+client's `id_token_signed_response_alg` which signs its ID Tokens.
 
 | Key | Default | What it is |
 |---|---|---|
@@ -104,8 +105,8 @@ itself. A deployment that logs people in at a FHIR server needs this table.
 
 | Key | Default | What it is |
 |---|---|---|
-| `algorithm` | `ES384` | The JWS algorithm of its client assertions: `ES384` or `RS384` |
-| `[ferrosmart.backend.keys]` | required | The assertion ring: `private_key_file` (a P-384 key for `ES384`, an RSA key for `RS384`), `kid`, `next_private_key_file`, `previous_private_key_file` and `previous_key_overlap`, as the upstream assertion ring has them. It may share no key with the token keys |
+| `algorithm` | `ES384` | The JWS algorithm of its client assertions: `ES384`, `RS384`, or `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87` (RFC 9964), which FerroSMART's own token endpoint takes |
+| `[ferrosmart.backend.keys]` | required | The assertion ring: `private_key_file` (a P-384 key for `ES384`, an RSA key for `RS384`, an ML-DSA key of that parameter set for ML-DSA), `kid`, `next_private_key_file`, `previous_private_key_file` and `previous_key_overlap`, as the upstream assertion ring has them. It may share no key with the token keys |
 
 ## `[[ferrosmart.resource]]`
 
@@ -116,6 +117,7 @@ of the tokens issued for it. At least one is required, and no base twice.
 |---|---|
 | `base` | The server's base URL as its clients name it: `https`, or `http` on a loopback host, no query or fragment |
 | `kind` | `fhir` or `openehr` |
+| `access_token_signing_alg` | The algorithm its access tokens are signed with: `RS256` (the default) or `ML-DSA-65` for a server that verifies ML-DSA (RFC 9964); a key of `[ferrosmart.keys]` must sign it |
 | `subject_namespace` | openEHR only: the namespace the server's EHRs name their subjects in, which the patient picker looks an EHR up by. Unset, the picker is not offered at that base |
 | `fhir_base` | openEHR only: the base of the same platform's FHIR server, one of the FHIR bases configured here. The patient picker then searches that server for the patient and looks their EHR up, so the app gets both `patient` and `ehrId`. Needs `subject_namespace` and `subject_system` |
 | `subject_system` | With `fhir_base`: the `system` of the `Patient.identifier` whose value is the subject id of the patient's EHR in `subject_namespace` |

@@ -3389,13 +3389,14 @@ private_key_files = [                         # in the order they take over; eac
 rotation_period = "90d"                       # how long a key signs before the next takes over
 
 [ferrosmart.backend]                          # FerroSMART's own Backend Services client, its client_id the issuer; needed with a login at a FHIR base (13.33)
-algorithm = "ES384"                           # or "RS384"
+algorithm = "ES384"                           # or "RS384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"
 [ferrosmart.backend.keys]                     # its assertion ring, sharing no key with [ferrosmart.keys]
 private_key_file = "/run/secrets/backend-assertion.pem"
 
 [[ferrosmart.resource]]                       # each base an `aud` may name; at least one
 base = "https://ehr.example.org/fhir"
 kind = "fhir"                                 # or "openehr"
+# access_token_signing_alg = "ML-DSA-65"      # the algorithm its access tokens are signed with; RS256 by default (13.11)
 # subject_namespace = "examples"              # openEHR only: the EHR subjects' namespace the picker looks up in
 # fhir_base = "https://ehr.example.org/fhir"  # openEHR only: the platform's FHIR base the picker finds the patient at
 # subject_system = "urn:example:mrn"          # with fhir_base: the Patient.identifier system that names the EHR's subject
@@ -3590,8 +3591,13 @@ presets or the commands: our own design.
   `id_token_signing_alg_values_supported` names both. A client's
   `id_token_signed_response_alg` (OpenID Connect Dynamic Client
   Registration 1.0 §2), `RS256` by default, picks the algorithm of its ID
-  Tokens and of its access tokens alike, which no specification names for
-  an access token: our own design (#887). A registration naming another
+  Tokens. An access token is signed with the algorithm its resource server
+  verifies, which no specification names: the `[[ferrosmart.resource]]`
+  table's `access_token_signing_alg`, `RS256` by default, since RFC 9068
+  §2.1 has every resource server verify it, and `ML-DSA-65` for a server
+  that verifies it, such as a FerroHEALTH product on `ferrohealth-smart`;
+  a value no key of the pool signs is refused at start (#935, our own
+  design). A registration naming another
   algorithm, or one no key signs, is `invalid_client_metadata`. Names
   follow RFC 9864's fully-specified registrations; `none` and HMAC never
   sign.
@@ -4210,7 +4216,9 @@ redacted in every rendering. A table naming both is refused at load, and
 a secret anywhere else is an unknown key. At start FerroSMART reads the
 provider's `token_endpoint_auth_methods_supported` (`rfc8414 §2`,
 `client_secret_basic` when absent) and refuses a provider that does not
-list the method. Choose the secret only for a provider that offers no
+list the method, and refuses a `private_key_jwt` entry whose algorithm a
+listed `token_endpoint_auth_signing_alg_values_supported` leaves out, so
+an entry signs ML-DSA (`rfc9964`) where the provider lists it (#935). Choose the secret only for a provider that offers no
 `private_key_jwt` for a web client: OAuth 2.1 and FAPI 2.0 prefer
 asymmetric client authentication, a secret can leak from a configuration
 file, and FerroSMART holds keys already.
@@ -5113,7 +5121,9 @@ carries `x5t#S256`, the SHA-256 of the leaf certificate's DER encoding
 `invalid_request`, which RFC 8705 §3.4 leaves to the server. Introspection
 answers the token's `cnf` (`rfc9449 §6.2`, `rfc8705 §3.2`). The metadata
 names `dpop_signing_alg_values_supported`, the proof algorithms the check
-admits (`rfc9449 §5.1`), and `tls_client_certificate_bound_access_tokens`,
+admits (`rfc9449 §5.1`): `ferrohealth-smart`'s defaults with ML-DSA-44,
+ML-DSA-65 and ML-DSA-87 beside them, a proof of those carrying its `AKP`
+key (`rfc9964`, #935), and `tls_client_certificate_bound_access_tokens`,
 `true` when the listener asks for a certificate (`rfc8705 §3.3`).
 
 ### 13.32 Upstream providers: the EUDI Wallet
@@ -5456,7 +5466,9 @@ sequenceDiagram
   client a resource server's `ferrosmart` preset reads as the authorization
   server itself (`issuer_client_is_person`, 3.13). `[ferrosmart.backend]`
   names the assertion algorithm (`ES384` or `RS384`,
-  the two `smart client-authentication-asymmetric` has a server validate)
+  the two `smart client-authentication-asymmetric` has a server validate,
+  or `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87`, which the token endpoint
+  it authenticates to, FerroSMART's own, also lists, `rfc8414 §2`, #935)
   and the `[ferrosmart.backend.keys]` ring, which shares no key with
   `[ferrosmart.keys]` (RFC 8725 §3.12). A deployment that logs people in
   at a FHIR base needs it, and a configuration without it is refused at

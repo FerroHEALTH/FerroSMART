@@ -69,7 +69,7 @@ pub fn metadata(settings: &Settings, login: bool) -> ServerMetadata {
         registration_endpoint: Some(settings.endpoint(crate::admin::register::REGISTER_ROUTE)),
         // NOTE: RFC 9449 §5.1, the algorithms the token endpoint takes a DPoP proof in.
         dpop_signing_alg_values_supported: Some(
-            ferrohealth_smart::sender::proof::ProofSettings::new(settings.issuer_url.clone())
+            crate::token::sender::proof_settings(settings)
                 .algorithms
                 .iter()
                 .map(|algorithm| algorithm.name().to_owned())

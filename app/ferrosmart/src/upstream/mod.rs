@@ -269,6 +269,15 @@ pub enum UpstreamError {
         /// The method the entry names.
         method: &'static str,
     },
+    /// The provider's token endpoint lists the algorithms it takes a
+    /// client assertion in, and not the one the entry signs with.
+    #[error(
+        "the provider's token endpoint does not list `{algorithm}` among its client assertion algorithms"
+    )]
+    AssertionAlgorithm {
+        /// The algorithm the entry signs with.
+        algorithm: &'static str,
+    },
     /// A SAML provider's metadata cannot be read or used.
     #[error("the SAML provider's metadata cannot be used")]
     Saml(#[from] saml::SamlError),
@@ -373,6 +382,17 @@ impl OidcUpstream {
             .any(|listed| listed == method)
         {
             return Err(UpstreamError::Method { method });
+        }
+        // NOTE: RFC 8414 §2, token_endpoint_auth_signing_alg_values_supported: an
+        // assertion algorithm the provider lists none of is refused at start.
+        if let (Authentication::PrivateKeyJwt(keys), Some(listed)) = (
+            &self.authentication,
+            &metadata.token_endpoint_auth_signing_alg_values_supported,
+        ) {
+            let algorithm = keys.signer.algorithm().name();
+            if !listed.iter().any(|name| name == algorithm) {
+                return Err(UpstreamError::AssertionAlgorithm { algorithm });
+            }
         }
         let provider = Provider::from_metadata(&metadata)?;
         let party = RelyingParty::new(http, provider, self.client_id.clone(), callback)
