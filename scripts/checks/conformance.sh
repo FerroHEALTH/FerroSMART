@@ -391,14 +391,12 @@ self_test() {
   printf '# c\nfamily_name\tyes\tfamily_name\tfamily_name\tfamily_name\tmaps\nportrait\tyes\tpicture\tportrait\tnot retained (x)\tdrops\n' \
     > "$tree/conformance/pid-attributes.tsv"
   printf '#[test]\nfn maps() {}\n' > "$tree/app/ferrosmart/pid.rs"
-  printf '# c\noid4vp-p\tm1\tPASSED\trefused\t-\t\noid4vp-p\tm2\tFAILED\trefused\t#1\tx\noid4vp-p\tm3\tREVIEW\taccepted\t-\t\noidcc-p\tm4\tPASSED\trefused\t-\t\n' \
-    > "$tree/app/ferrosmart/oidf/expected.tsv"
-  printf 'oidcc-basic-certification-test-plan\tm5\tFAILED\t-\t650\tx\noidcc-config-certification-test-plan\tm6\tWARNING\t-\t#650\tx\noidcc-basic-certification-test-plan\tm7\tSKIPPED\t-\t#9\tx\n' \
-    >> "$tree/app/ferrosmart/oidf/expected.tsv"
-  printf 'oidcc-client-test-plan\tm8\tPASSED\trefused\t-\t\noidcc-client-basic-certification-test-plan\tm9\tPASSED\trefused\t-\t\n' \
-    >> "$tree/app/ferrosmart/oidf/expected.tsv"
-  printf 'fapi2-security-profile-final-test-plan\tm11\tPASSED\t-\t-\t\nfapi2-security-profile-final-test-plan\tm12\tFAILED\t-\t966\tx\n' \
-    >> "$tree/app/ferrosmart/oidf/expected.tsv"
+  {
+    printf '# c\noid4vp-p\tm1\tPASSED\trefused\t-\t\noid4vp-p\tm2\tFAILED\trefused\t#1\tx\noid4vp-p\tm3\tREVIEW\taccepted\t-\t\noidcc-p\tm4\tPASSED\trefused\t-\t\n'
+    printf 'oidcc-basic-certification-test-plan\tm5\tFAILED\t-\t650\tx\noidcc-config-certification-test-plan\tm6\tWARNING\t-\t#650\tx\noidcc-basic-certification-test-plan\tm7\tSKIPPED\t-\t#9\tx\n'
+    printf 'oidcc-client-test-plan\tm8\tPASSED\trefused\t-\t\noidcc-client-basic-certification-test-plan\tm9\tPASSED\trefused\t-\t\n'
+    printf 'fapi2-security-profile-final-test-plan\tm11\tPASSED\t-\t-\t\nfapi2-security-profile-final-test-plan\tm12\tFAILED\t-\t966\tx\n'
+  } > "$tree/app/ferrosmart/oidf/expected.tsv"
   printf '[{"test_id":"a","result":"pass"},{"test_id":"b","result":"omit"},{"test_group_id":"g","result":"pass"}]' \
     > "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
   printf '| Item | Pin |\n|---|---|\n| SMART App Launch | 2.2.0 (STU 2.2) |\n| mdoc sources | the EUDI PID Rulebook 1.7 at commit x |\n' \
