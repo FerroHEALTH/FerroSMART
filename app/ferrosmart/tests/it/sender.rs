@@ -281,3 +281,118 @@ async fn the_metadata_names_the_proof_algorithms() {
     );
     server.stop().await;
 }
+
+/// Asks the UserInfo Endpoint with the `Authorization` header
+/// `authorization`, the `DPoP` header `dpop` and the connection's client
+/// certificate `certificate`, and returns the status and the challenge.
+async fn userinfo(
+    server: &Server,
+    authorization: &str,
+    dpop: Option<&str>,
+    certificate: Option<&[u8]>,
+) -> (StatusCode, Option<String>) {
+    let mut request = Request::get("/userinfo").header(header::AUTHORIZATION, authorization);
+    if let Some(dpop) = dpop {
+        request = request.header("DPoP", dpop);
+    }
+    let mut request = request.body(Body::empty()).expect("a request");
+    if let Some(der) = certificate {
+        let chain: Arc<[CertificateDer<'static>]> =
+            Arc::from(vec![CertificateDer::from(der.to_vec())]);
+        request.extensions_mut().insert(PeerCertificates(chain));
+    }
+    let response = server
+        .app
+        .clone()
+        .oneshot(from_client(request))
+        .await
+        .expect("an answer");
+    let challenge = response
+        .headers()
+        .get(header::WWW_AUTHENTICATE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    (response.status(), challenge)
+}
+
+/// Returns a proof of `key` for a UserInfo request with `token`.
+fn userinfo_proof(key: &DpopKey, token: &str) -> String {
+    let url = url::Url::parse(&format!("{ISSUER}/userinfo")).expect("a URL");
+    key.proof(&Method::GET, &url, Role::Resource, Some(token))
+        .expect("a proof")
+}
+
+// NOTE: RFC 9449 §7.1 and §7.2, a DPoP-bound token reaches the UserInfo
+// Endpoint under the DPoP scheme with a fresh proof of its key, never as Bearer.
+#[tokio::test]
+async fn a_dpop_bound_token_reaches_userinfo_only_with_its_proof() {
+    let server = Server::start().await;
+    let key = dpop_key();
+    let (status, _, body) = post(&server, &backend(&server), Some(&proof(&key)), None).await;
+    assert_eq!(StatusCode::OK, status, "{body}");
+    let token = body["access_token"].as_str().expect("a token");
+    let invalid = Some(String::from("Bearer error=\"invalid_token\""));
+    let (status, challenge) = userinfo(&server, &format!("Bearer {token}"), None, None).await;
+    assert_eq!(
+        (StatusCode::UNAUTHORIZED, invalid.clone()),
+        (status, challenge)
+    );
+    let (status, challenge) = userinfo(&server, &format!("DPoP {token}"), None, None).await;
+    assert_eq!(
+        (StatusCode::UNAUTHORIZED, invalid.clone()),
+        (status, challenge)
+    );
+    let other = userinfo_proof(&dpop_key(), token);
+    let (status, _) = userinfo(&server, &format!("DPoP {token}"), Some(&other), None).await;
+    assert_eq!(StatusCode::UNAUTHORIZED, status, "another key's proof");
+    // NOTE: OpenID Connect Core 1.0 §5.3, a client's own token holds no person, so
+    // a request whose proof holds is insufficient_scope.
+    let fresh = userinfo_proof(&key, token);
+    let (status, challenge) = userinfo(&server, &format!("DPoP {token}"), Some(&fresh), None).await;
+    assert_eq!(StatusCode::FORBIDDEN, status);
+    assert_eq!(
+        Some("Bearer error=\"insufficient_scope\""),
+        challenge.as_deref()
+    );
+    let (status, _) = userinfo(&server, &format!("DPoP {token}"), Some(&fresh), None).await;
+    assert_eq!(StatusCode::UNAUTHORIZED, status, "a proof is used once");
+
+    let (_, _, body) = post(&server, &backend(&server), None, None).await;
+    let unbound = body["access_token"].as_str().expect("a token");
+    let proof = userinfo_proof(&key, unbound);
+    let (status, _) = userinfo(&server, &format!("DPoP {unbound}"), Some(&proof), None).await;
+    assert_eq!(
+        StatusCode::UNAUTHORIZED,
+        status,
+        "an unbound token is Bearer"
+    );
+    server.stop().await;
+}
+
+// NOTE: RFC 8705 §3, a certificate-bound token reaches the UserInfo Endpoint only
+// over a connection that presents its certificate.
+#[tokio::test]
+async fn a_certificate_bound_token_reaches_userinfo_only_with_its_certificate() {
+    let server = Server::start().await;
+    execute(
+        &server,
+        "UPDATE client SET tls_client_certificate_bound_access_tokens = true \
+         WHERE client_id = 'export'",
+    )
+    .await;
+    let der = certificate();
+    let (status, _, body) = post(&server, &backend(&server), None, Some(&der)).await;
+    assert_eq!(StatusCode::OK, status, "{body}");
+    let bearer = format!("Bearer {}", body["access_token"].as_str().expect("a token"));
+    let (status, _) = userinfo(&server, &bearer, None, None).await;
+    assert_eq!(StatusCode::UNAUTHORIZED, status, "no certificate");
+    let (status, _) = userinfo(&server, &bearer, None, Some(&certificate())).await;
+    assert_eq!(StatusCode::UNAUTHORIZED, status, "another certificate");
+    let (status, _) = userinfo(&server, &bearer, None, Some(&der)).await;
+    assert_eq!(
+        StatusCode::FORBIDDEN,
+        status,
+        "the certificate holds; no person"
+    );
+    server.stop().await;
+}

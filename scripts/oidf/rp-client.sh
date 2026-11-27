@@ -15,12 +15,11 @@
 #   started    FerroSMART started, and the module ended on that: it tests
 #              the reading of the metadata alone
 #
-# A module of the code flow passes at the suite only after a UserInfo
-# request (OpenID Connect Core 1.0 §5.3), which FerroSMART never makes, so
-# such a module would wait out the runner's four minutes. Once FerroSMART's
-# part is over the script gives the module the suite's own five seconds and
-# then stops it, which the suite records as INTERRUPTED. No specification
-# governs the driver: our own design.
+# FerroSMART makes the UserInfo request (OpenID Connect Core 1.0 §5.3) as
+# part of the login, so a module of the code flow is over once the callback
+# answers. One that still waits once FerroSMART's part is over gets the
+# suite's own five seconds and is then stopped, which the suite records as
+# INTERRUPTED. No specification governs the driver: our own design.
 #
 # It reads MODULE_NAME from run-test-plan.py and LANE_DIR, LANE_PG, OIDF_PLAN
 # and OIDF_SUITE from the lane, and needs bash, curl, jq and openssl.
@@ -117,7 +116,8 @@ login() {
     return
     ;;
   esac
-  # 3. FerroSMART redeems the code and checks the ID Token (§3.1.3.7).
+  # 3. FerroSMART redeems the code, checks the ID Token (§3.1.3.7) and asks
+  #    the UserInfo Endpoint for the claims about its subject (§5.3).
   location=$(redirect "$location")
   case "$location" in
     "$issuer"/consent*) echo accepted ;;
@@ -148,8 +148,8 @@ fi
 printf '%s\t%s\n' "$MODULE_NAME" "$outcome" >> "$LANE_DIR/logins-$OIDF_PLAN.tsv"
 echo "rp-client: $OIDF_PLAN $MODULE_NAME: $outcome"
 
-# The module ends by itself when it has what it waits for; one that waits
-# for a UserInfo request is stopped.
+# The module ends by itself when it has what it waits for; one that still
+# waits is stopped.
 for _ in $(seq 1 12); do
   case "$(status)" in FINISHED | INTERRUPTED) exit 0 ;; *) sleep 1 ;; esac
 done

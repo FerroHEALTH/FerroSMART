@@ -80,7 +80,7 @@ pub(crate) async fn presented(
     let jkt = if headers.contains_key(DPOP) {
         let check = ProofCheck::new(
             ProofSettings::new(state.settings().issuer_url.clone()),
-            Arc::new(Replays(state.store().clone())),
+            replays(state),
         )
         .map_err(|error| server_error("the DPoP proof check cannot be built", &error))?;
         let proof = check
@@ -141,6 +141,12 @@ impl Presented {
             .then(|| self.jkt.clone())
             .flatten()
     }
+}
+
+/// Returns the record of the `DPoP` proofs seen, which every endpoint that
+/// takes a proof shares.
+pub(crate) fn replays(state: &AppState) -> Arc<dyn ReplayStore> {
+    Arc::new(Replays(state.store().clone()))
 }
 
 /// The `DPoP` proofs seen, in the store every replica shares.

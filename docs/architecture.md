@@ -2640,7 +2640,8 @@ document (13.8).
 | ID Tokens signed with `RS256` | SHALL | same; `discovery §3` | 2 |
 | ID Token claims `iss`, `sub`, `aud`, `exp`, `iat`, `nonce` when sent, `auth_time` when `max_age` is requested | REQUIRED | `oidc core §2`, `§3.1.2.1` | 3 |
 | `profile` and `email` request `name`, `preferred_username`, `given_name`, `family_name`, `birthdate`, `email` and `email_verified`, and a wallet login adds `place_of_birth` and `nationalities` under `profile` (13.32); FerroSMART passes the upstream ID Token's values into its own ID Token when granted, never into an access token, and leaves out what the upstream did not send (owner, 2026-11-19, #676) | MAY (an OP may decline) | `oidc core §5.1`, `§5.4` | 3 |
-| `claims`, request objects and UserInfo | MAY | `smart scopes-and-launch-context`, Scopes for requesting identity data | not built: no UserInfo Endpoint, which `oidc core §15.2` requires only of a Dynamic OP (owner decision of 2026-11-19, #650) |
+| UserInfo | MAY | `smart scopes-and-launch-context`, Scopes for requesting identity data; `oidc core §5.3`; `discovery §3` (`userinfo_endpoint` RECOMMENDED) | met: `GET`, `POST {issuer}/userinfo` answers the claims of the ID Token issued with the token, listed as `userinfo_endpoint` (#933, reversing #650) |
+| `claims` and request objects | MAY | `smart scopes-and-launch-context`, Scopes for requesting identity data | not built: `oidc core §15.2` requires them only of a Dynamic OP (#650) |
 | What every OpenID Provider implements (`oidc core §15.1`) | MUST | `oidc core §15.1` | met, 13.25 |
 
 **Refresh tokens**
@@ -3315,6 +3316,7 @@ differently.
 | `GET`, `POST /consent`, `/picker` | the consent and picker pages | our own design |
 | `POST /token` | the token endpoint | `rfc6749 §3.2` |
 | `POST /introspect` | RFC 7662 | `rfc7662 §2` |
+| `GET`, `POST /userinfo` | the UserInfo Endpoint (`userinfo_endpoint`): an active access token FerroSMART issued under a person's grant with `openid`, by `Bearer` or, bound, by `DPoP` with its proof and over the certificate it is bound to, answers `sub`, `fhirUser` and the standard claims its scope passes on, the ID Token's claims; a refusal is the RFC 6750 §3 challenge | `oidc core §5.3`; `rfc6750 §2.1`, `§3`; `rfc9449 §7`; `rfc8705 §3` |
 | `POST /revoke` | RFC 7009 | `rfc7009 §2` |
 | `POST /launch` | the EHR launch API | our own design (13.6) |
 | `GET /manage` | the apps holding the user's consent or live access, each with Disconnect (`management_endpoint`) | `smart conformance`, Metadata |
@@ -3344,7 +3346,7 @@ stored as their SHA-256, client secrets as Argon2id hashes.
 | `signing_key` | `kid` | state (`next`, `active`, `retiring`, `retired`) and the time it reached each one; the key itself stays in the files of `[ferrosmart.keys]` (13.11) |
 | `pending_authorization` | random id | the validated request (client, redirect URI, scope, `state`, `nonce`, PKCE challenge, `aud`, launch, and the OpenID Connect `prompt`, `max_age` and `ui_locales` of 13.25), the upstream provider chosen, its `state`, `nonce` and PKCE verifier, expiry |
 | `authorization_code` | code hash | the grant it opens, the PKCE challenge, the redirect URI, expiry, redemption time, the basis of its consent (13.6 item 6) |
-| `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), the basis of its consent, the `DPoP` key a public client's refresh token is bound to (13.31), creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
+| `authorization_grant` | grant id | client, subject, `fhirUser`, `aud`, scope, launch context, `auth_time`, upstream session, access (`offline`, `online`, none), the basis of its consent, the `DPoP` key a public client's refresh token is bound to (13.31), the standard claims its scope passes on, which the UserInfo Endpoint answers (`oidc core §5.3`; none without `openid`), creation and revocation times (`grant` is an SQL keyword, so the table takes RFC 6749 §1.3's full name) |
 | `refresh_token` | token hash | grant, predecessor, idle expiry, use time (set when rotated, kept for reuse detection), revocation |
 | `access_token` | `jti` | grant or client, `aud`, scope, `exp`, revocation, so introspection and revocation answer for a JWT |
 | `launch` | launch hash | EHR client, the app's `client_id`, `aud`, context, expiry, use time |
@@ -4554,10 +4556,11 @@ module cannot see the relying party refuse, so the login column carries
 the check: the lane knows what each module asks of the login, from the
 module's own summary in the suite, and a login the module does not ask
 for names its issue. A happy-path module finishes at the suite only after
-a UserInfo request (`oidc core §5.3`), which FerroSMART never makes: it
-reads the person from the ID Token. The driver therefore stops such a
-module once the login is accepted, and the suite records it
-`INTERRUPTED`. One configuration, `app/ferrosmart/oidf/ferrosmart-rp.toml`,
+a UserInfo request (`oidc core §5.3`): FerroSMART makes one after the code
+exchange whenever the provider names a `userinfo_endpoint`, refuses the
+login when its `sub` is not the ID Token's (`§5.3.2`), and lets its claims
+complete the ID Token's (#933). A module still waiting once the login is
+over is stopped, and the suite records it `INTERRUPTED`. One configuration, `app/ferrosmart/oidf/ferrosmart-rp.toml`,
 names no client authentication, and the driver adds the one the module
 fixes (13.22): `client_secret_basic` with the secret
 `app/ferrosmart/oidf/rp.json` registers, from a file, for the Basic
@@ -4566,17 +4569,16 @@ for every other module. The suite's runner never runs the two key-rotation
 modules (its own `ignored_modules`), and the lane records them as not run.
 
 **As the OpenID Provider**, the suite is the static client `oidf-suite`, a
-confidential symmetric client, and Keycloak is FerroSMART's upstream.
-FerroSMART has no UserInfo Endpoint, so every module of the Basic plan
-stops before its authorization request and the configuration module
-warns. The owner decided on 2026-11-19 (#650) that FerroSMART builds none:
-`oidc core §15.1` does not list it, `§15.2` requires it only of a Dynamic
-OP, and SMART App Launch 2.2.0 makes it a MAY. The modules would stop at
-the authorization request even with one, since they send neither the PKCE
-challenge nor the `aud` SMART App Launch 2.2.0 requires, so the Basic OP
-plan does not apply to a SMART authorization server and its 36 modules
-stay held as failures under #650. What `§15.1` requires of every OP is
-tested through the endpoints instead (13.25).
+confidential symmetric client, and Keycloak is FerroSMART's upstream; the
+suite's browser logs in at Keycloak's form with the person's password the
+lane makes for the run. FerroSMART serves the UserInfo Endpoint (13.8,
+#933, which reverses the decision of #650 that it builds none):
+`oidc core §5.3` defines it as the provider's source of the claims, and
+`discovery §3` RECOMMENDS `userinfo_endpoint`. A module whose authorization
+request carries no S256 PKCE challenge is refused, since SMART App Launch
+2.2.0 requires one of every app (13.6), and `expected.tsv` names that
+reason for each module it stops. What `§15.1` requires of every OP is also
+tested through the endpoints (13.25).
 
 What the lane found: the relying party accepted an ID Token without
 `iat` (#646) and refused one without `kid` whose key set holds a single
@@ -4638,6 +4640,14 @@ The tests are in `app/ferrosmart/tests/it/authorize/core_op.rs`.
 | `auth_time` | every ID Token carries `auth_time`, the upstream ID Token's own, or the time the upstream login returned when it names none; a refresh keeps it | `oidc core §15.1`, `§2` | `the_id_token_is_rs256_and_carries_the_upstream_login_s_auth_time` |
 | `max_age` | goes to the upstream login; an upstream `auth_time` older than `max_age`, or none, begins the upstream login again with `prompt=login`, once, and a login still older answers `login_required`; `max_age=0` is `prompt=login`; a value that is no number of seconds is `invalid_request` | `oidc core §15.1`, `§3.1.2.1`, `§3.1.2.6` | `an_upstream_login_older_than_max_age_is_begun_again_with_prompt_login` |
 | `acr_values` | an eIDAS URI it names is the level the login must reach, a miss answered `unmet_authentication_requirements`; the provider is asked for its values at that level; any other value is taken and ignored; the ID Token and the access token carry `acr`, and the documents name `acr_values_supported` (13.28) | `oidc core §15.1`, `§3.1.2.1`; `rfc9470 §5`, `§7` | `acr_values_naming_an_eidas_level_holds_the_login_to_it`, `display_locales_and_acr_values_are_taken` |
+
+`oidc core §15.1` does not list the UserInfo Endpoint, and `§15.2` requires
+it only of a Dynamic OP; FerroSMART serves it anyway (13.8, #933), because
+`§5.3` makes it the provider's source of the claims, `discovery §3`
+RECOMMENDS `userinfo_endpoint`, and the OpenID Foundation's Basic OP plan
+reads the claims there (13.24). It answers what the ID Token issued with
+the token carries, so it exposes nothing new. The tests are in
+`app/ferrosmart/tests/it/authorize/userinfo.rs`.
 
 ### 13.26 Upstream providers: SAML 2.0
 

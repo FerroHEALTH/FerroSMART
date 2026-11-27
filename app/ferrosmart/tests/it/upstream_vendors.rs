@@ -81,7 +81,9 @@ struct Contract {
 /// `v2-oauth2-auth-code-flow.md` (Request an access token with a
 /// `client_secret`) supports. The claims are those
 /// `id-token-claims-reference.md` (Payload claims) lists for a v2.0 ID
-/// Token, with the app roles and the `extn.` optional claim.
+/// Token, with the app roles and the `extn.` optional claim. Entra serves its
+/// UserInfo Endpoint at `https://graph.microsoft.com/oidc/userinfo`; the stub
+/// serves it under the tenant, since no case reaches the network.
 fn entra() -> Contract {
     Contract {
         example: ENTRA,
@@ -102,7 +104,7 @@ fn entra() -> Contract {
                 "scopes_supported": ["openid", "profile", "email", "offline_access"],
                 "subject_types_supported": ["pairwise"],
                 "id_token_signing_alg_values_supported": ["RS256"],
-                "userinfo_endpoint": "https://graph.microsoft.com/oidc/userinfo"
+                "userinfo_endpoint": format!("{tenant}/oidc/userinfo")
             })
         },
         jwks: |path| format!("{}/discovery/v2.0/keys", path.trim_end_matches("/v2.0")),
@@ -263,6 +265,27 @@ impl Provider {
             .expect(1)
             .mount(&self.server)
             .await;
+        // NOTE: OpenID Connect Core 1.0 §5.3, a provider naming a UserInfo Endpoint
+        // is asked for the claims about the ID Token's subject.
+        if let Some(endpoint) = (contract.metadata)(&self.issuer)
+            .get("userinfo_endpoint")
+            .and_then(Value::as_str)
+        {
+            let userinfo = Url::parse(endpoint).expect("a URL").path().to_owned();
+            Mock::given(matchers::method("GET"))
+                .and(matchers::path(userinfo))
+                .and(matchers::header(
+                    "authorization",
+                    "Bearer synthetic-upstream-access-token",
+                ))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({ "sub": contract.claims.get("sub") })),
+                )
+                .expect(1)
+                .mount(&self.server)
+                .await;
+        }
     }
 }
 

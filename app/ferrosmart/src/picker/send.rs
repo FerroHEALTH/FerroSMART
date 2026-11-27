@@ -178,6 +178,7 @@ async fn granted(
             roles: person.roles,
             acr: person.login.acr,
             dpop_jkt: None,
+            person_claims: None,
         })
         .await
         .map_err(|error| PickerError::Record(audit::RecordFailure::Store(error)))?;

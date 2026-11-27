@@ -213,6 +213,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(REVOKE_ROUTE, post(crate::revoke::revoke))
         .route(OPENID_CONFIGURATION_ROUTE, get(openid_configuration))
         .route(
+            crate::userinfo::USERINFO_ROUTE,
+            get(crate::userinfo::userinfo_get).post(crate::userinfo::userinfo_post),
+        )
+        .route(
             AUTHORIZE_ROUTE,
             get(authorize::request::authorize_get).post(authorize::request::authorize_post),
         )

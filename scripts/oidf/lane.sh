@@ -98,7 +98,7 @@ wanted_login() {
       oidcc-client-test-missing-iat | oidcc-client-test-missing-aud | oidcc-client-test-invalid-aud | \
       oidcc-client-test-idtoken-sig-none | oidcc-client-test-missing-sub | \
       oidcc-client-test-invalid-sig-rs256 | oidcc-client-test-invalid-sig-es256 | \
-      oidcc-client-test-invalid-iss)
+      oidcc-client-test-invalid-iss | oidcc-client-test-userinfo-invalid-sub)
       echo refused
       ;;
     oidcc-client-test-discovery-issuer-mismatch) echo no-start ;;
@@ -257,10 +257,12 @@ start_suite() {
   wait_for "the conformance suite" "$suite/api/runner/available"
 }
 
-# FerroSMART as the OpenID Provider, with Keycloak upstream. No module of
-# the suite reaches the login today (expected.tsv), so the person's
-# password is made and never used.
+# FerroSMART as the OpenID Provider, with Keycloak upstream. The person's
+# password is made for the run and handed to the suite's browser, which logs
+# in at Keycloak's form whenever a module's authorization request reaches it.
 start_provider() {
+  local password
+  password=$(openssl rand -hex 16)
   docker run -d --name oidf-lane-keycloak --network host --add-host "$host:127.0.0.1" \
     -v "$root/app/ferrosmart/examples/keycloak/ferrosmart-realm.json:/opt/keycloak/data/import/ferrosmart-realm.json:ro" \
     -v "$LANE_DIR/ca.crt:/opt/keycloak/lane-ca.pem:ro" \
@@ -268,7 +270,7 @@ start_provider() {
     -e KC_TRUSTSTORE_PATHS=/opt/keycloak/lane-ca.pem \
     -e "FERROSMART_KEYCLOAK_JWKS_URL=$issuer/upstream-jwks" \
     -e "FERROSMART_KEYCLOAK_REDIRECT_URI=$issuer/callback" \
-    -e "FERROSMART_KEYCLOAK_USER_PASSWORD=$(openssl rand -hex 16)" \
+    -e "FERROSMART_KEYCLOAK_USER_PASSWORD=$password" \
     -e "FERROSMART_KEYCLOAK_FHIR_USER=$issuer/fhir/Practitioner/example" \
     "$(pinned_image 'Keycloak test image')" start-dev --import-realm > /dev/null
   wait_for Keycloak http://localhost:8180/realms/ferrosmart/.well-known/openid-configuration
@@ -286,7 +288,9 @@ start_provider() {
   one=$(awk '$3 == "\"oidf-suite\"" && $4 == "client_secret" { print $5 }' "$LANE_DIR/apply.log")
   two=$(awk '$3 == "\"oidf-suite-2\"" && $4 == "client_secret" { print $5 }' "$LANE_DIR/apply.log")
   [ -n "$one" ] && [ -n "$two" ] || fail "FerroSMART issued the suite's clients no secret"
-  jq --arg one "$one" --arg two "$two" '.client.client_secret = $one | .client2.client_secret = $two' \
+  jq --arg one "$one" --arg two "$two" --arg password "$password" \
+    '.client.client_secret = $one | .client2.client_secret = $two
+      | (.browser[].tasks[].commands[] | select(.[2] == "password")) |= (.[3] = $password)' \
     "$lane/op.json" > "$LANE_DIR/op.json"
   SSL_CERT_FILE="$LANE_DIR/trust.pem" "${op[@]}" serve > "$LANE_DIR/ferrosmart-op.log" 2>&1 &
   smart=$!

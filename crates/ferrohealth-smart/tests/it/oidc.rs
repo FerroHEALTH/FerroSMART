@@ -57,6 +57,7 @@ async fn unauthenticated(key: &SigningKey) -> (Issuer, RelyingParty) {
                 "token_endpoint": format!("{uri}{TOKEN_PATH}"),
                 "end_session_endpoint": format!("{uri}/logout"),
                 "revocation_endpoint": format!("{uri}/revoke"),
+                "userinfo_endpoint": format!("{uri}/userinfo"),
                 "code_challenge_methods_supported": ["S256"]
             }),
         )
@@ -988,5 +989,209 @@ async fn a_private_key_jwt_client_sends_a_fresh_assertion_at_every_call() {
             .iter()
             .all(|request| !request.headers.contains_key("authorization")),
         "no secret beside the assertion"
+    );
+}
+
+/// Signs the console in at `issuer` with `client` and returns the sign-in.
+async fn sign_in(
+    issuer: &Issuer,
+    key: &SigningKey,
+    client: &RelyingParty,
+) -> ferrohealth_smart::oidc::SignedIn {
+    let request = client.authorization_request().expect("a sign-in is minted");
+    let pending = request.pending;
+    let token = id_token(issuer, key, pending.nonce());
+    mount_exchange(issuer, pending.verifier().expose(), &token).await;
+    client
+        .exchange(
+            &pending,
+            &Callback::granted("synthetic-code", pending.state()),
+        )
+        .await
+        .expect("the sign-in completes")
+}
+
+/// Mounts the UserInfo Endpoint answering the access token of
+/// [`mount_exchange`] with `response`.
+async fn mount_userinfo(issuer: &Issuer, response: ResponseTemplate) {
+    Mock::given(matchers::method("GET"))
+        .and(matchers::path("/userinfo"))
+        .and(matchers::header(
+            "authorization",
+            "Bearer synthetic-access-1",
+        ))
+        .respond_with(response)
+        .mount(&issuer.server)
+        .await;
+}
+
+// NOTE: OpenID Connect Core 1.0 §5.3.1, the access token as a bearer token in
+// the Authorization header; §5.3.2, the claims of the ID Token's subject.
+#[tokio::test]
+async fn userinfo_answers_the_claims_about_the_id_token_s_subject() {
+    let key = ec_key("op-1", Algorithm::Es256);
+    let (issuer, client) = provider(&key).await;
+    let signed_in = sign_in(&issuer, &key, &client).await;
+    mount_userinfo(
+        &issuer,
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "sub": "synthetic-operator", "email": "operator@example.org"
+        })),
+    )
+    .await;
+    let claims = client
+        .userinfo(&signed_in)
+        .await
+        .expect("the UserInfo request completes")
+        .expect("the provider names a UserInfo Endpoint");
+    assert_eq!(
+        Some(&serde_json::json!("operator@example.org")),
+        claims.get("email")
+    );
+}
+
+// NOTE: OpenID Connect Core 1.0 §5.3.2, a sub that is not the ID Token's means
+// the response values MUST NOT be used.
+#[tokio::test]
+async fn a_userinfo_response_about_another_subject_or_none_is_refused() {
+    let key = ec_key("op-1", Algorithm::Es256);
+    for body in [
+        serde_json::json!({ "sub": "synthetic-other", "email": "other@example.org" }),
+        serde_json::json!({ "email": "operator@example.org" }),
+    ] {
+        let (issuer, client) = provider(&key).await;
+        let signed_in = sign_in(&issuer, &key, &client).await;
+        mount_userinfo(&issuer, ResponseTemplate::new(200).set_body_json(body)).await;
+        let refused = client.userinfo(&signed_in).await;
+        assert!(
+            matches!(refused, Err(OidcError::UserInfoSubject)),
+            "{refused:?}"
+        );
+    }
+}
+
+// NOTE: OpenID Connect Core 1.0 §5.3.3 and RFC 6750 §3, the refusal's status
+// and the error of its challenge.
+#[tokio::test]
+async fn a_refused_userinfo_request_carries_its_status_and_challenge() {
+    let key = ec_key("op-1", Algorithm::Es256);
+    let (issuer, client) = provider(&key).await;
+    let signed_in = sign_in(&issuer, &key, &client).await;
+    mount_userinfo(
+        &issuer,
+        ResponseTemplate::new(401)
+            .insert_header("www-authenticate", "Bearer error=\"invalid_token\""),
+    )
+    .await;
+    match client.userinfo(&signed_in).await {
+        Err(OidcError::UserInfo { status, error }) => {
+            assert_eq!(http::StatusCode::UNAUTHORIZED, status);
+            assert_eq!(Some("invalid_token"), error.as_deref());
+        }
+        other => panic!("a refusal: {other:?}"),
+    }
+}
+
+// NOTE: OpenID Connect Core 1.0 §5.3.2, a body that is no JSON object is no
+// UserInfo Response.
+#[tokio::test]
+async fn a_userinfo_body_that_is_no_json_object_is_refused() {
+    let key = ec_key("op-1", Algorithm::Es256);
+    for body in [
+        "[\"synthetic-operator\"]",
+        "not json",
+        "{\"sub\":\"a\",\"sub\":\"b\"}",
+    ] {
+        let (issuer, client) = provider(&key).await;
+        let signed_in = sign_in(&issuer, &key, &client).await;
+        mount_userinfo(
+            &issuer,
+            ResponseTemplate::new(200).set_body_raw(body, "application/json"),
+        )
+        .await;
+        let refused = client.userinfo(&signed_in).await;
+        assert!(
+            matches!(refused, Err(OidcError::UserInfoBody)),
+            "{refused:?}"
+        );
+    }
+}
+
+// NOTE: OpenID Connect Core 1.0 §5.3.2, a signed response is a JWT with the
+// provider as iss and the client in aud, checked against the provider's keys.
+#[tokio::test]
+async fn a_signed_userinfo_response_is_checked_against_the_provider_s_keys() {
+    let key = ec_key("op-1", Algorithm::Es256);
+    let (issuer, client) = provider(&key).await;
+    let signed_in = sign_in(&issuer, &key, &client).await;
+    let mut header = Header::new(key.alg);
+    header.kid = Some(key.kid.clone());
+    let signed = mint_with(
+        &key,
+        &header,
+        &serde_json::json!({
+            "iss": issuer.uri(), "aud": CLIENT, "sub": "synthetic-operator",
+            "email": "operator@example.org"
+        }),
+    );
+    mount_userinfo(
+        &issuer,
+        ResponseTemplate::new(200).set_body_raw(signed, "application/jwt"),
+    )
+    .await;
+    let claims = client
+        .userinfo(&signed_in)
+        .await
+        .expect("the signed response verifies")
+        .expect("the provider names a UserInfo Endpoint");
+    assert_eq!(
+        Some(&serde_json::json!("operator@example.org")),
+        claims.get("email")
+    );
+
+    let (issuer, client) = provider(&key).await;
+    let signed_in = sign_in(&issuer, &key, &client).await;
+    let foreign = mint_with(
+        &key,
+        &header,
+        &serde_json::json!({
+            "iss": "https://other.example.org", "aud": CLIENT, "sub": "synthetic-operator"
+        }),
+    );
+    mount_userinfo(
+        &issuer,
+        ResponseTemplate::new(200).set_body_raw(foreign, "application/jwt"),
+    )
+    .await;
+    let refused = client.userinfo(&signed_in).await;
+    assert!(
+        matches!(refused, Err(OidcError::UserInfoSignature { .. })),
+        "{refused:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_provider_without_a_userinfo_endpoint_answers_none() {
+    let key = ec_key("op-1", Algorithm::Es256);
+    let issuer = Issuer::start(&[&key]).await;
+    let http = Http::new(Duration::from_secs(5)).expect("the engine builds");
+    let discovered = Provider::discover(&http, &issuer.uri())
+        .await
+        .expect("the provider is discovered");
+    assert_eq!(None, discovered.userinfo_endpoint());
+    let client = RelyingParty::new(
+        http,
+        discovered,
+        CLIENT,
+        Url::parse(REDIRECT).expect("a URL"),
+    )
+    .with_client_secret(SecretString::from("synthetic-secret"));
+    let signed_in = sign_in(&issuer, &key, &client).await;
+    assert!(
+        client
+            .userinfo(&signed_in)
+            .await
+            .expect("no request is made")
+            .is_none()
     );
 }

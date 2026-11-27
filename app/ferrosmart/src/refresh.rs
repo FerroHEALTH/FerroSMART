@@ -321,6 +321,7 @@ pub(crate) async fn open(
             roles: &code.roles,
             acr: code.acr,
             dpop_jkt: presented.refresh_key(client).as_deref(),
+            person_claims: holds(&code.scope, "openid").then_some(&code.person_claims),
         })
         .await
         .map_err(|error| server_error("the grant could not be recorded", &error))?;
