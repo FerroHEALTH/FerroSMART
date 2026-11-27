@@ -11,7 +11,40 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.36.0] - Unreleased
+## [0.36.0] - 2026-11-27
+
+The relying party's UserInfo request, ML-DSA DPoP keys and the shared
+`post_quantum_only` switch. `ferrohealth-authz` 0.29.0 and
+`ferrohealth-session` 0.33.0 follow it.
+
+### Added
+
+- `RelyingParty::userinfo`, the relying party's UserInfo request (OpenID
+  Connect Core 1.0 §5.3): the access token as a bearer token with `GET`, a
+  JSON answer or a signed one checked against the provider's keys, and its
+  `sub` held to the ID Token's (§5.3.2), with `Provider::userinfo_endpoint`
+  and the `OidcError` variants `UserInfo`, `UserInfoBody`,
+  `UserInfoSignature` and `UserInfoSubject` (#933).
+- `client::dpop::DpopKey::from_pem` reads an ML-DSA-44, ML-DSA-65 or
+  ML-DSA-87 private key (RFC 9881 §6) beside the P-256 and P-384 keys, and
+  signs its proofs with that parameter set, the `AKP` public key in the
+  header `jwk` (RFC 9964, RFC 9449 §4.2) (#944).
+- `[auth] post_quantum_only`: on, every JWT issuer's `algorithms` and
+  `[auth.dpop] algorithms` left at their default become ML-DSA-44,
+  ML-DSA-65 and ML-DSA-87 (RFC 9964 §5), an explicit ML-DSA list stays, and
+  a list naming any other algorithm refuses the section with
+  `ConfigError::ClassicalAlgorithm`, naming its key. `jws::algorithm::ML_DSA`
+  holds the three parameter sets. A product that carries its own copy of
+  this rule deletes it (#945).
+
+### Changed
+
+- Breaking: `ServerMetadata` carries `userinfo_endpoint` (OpenID Connect
+  Discovery 1.0 §3); a product that builds the struct by its fields adds
+  it or keeps `..ServerMetadata::default()` (#933).
+- Breaking: `AuthSection` carries `post_quantum_only`; a product that
+  builds the struct by its fields adds it or keeps
+  `..AuthSection::default()` (#945).
 
 ## [0.35.0] - 2026-11-25
 
@@ -2663,7 +2696,8 @@ it issues no token and holds no key that signs one.
   `TODO(#N)` guards, the issue and pull request templates, the labels, the
   rulesets and the `crates-io` environment.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.35.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.36.0...HEAD
+[0.36.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.35.0...ferrohealth-smart-v0.36.0
 [0.35.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.34.0...ferrohealth-smart-v0.35.0
 [0.34.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.1...ferrohealth-smart-v0.34.0
 [0.33.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.0...ferrohealth-smart-v0.33.1
