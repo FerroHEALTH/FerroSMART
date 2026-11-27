@@ -51,7 +51,13 @@ pub async fn par(State(state): State<Arc<AppState>>, headers: HeaderMap, body: B
 /// (RFC 9126 §2.1, §2.2).
 async fn push(state: &AppState, headers: &HeaderMap, body: &[u8]) -> Result<Response, Refusal> {
     let form = read_form(headers, body)?;
-    let client = crate::token::grants::identify(state, headers, &form).await?;
+    let client = crate::token::grants::identify(
+        state,
+        headers,
+        &form,
+        crate::token::assertion::Endpoint::Par,
+    )
+    .await?;
     // NOTE: RFC 9126 §2.1, `client_id` is required, and the request is the
     // authenticated client's own.
     if form.get("client_id") != Some(client.client_id.as_str()) {
