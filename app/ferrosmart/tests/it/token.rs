@@ -394,11 +394,41 @@ async fn an_rs384_assertion_typed_by_rfc_10070_naming_the_issuer_is_admitted() {
     server.stop().await;
 }
 
+// NOTE: FAPI 2.0 Security Profile §5.3.2.1, accept an iat or nbf up to 10 seconds
+// ahead, refuse one more than 60 seconds ahead.
+#[tokio::test]
+async fn an_assertion_dated_in_the_future_is_refused() {
+    let server = Server::start(None, Algorithm::ES384).await;
+    let now = jiff::Timestamp::now().as_second();
+    for (name, ahead, admitted) in [
+        ("iat", 10, true),
+        ("nbf", 10, true),
+        ("iat", 61, false),
+        ("nbf", 61, false),
+    ] {
+        let mut claims = valid_claims();
+        claims[name] = json!(now + ahead);
+        let answer = server
+            .post(&form(
+                &server.assertion("JWT", &claims),
+                "system/Patient.rs",
+            ))
+            .await;
+        if admitted {
+            assert_eq!(StatusCode::OK, answer.0, "{name} {ahead}: {:?}", answer.2);
+        } else {
+            assert_eq!("invalid_client", refused(&answer), "{name} {ahead}");
+        }
+    }
+    server.stop().await;
+}
+
 #[tokio::test]
 async fn the_assertion_s_audience_is_one_string_naming_this_server() {
     let server = Server::start(None, Algorithm::ES384).await;
-    // NOTE: docs/architecture.md §13.6 item 1, RFC 10070 §4 "sole value".
+    // NOTE: RFC 10070 §4 "sole value", and §5, which drops the PAR endpoint URL.
     for aud in [
+        json!(format!("{ISSUER}/par")),
         json!([TOKEN_URL]),
         json!([TOKEN_URL, ISSUER]),
         json!("https://other.example.org/token"),

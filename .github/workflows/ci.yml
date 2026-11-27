@@ -539,6 +539,7 @@ jobs:
             ${{ runner.temp }}/oidf-lane/*.log
             ${{ runner.temp }}/oidf-lane/*.tsv
             ${{ runner.temp }}/oidf-lane/plan-*.json
+            ${{ runner.temp }}/oidf-lane/log-*.json
           if-no-files-found: ignore
       # The Inferno SMART App Launch lane (#520): the kit's STU 2.2 suite
       # against FerroSMART, with FerroEHR as the resource server

@@ -722,3 +722,49 @@ async fn an_administered_app_s_ehr_launch_covers_a_professional_s_patient_scopes
     );
     smart.stop().await;
 }
+
+// NOTE: RFC 9126 §2 as RFC 10070 §5 replaces it, a client assertion at the PAR
+// endpoint names the issuer as its sole audience; the token URL authenticates nobody there.
+#[tokio::test]
+async fn a_pushed_request_s_assertion_names_the_issuer_alone() {
+    let smart = Smart::start().await;
+    let token_url = format!("{ISSUER}/token");
+    let par_url = format!("{ISSUER}/par");
+    for (aud, error) in [
+        (token_url.as_str(), "invalid_client"),
+        (par_url.as_str(), "invalid_client"),
+        (ISSUER, "unauthorized_client"),
+    ] {
+        let now = jiff::Timestamp::now().as_second();
+        let mut bytes = [0_u8; 12];
+        aws_lc_rs::rand::fill(&mut bytes).expect("draws");
+        let jti = bytes.iter().fold(String::new(), |mut id, byte| {
+            use std::fmt::Write as _;
+            write!(id, "{byte:02x}").expect("a String takes every write");
+            id
+        });
+        let assertion = smart
+            .ehr
+            .sign(
+                "JWT",
+                &json!({"iss": "ehr", "sub": "ehr", "aud": aud, "exp": now + 120, "jti": jti}),
+            )
+            .expect("signs");
+        let (_, _, body) = smart
+            .post(
+                "/par",
+                &[
+                    ("client_assertion_type", JWT_BEARER),
+                    ("client_assertion", &assertion),
+                    ("client_id", "ehr"),
+                    ("response_type", "code"),
+                    ("redirect_uri", REDIRECT),
+                ],
+                None,
+            )
+            .await;
+        let body: Value = serde_json::from_str(&body).expect("JSON");
+        assert_eq!(json!(error), body["error"], "{aud}: {body}");
+    }
+    smart.stop().await;
+}

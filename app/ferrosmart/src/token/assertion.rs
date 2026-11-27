@@ -39,8 +39,25 @@ pub(crate) const ALGORITHMS: [Algorithm; 8] = [
     Algorithm::MlDsa87,
 ];
 
-/// Authenticates the client of `form` by its JWT assertion.
-pub(crate) async fn authenticate(state: &AppState, form: &Params) -> Result<Client, Refusal> {
+/// The endpoint a client assertion is presented at, which decides the
+/// audience it may name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Endpoint {
+    /// The token endpoint and the endpoints that authenticate a client as it
+    /// does: the issuer identifier or the token URL.
+    Token,
+    /// The pushed authorization request endpoint: the issuer identifier
+    /// alone (RFC 9126 §2 as RFC 10070 §5 replaces it).
+    Par,
+}
+
+/// Authenticates the client of `form` by its JWT assertion presented at
+/// `endpoint`.
+pub(crate) async fn authenticate(
+    state: &AppState,
+    form: &Params,
+    endpoint: Endpoint,
+) -> Result<Client, Refusal> {
     if form.get("client_assertion_type") != Some(JWT_BEARER) {
         return Err(Refusal::client(
             "the client_assertion_type is not jwt-bearer",
@@ -62,10 +79,12 @@ pub(crate) async fn authenticate(state: &AppState, form: &Params) -> Result<Clie
             "the client_assertion's algorithm is not admitted",
         ));
     }
-    if !header
+    // NOTE: RFC 10070 §3.2, "it is NOT RECOMMENDED for servers to reject JWTs that do
+    // not have explicit types"; a typ that is present names a client assertion.
+    if header
         .typ
         .as_deref()
-        .is_some_and(|typ| ASSERTION_TYPES.contains(&typ))
+        .is_some_and(|typ| !ASSERTION_TYPES.contains(&typ))
     {
         return Err(Refusal::client(
             "the client_assertion's typ is not admitted",
@@ -109,7 +128,7 @@ pub(crate) async fn authenticate(state: &AppState, form: &Params) -> Result<Clie
         }
     }
     let key = key_of(state, &client, kid, algorithm).await?;
-    let claims = verified(state, &jws, &key)?;
+    let claims = verified(state, &jws, &key, endpoint)?;
     if claims.get("sub").and_then(Value::as_str) != Some(client.client_id.as_str()) {
         return Err(Refusal::client("the client_assertion's sub is not its iss"));
     }
@@ -185,9 +204,14 @@ pub(crate) async fn key_of(
     Err(Refusal::client("no key of the client matches the kid"))
 }
 
-/// Returns the claims of `jws` once its signature, `exp`, `iss` and `aud`
-/// hold (RFC 7523 §3; `docs/architecture.md` §13.6 item 1).
-fn verified(state: &AppState, jws: &Unverified<'_>, key: &Jwk) -> Result<Value, Refusal> {
+/// Returns the claims of `jws` once its signature, `exp`, `iat`, `nbf`,
+/// `iss` and `aud` hold for `endpoint` (RFC 7523 §3).
+fn verified(
+    state: &AppState,
+    jws: &Unverified<'_>,
+    key: &Jwk,
+    endpoint: Endpoint,
+) -> Result<Value, Refusal> {
     let claims = jws
         .verify_claims(key)
         .map_err(|_refused| Refusal::client("the client_assertion does not verify"))?;
@@ -208,16 +232,29 @@ fn verified(state: &AppState, jws: &Unverified<'_>, key: &Jwk) -> Result<Value, 
     {
         return Err(Refusal::client("the client_assertion has expired"));
     }
-    // NOTE: RFC 10070 §4, a sole audience value; SMART App Launch 2.2.0 names the
-    // token URL, the issuer identifier is admitted beside it (13.6 item 1), and RFC
-    // 9126 §2 has the PAR endpoint URL admitted too.
+    // NOTE: FAPI 2.0 Security Profile §5.3.2.1, a JWT whose iat or nbf is more than
+    // 60 seconds ahead is refused; the leeway keeps within the 10 it must accept.
+    let ahead = now.saturating_add_unsigned(LEEWAY_SECONDS);
+    let future = ["iat", "nbf"].iter().any(|name| {
+        claims
+            .get(*name)
+            .is_some_and(|time| time.as_i64().is_none_or(|time| time > ahead))
+    });
+    if future {
+        return Err(Refusal::client(
+            "the client_assertion is dated in the future",
+        ));
+    }
+    // NOTE: RFC 10070 §4 and §5, the issuer as the sole audience; SMART App Launch
+    // 2.2.0 names the token URL at the token endpoint, admitted there beside it.
     let settings = state.settings();
     let token_url = settings.endpoint(TOKEN_ROUTE);
-    let par_url = settings.endpoint(crate::authorize::par::PAR_ROUTE);
     let admitted = claims
         .get("aud")
         .and_then(Value::as_str)
-        .is_some_and(|aud| aud == token_url || aud == par_url || aud == settings.issuer);
+        .is_some_and(|aud| {
+            aud == settings.issuer || (endpoint == Endpoint::Token && aud == token_url)
+        });
     if !admitted {
         return Err(Refusal::client(
             "the client_assertion's aud is not this server",

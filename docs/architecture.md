@@ -2585,7 +2585,7 @@ document (13.8).
 | Key resolution: a `jku` header must equal the registered JWK Set URL, otherwise the registered keys; exactly one key matching `kid` and the `kty` of `alg` | SHALL | same | 2 |
 | A client's JWK Set is cached no longer than its `Cache-Control` allows | SHALL NOT exceed; SHOULD cache | same | 2 |
 | Any authentication failure answers `invalid_client` | SHALL | same; `rfc6749 §5.2` | 2 |
-| The assertion's `aud` is a single string equal to the token endpoint URL or the issuer identifier; `typ` is `JWT` or `client-authentication+jwt` (13.6 item 1, a recorded deviation from `rfc10070 §4`) | SHALL (SMART); MUST (RFC 10070) | `smart client-confidential-asymmetric`, Request and Signature Verification; `rfc7523 §3`; `rfc10070 §4` | 2 |
+| The assertion's `aud` is a single string equal to the token endpoint URL or the issuer identifier, and at the PAR endpoint the issuer alone (`rfc10070 §5`); `typ` is `JWT`, `client-authentication+jwt` or absent (13.6 item 1, a recorded deviation from `rfc10070 §4`) | SHALL (SMART); MUST (RFC 10070) | `smart client-confidential-asymmetric`, Request and Signature Verification; `rfc7523 §3`; `rfc10070 §4` | 2 |
 | The symmetric profile is not used for Backend Services | SHALL NOT | `smart client-confidential-symmetric`, Profile audience and scope | 2 |
 | Dynamic client registration is encouraged, not required | MAY | `smart app-launch`, Register App with EHR; `rfc7591 §3` | after 9 |
 
@@ -2717,8 +2717,15 @@ specification governs.
    (`rfc7523 §3` item 3, "a value that identifies the authorization server";
    `rfc10070 §4`), each compared by simple string comparison, and refuses an
    array and every other value (`rfc10070 §4`, "sole value"). It accepts
-   `typ` `JWT` (SMART 2.2) and `client-authentication+jwt` (`rfc10070 §4`)
-   and refuses an assertion with no `typ` or another one. This is fixed
+   `typ` `JWT` (SMART 2.2) and `client-authentication+jwt` (`rfc10070 §4`),
+   and an assertion with no `typ`, which `rfc10070` §3.2 does not
+   recommend refusing and the FAPI 2.0 plan of the OpenID Foundation sends
+   (#966); it refuses any other `typ`. At the pushed authorization
+   request endpoint, which SMART 2.2 does not define, the issuer is the
+   only audience accepted: `rfc10070 §5` replaces the `rfc9126 §2`
+   paragraph that let the token URL and the PAR URL stand there (#966). An
+   `iat` or `nbf` more than 30 seconds ahead is refused, within FAPI 2.0
+   §5.3.2.1 (accept up to 10 seconds, refuse past 60). This is fixed
    behaviour with no setting. Accepting the token URL deviates from
    `rfc10070 §4`'s server MUST; FerroHEALTH/FerroSMART#528 is the upstream
    report. `ferrohealth-smart`'s own client follows the same reading

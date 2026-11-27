@@ -15,7 +15,7 @@ use crate::discovery::TOKEN_ROUTE;
 use crate::form::Params;
 use crate::server::AppState;
 
-use super::assertion::authenticate;
+use super::assertion::{Endpoint, authenticate};
 use super::mint::{Authentication, Grant, Identity, mint};
 use super::sender::{Confirmation, Presented};
 use super::{Issued, Refusal, server_error};
@@ -31,7 +31,7 @@ pub(super) async fn client_credentials(
     form: &Params,
     presented: &Presented,
 ) -> Result<Issued, Refusal> {
-    let client = authenticate(state, form).await?;
+    let client = authenticate(state, form, Endpoint::Token).await?;
     let confirmation = presented.bind(&client)?;
     may_use(&client, GrantType::ClientCredentials)?;
     let scope = granted_scope(&client, form.get("scope"))?;
@@ -229,7 +229,7 @@ pub(crate) async fn admitted(
     presented: &Presented,
     grant: GrantType,
 ) -> Result<(Client, Confirmation), Refusal> {
-    let client = identify(state, headers, form).await?;
+    let client = identify(state, headers, form, Endpoint::Token).await?;
     may_use(&client, grant)?;
     let confirmation = presented.bind(&client)?;
     Ok((client, confirmation))
@@ -248,17 +248,18 @@ pub(crate) fn may_use(client: &Client, grant: GrantType) -> Result<(), Refusal> 
 /// (RFC 6749 §2.3.1) or its assertion, or a registered public client named
 /// by `client_id`, which cannot
 /// authenticate (RFC 6749 §2.1, §3.2.1; SMART App Launch 2.2.0, Refresh
-/// access token, Request).
+/// access token, Request), at `endpoint`.
 pub(crate) async fn identify(
     state: &AppState,
     headers: &http::HeaderMap,
     form: &Params,
+    endpoint: Endpoint,
 ) -> Result<Client, Refusal> {
     if let Some(presented) = super::secret::presented(headers, form)? {
         return super::secret::authenticate(state, presented).await;
     }
     if form.get("client_assertion").is_some() || form.get("client_assertion_type").is_some() {
-        return authenticate(state, form).await;
+        return authenticate(state, form, endpoint).await;
     }
     let client_id = form
         .get("client_id")
