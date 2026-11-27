@@ -559,3 +559,30 @@ async fn a_resource_server_takes_tokens_in_each_algorithm_the_pool_signs() {
         server.stop().await;
     }
 }
+
+// NOTE: RFC 10070 §3.2, it is NOT RECOMMENDED for servers to reject a client
+// assertion that carries no explicit typ.
+#[tokio::test]
+async fn a_client_assertion_without_typ_authenticates() {
+    use ferrohealth_smart::jws::compact::Header;
+    use ferrohealth_smart::jws::key::{PrivateKey, SigningKey};
+    let server = Server::with_client("RS256", crate::support::p256_key).await;
+    let pem = std::fs::read(server._keys.dir.path().join("client.pem")).expect("the key reads");
+    let key = SigningKey::new(
+        PrivateKey::from_pem(&pem).expect("a P-256 key"),
+        Algorithm::Es256,
+    )
+    .expect("a signing key");
+    let mut header = Header::new(Algorithm::Es256);
+    header.kid = Some(String::from("client-1"));
+    let now = jiff::Timestamp::now().as_second();
+    let untyped = ferrohealth_smart::jws::compact::encode(
+        &header,
+        &json!({"iss": "export", "sub": "export", "aud": TOKEN_URL, "exp": now + 60, "jti": unique()}),
+        &key,
+    )
+    .expect("signs");
+    let (status, body) = server.grant(&untyped).await;
+    assert_eq!(StatusCode::OK, status, "{body}");
+    server.stop().await;
+}

@@ -62,10 +62,12 @@ pub(crate) async fn authenticate(state: &AppState, form: &Params) -> Result<Clie
             "the client_assertion's algorithm is not admitted",
         ));
     }
-    if !header
+    // NOTE: RFC 10070 §3.2, "it is NOT RECOMMENDED for servers to reject JWTs that do
+    // not have explicit types"; a typ that is present names a client assertion.
+    if header
         .typ
         .as_deref()
-        .is_some_and(|typ| ASSERTION_TYPES.contains(&typ))
+        .is_some_and(|typ| !ASSERTION_TYPES.contains(&typ))
     {
         return Err(Refusal::client(
             "the client_assertion's typ is not admitted",
