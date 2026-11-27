@@ -51,9 +51,13 @@ PostgreSQL connection of `sqlx`. Tests (`app/ferrosmart/tests/it/post_quantum.rs
 show the listener and each of those clients agreeing on X25519MLKEM768 with
 a peer that offers it, and on X25519 with a peer that offers only that.
 
-FerroSMART signs a client's access and ID tokens with ML-DSA-65 when the
-client's registration names it, and accepts client assertions and signed
-launches signed with ML-DSA by an `AKP` key (RFC 9964). RS256 stays beside
+FerroSMART signs an access token with ML-DSA-65 when its resource server's
+`access_token_signing_alg` names it, and an ID Token when the client's
+registration does. It accepts client assertions, signed launches and DPoP
+proofs signed with ML-DSA by an `AKP` key, signs its own Backend Services
+assertions with ML-DSA when `[ferrosmart.backend] algorithm` names it, and
+signs an upstream client assertion with ML-DSA when the provider lists it
+(RFC 9964). RS256 stays beside
 it, since RFC 9068 §2.1 has an authorization server support it, and RS384
 and ES384 stay for client assertions, which SMART App Launch 2.2.0
 requires. The certificate signatures that authenticate a TLS peer, the
@@ -98,13 +102,18 @@ The TLS certificate authentication row belongs to `ferrohealth-server`
 | TLS 1.2 key exchange where min_version lowers the minimum | ECDHE over X25519, P-256 or P-384 | no | the eHDSI trust model's: Cryptographic Algorithms 9.0.0 §3 requires at least TLS 1.2, and RFC 10024 defines the hybrid groups for TLS 1.3 alone | `ferrohealth-server tls (protocol_versions)` |
 | TLS server and client certificate authentication | ECDSA, RSA or Ed25519, as the operator's certificates hold | no | no standard yet | `ferrohealth-server tls, ferrohealth-server tls_client` |
 | TLS record protection | AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305 | yes | NIST IR 8547 4.1.3 | `ferrohealth-server tls` |
-| Access and ID tokens of a client registered for ML-DSA-65, and their keys in the JWK Set | ML-DSA-65 | yes | RFC 9964 | `app/ferrosmart/src/signing.rs, app/ferrosmart/src/token/mint.rs` |
-| Access and ID tokens of every other client, and their keys in the JWK Set | RS256 | no | RFC 9964 | `app/ferrosmart/src/signing.rs, app/ferrosmart/src/token/mint.rs` |
+| Access tokens for a resource server set to ML-DSA-65, and their key in the JWK Set | ML-DSA-65 | yes | RFC 9964 | `app/ferrosmart/src/config/settings.rs, app/ferrosmart/src/token/mint.rs` |
+| ID tokens of a client registered for ML-DSA-65 | ML-DSA-65 | yes | RFC 9964 | `app/ferrosmart/src/signing.rs, app/ferrosmart/src/token/mint.rs` |
+| Access tokens for every other resource server, and their keys in the JWK Set | RS256 | no | the deployment's: the resource server's access_token_signing_alg, RS256 by default, which RFC 9068 §2.1 has every resource server verify | `app/ferrosmart/src/config/settings.rs, app/ferrosmart/src/token/mint.rs` |
+| ID tokens of every other client | RS256 | no | the client's: its id_token_signed_response_alg, RS256 by default (OpenID Connect Dynamic Client Registration 1.0 §2) | `app/ferrosmart/src/signing.rs, app/ferrosmart/src/token/mint.rs` |
 | Client assertions and signed launches FerroSMART accepts by an AKP key | ML-DSA-44, ML-DSA-65, ML-DSA-87 | yes | RFC 9964 | `app/ferrosmart/src/token/assertion.rs, app/ferrosmart/src/launch/signed.rs` |
 | Client assertions and signed launches FerroSMART accepts by an RSA or EC key | RS384, ES384 | no | SMART App Launch 2.2.0's: Client Authentication: Asymmetric has the server validate RS384 or ES384, which every client supports; RFC 9964 serves a client with an AKP key | `app/ferrosmart/src/token/assertion.rs, app/ferrosmart/src/launch/signed.rs` |
-| DPoP proof verification at the token endpoint | RS256, RS384, PS256, PS384, ES256, ES384 | no | RFC 9964 | `app/ferrosmart/src/token/sender.rs, crates/ferrohealth-smart/src/sender/proof.rs` |
-| Backend Services assertions FerroSMART signs | ES384 or RS384 | no | RFC 9964 | `app/ferrosmart/src/config/settings.rs` |
-| Upstream OpenID Provider client assertions | RS256 by default, as the provider's registration names | no | RFC 9964 | `app/ferrosmart/src/upstream/mod.rs` |
+| DPoP proof verification by an AKP key | ML-DSA-44, ML-DSA-65, ML-DSA-87 | yes | RFC 9964 | `app/ferrosmart/src/token/sender.rs, app/ferrosmart/src/userinfo.rs, crates/ferrohealth-smart/src/sender/proof.rs` |
+| DPoP proof verification by an RSA or EC key | RS256, RS384, PS256, PS384, ES256, ES384 | no | the client's: it signs with its own key (RFC 9449 §4.2) | `app/ferrosmart/src/token/sender.rs, app/ferrosmart/src/userinfo.rs, crates/ferrohealth-smart/src/sender/proof.rs` |
+| Backend Services assertions FerroSMART signs with an ML-DSA key | ML-DSA-44, ML-DSA-65 or ML-DSA-87 | yes | RFC 9964 | `app/ferrosmart/src/config/settings.rs` |
+| Backend Services assertions FerroSMART signs with an RSA or EC key | ES384 or RS384 | no | the deployment's: [ferrosmart.backend] algorithm, ES384 by default | `app/ferrosmart/src/config/settings.rs` |
+| Upstream OpenID Provider client assertions by an ML-DSA key the provider lists | ML-DSA-44, ML-DSA-65 or ML-DSA-87 | yes | RFC 9964 | `app/ferrosmart/src/upstream/mod.rs, app/ferrosmart/src/config/settings.rs` |
+| Upstream OpenID Provider client assertions by an RSA or EC key | RS256 by default, as the provider's registration names | no | the provider's: the algorithm its registration names, held to its token_endpoint_auth_signing_alg_values_supported (RFC 8414 §2) | `app/ferrosmart/src/upstream/mod.rs` |
 | Upstream ID token verification | RS256 to PS512, ES256, ES384, EdDSA | no | the upstream provider's: OpenID Connect Core 1.0 §3.1.3.7 items 6 and 7, the alg it signs with, RS256 by default; RFC 9964 once it signs ML-DSA | `crates/ferrohealth-smart/src/oidc.rs` |
 | SAML assertion and metadata signatures (XML Signature) | RSA, ECDSA P-256, ECDSA P-384 | no | no standard yet | `app/ferrosmart/src/saml/keys.rs, app/ferrosmart/src/saml/dsig.rs, crates/ferrohealth-smart/src/federation/assertion/dsig.rs` |
 | SAML encrypted assertion key transport (XML Encryption) | RSA-OAEP | no | no standard yet | `app/ferrosmart/src/saml/xenc.rs` |

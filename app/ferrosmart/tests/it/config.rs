@@ -820,6 +820,9 @@ fn a_backend_client_outside_the_asymmetric_profile_is_refused() {
     let rsa = crate::support::rsa_key(keys.dir.path(), "backend-rsa.pem")
         .display()
         .to_string();
+    let pq = crate::support::ml_dsa_key(keys.dir.path(), "backend-ml-dsa.pem")
+        .display()
+        .to_string();
     let token = keys.current.display().to_string();
     for (table, refused) in [
         (
@@ -832,7 +835,13 @@ fn a_backend_client_outside_the_asymmetric_profile_is_refused() {
             format!(
                 "algorithm = \"ES256\"\n[ferrosmart.backend.keys]\nprivate_key_file = {ec:?}\n"
             ),
-            Some("`algorithm` is `ES384` or `RS384`"),
+            Some("`algorithm` is `ES384`, `RS384`, `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87`"),
+        ),
+        (
+            format!(
+                "algorithm = \"ML-DSA-65\"\n[ferrosmart.backend.keys]\nprivate_key_file = {pq:?}\n"
+            ),
+            None,
         ),
         (
             format!(

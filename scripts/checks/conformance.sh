@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: Cadasto B.V.
 # SPDX-License-Identifier: BUSL-1.1
-# The README conformance badges (#859, #946): one shields.io endpoint badge
+# The README conformance badges (#859, #946, #950): one shields.io endpoint badge
 # (https://shields.io/badges/endpoint-badge) per self-tested specification,
 # written under conformance/badges/ from the files the tests hold FerroSMART
 # to. No specification governs the badges: our own design.
@@ -15,11 +15,15 @@
 #   openid4vp.json         app/ferrosmart/oidf/expected.tsv: of the verifier
 #                          plans' negative modules (the login refused), those
 #                          the suite passes
+#   openid4vp-accepted.json
+#                          the same file: of the verifier plans' positive
+#                          modules (a valid presentation), those FerroSMART
+#                          accepted and the suite did not fail (PASSED, or
+#                          REVIEW, which the suite gives a module with an
+#                          image for its reviewers)
 #   openid-connect-op.json app/ferrosmart/oidf/expected.tsv: of the modules
 #                          of the two OpenID Provider plans, those the
-#                          suite passes (PASSED or WARNING), with every
-#                          other result counted and the issues the rows
-#                          name
+#                          suite passes (PASSED or WARNING)
 #   openid-connect-rp.json the same, of the two relying party plans
 #   smart-app-launch.json  app/ferrosmart/inferno/smart_stu2_2_expected.json:
 #                          the Inferno tests that pass, of all run and not
@@ -30,6 +34,11 @@
 #                          table of docs/post-quantum.md, and each file a
 #                          row's location names exists
 #
+# A badge shows only its count, in the family's length limits; docs/conformance.md,
+# written from the same files, breaks every count down: each result of
+# the OpenID Foundation plans, the REVIEW modules and the issues the rows
+# name (owner decision, 2026-11-27).
+#
 # Each label names the exact version it was tested against, and no label
 # claims more than a self-test: "certified", "compliant" and "conformant"
 # are refused, in a badge and in the README's badge text. Every badge, and
@@ -38,8 +47,8 @@
 # badges count (owner decision, 2026-11-25). A badge's colour follows its
 # count: green when all pass, yellow when some do, red when none do.
 #
-#   scripts/checks/conformance.sh             rewrite the badges
-#   scripts/checks/conformance.sh --check     fail when a badge or a label
+#   scripts/checks/conformance.sh             rewrite the badges and the page
+#   scripts/checks/conformance.sh --check     fail when a badge, the page or a label
 #                                             disagrees (CI)
 #   scripts/checks/conformance.sh --self-test
 #
@@ -126,45 +135,58 @@ pq_locations() {
   [[ "$failures" -eq 0 ]]
 }
 
-# Prints the badge message of the modules of expected.tsv $1 whose plan
-# matches the regular expression $2: the modules passed (PASSED, or WARNING,
-# which the suite passes with a remark) of all, then each other result by
-# count, then the issues the rows that did not pass name.
-oidf_message() {
+# Prints, for the modules of expected.tsv $1 whose plan matches the regular
+# expression $2, the line "<passed> <total>" (passed: PASSED, or WARNING,
+# which the suite passes with a remark), then one "<result> <count>" line
+# per result in the suite's order, then "issues" and the issues the rows
+# that did not pass name, ascending.
+oidf_counts() {
   rows "$1" | awk -F'\t' -v plans="$2" '
     $1 ~ plans {
       total++
       if ($3 == "PASSED" || $3 == "WARNING") passed++
-      if ($3 == "WARNING") warned++
-      else if ($3 != "PASSED") {
-        other[$3]++
+      result[$3]++
+      if ($3 != "PASSED" && $3 != "WARNING") {
         m = split($5, named, /[ ,]+/)
         for (i = 1; i <= m; i++) if (named[i] ~ /^#?[0-9]+$/) { sub(/^#/, "", named[i]); issue[named[i]] = 1 }
       }
     }
     END {
       if (total == 0) exit 1
-      message = (passed + 0) "/" total " modules passed"
-      if (warned) message = message ", " warned " with a warning"
-      split("FAILED REVIEW INTERRUPTED SKIPPED NOT-RUN", order, " ")
-      for (i = 1; i <= 5; i++) if (order[i] in other) {
-        word = tolower(order[i]); sub(/-/, " ", word)
-        message = message ", " other[order[i]] " " word; delete other[order[i]]
-      }
+      print passed + 0, total
+      split("PASSED WARNING FAILED REVIEW INTERRUPTED SKIPPED NOT-RUN", order, " ")
+      for (i = 1; i <= 7; i++) if (order[i] in result) { print order[i], result[order[i]]; delete result[order[i]] }
       n = 0
-      for (r in other) extra[++n] = r
+      for (r in result) extra[++n] = r
       for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++) if (extra[j] < extra[i]) { t = extra[i]; extra[i] = extra[j]; extra[j] = t }
-      for (i = 1; i <= n; i++) message = message ", " other[extra[i]] " " tolower(extra[i])
+      for (i = 1; i <= n; i++) print extra[i], result[extra[i]]
       n = 0
       for (k in issue) ids[++n] = k
       for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++) if (ids[j] + 0 < ids[i] + 0) { t = ids[i]; ids[i] = ids[j]; ids[j] = t }
-      if (n) {
-        message = message "; open: "
-        for (i = 1; i <= n; i++) message = message (i > 1 ? ", " : "") "#" ids[i]
-      }
-      print message
+      line = "issues"
+      for (i = 1; i <= n; i++) line = line " " ids[i]
+      print line
     }
   '
+}
+
+# Prints the markdown breakdown of the oidf_counts output $1.
+oidf_section() {
+  local result count issues id first=1
+  printf '| Result | Modules |\n|---|---|\n'
+  while read -r result count; do
+    [[ "$result" == issues ]] || printf '| %s | %s |\n' "$result" "$count"
+  done < <(tail -n +2 <<< "$1")
+  issues="$(tail -n 1 <<< "$1")"
+  issues="${issues#issues}"
+  [[ -n "${issues// /}" ]] || return 0
+  printf '\nOpen issues:'
+  for id in $issues; do
+    [[ "$first" -eq 1 ]] || printf ','
+    printf ' [#%s](https://github.com/FerroHEALTH/FerroSMART/issues/%s)' "$id" "$id"
+    first=0
+  done
+  printf '.\n'
 }
 
 # Prints the endpoint JSON of label $1 with the message $2, coloured by the
@@ -180,37 +202,79 @@ message_badge() {
     '{schemaVersion: 1, label: $label, message: $message, color: $color} + $logo'
 }
 
-# Writes the badges of the tree $1 into the directory $2.
+# Writes the badges of the tree $1 into the directory $2, with the page
+# that breaks their counts down as $2/conformance.md.
 render() {
-  local tree="$1" out="$2" mapped listed refused negative passed tests version
+  local tree="$1" out="$2" mapped listed refused negative passed tests pid smart
+  local expected="$tree/app/ferrosmart/oidf/expected.tsv"
   mapped=$(handled "$tree")
   listed=$(rows "$tree/conformance/pid-attributes.tsv" | wc -l | tr -d ' ')
-  version=$(pid_version "$tree")
-  [[ -n "$version" ]] || { echo "conformance: docs/VERSIONS.md pins no EUDI PID Rulebook version" >&2; return 2; }
-  badge "EUDI PID Rulebook $version" "$mapped" "$listed" "data identifiers handled" eu > "$out/pid-rulebook.json"
-  negative=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
-    awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused"' | wc -l | tr -d ' ')
-  refused=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
-    awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused" && $3 == "PASSED"' | wc -l | tr -d ' ')
-  badge "OpenID4VP 1.0" "$refused" "$negative" "negative tests" openid > "$out/openid4vp.json"
-  local op rp
-  op="$(oidf_message "$tree/app/ferrosmart/oidf/expected.tsv" '^oidcc-(basic|config)-certification-test-plan$')" ||
+  pid=$(pid_version "$tree")
+  [[ -n "$pid" ]] || { echo "conformance: docs/VERSIONS.md pins no EUDI PID Rulebook version" >&2; return 2; }
+  badge "EUDI PID Rulebook $pid" "$mapped" "$listed" handled eu > "$out/pid-rulebook.json"
+  negative=$(rows "$expected" | awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused"' | wc -l | tr -d ' ')
+  refused=$(rows "$expected" | awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused" && $3 == "PASSED"' | wc -l | tr -d ' ')
+  badge "OpenID4VP 1.0 negative tests" "$refused" "$negative" passed openid > "$out/openid4vp.json"
+  local positive accepted review
+  read -r positive accepted review < <(rows "$expected" | awk -F'\t' '
+    $1 ~ /^oid4vp-/ && $4 != "refused" {
+      n++
+      if ($4 == "accepted" && ($3 == "PASSED" || $3 == "REVIEW")) a++
+      if ($4 == "accepted" && $3 == "REVIEW") r++
+    }
+    END { print n + 0, a + 0, r + 0 }
+  ')
+  badge "OpenID4VP 1.0 positive tests" "$accepted" "$positive" accepted openid > "$out/openid4vp-accepted.json"
+  local op rp count
+  op="$(oidf_counts "$expected" '^oidcc-(basic|config)-certification-test-plan$')" ||
     { echo "conformance: expected.tsv holds no OpenID Provider module" >&2; return 2; }
-  message_badge "OpenID Connect Core 1.0 · OIDF OP plans" "$op" openid > "$out/openid-connect-op.json"
-  rp="$(oidf_message "$tree/app/ferrosmart/oidf/expected.tsv" '^oidcc-client-(basic-certification-)?test-plan$')" ||
+  read -r -a count <<< "$(head -n 1 <<< "$op")"
+  badge "OIDC Core 1.0 OIDF OP" "${count[0]}" "${count[1]}" passed openid > "$out/openid-connect-op.json"
+  rp="$(oidf_counts "$expected" '^oidcc-client-(basic-certification-)?test-plan$')" ||
     { echo "conformance: expected.tsv holds no relying party module" >&2; return 2; }
-  message_badge "OpenID Connect Core 1.0 · OIDF RP plans" "$rp" openid > "$out/openid-connect-rp.json"
+  read -r -a count <<< "$(head -n 1 <<< "$rp")"
+  badge "OIDC Core 1.0 OIDF RP" "${count[0]}" "${count[1]}" passed openid > "$out/openid-connect-rp.json"
   local results="$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
   # NOTE: inferno_core 1.4.3 result.rb:50, result_summarizer.rb and HelpModal.tsx:76: an omit
   # "does not affect passed or failed scores", and a group of passes and omits scores `pass`.
   tests=$(jq '[.[] | select(.test_id and .result != "omit")] | length' "$results")
   passed=$(jq '[.[] | select(.test_id and .result == "pass")] | length' "$results")
-  version=$(smart_version "$tree")
-  [[ -n "$version" ]] || { echo "conformance: docs/VERSIONS.md pins no SMART App Launch version" >&2; return 2; }
-  badge "SMART App Launch $version" "$passed" "$tests" "Inferno tests" key > "$out/smart-app-launch.json"
+  smart=$(smart_version "$tree")
+  [[ -n "$smart" ]] || { echo "conformance: docs/VERSIONS.md pins no SMART App Launch version" >&2; return 2; }
+  badge "SMART App Launch $smart" "$passed" "$tests" "Inferno tests" key > "$out/smart-app-launch.json"
   if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
     badge_post_quantum "$tree/conformance/post-quantum.tsv" > "$out/post-quantum.json"
   fi
+  {
+    printf '<!-- SPDX-FileCopyrightText: Cadasto B.V. -->\n<!-- SPDX-License-Identifier: BUSL-1.1 -->\n\n'
+    printf '# Conformance\n\n'
+    printf 'Each README conformance badge shows one count; this page breaks each count\n'
+    printf "down. \`scripts/checks/conformance.sh\` writes the badges and this page from\\n"
+    printf 'the same files, and CI fails when either disagrees with them. The counts\n'
+    printf 'are self-tested; none is a certification.\n\n'
+    printf '## EUDI PID Rulebook %s\n\n' "$pid"
+    printf "%s of the %s data identifiers in \`conformance/pid-attributes.tsv\` are\\n" "$mapped" "$listed"
+    printf 'handled (mapped, not retained as the law requires, or not asked for a\n'
+    printf "stated reason) by a named test under \`app/\`.\\n\\n"
+    printf '## OpenID4VP 1.0\n\n'
+    printf "From \`app/ferrosmart/oidf/expected.tsv\`, the verifier plans of the OpenID\\n"
+    printf 'Foundation suite.\n\n'
+    printf '| Modules | Count |\n|---|---|\n'
+    printf '| Negative (the login refused), passed | %s of %s |\n' "$refused" "$negative"
+    printf '| Positive (a valid presentation), accepted | %s of %s |\n' "$accepted" "$positive"
+    printf '| Accepted, awaiting the suite'"'"'s image review (REVIEW) | %s |\n\n' "$review"
+    printf '## OpenID Connect Core 1.0: OpenID Provider plans\n\n'
+    printf "The basic and config certification plans in\\n\`app/ferrosmart/oidf/expected.tsv\`. A WARNING passes with a remark.\\n\\n"
+    oidf_section "$op"
+    printf '\n## OpenID Connect Core 1.0: relying party plans\n\n'
+    printf "The client and client basic certification plans in\\n\`app/ferrosmart/oidf/expected.tsv\`.\\n\\n"
+    oidf_section "$rp"
+    printf '\n## SMART App Launch %s\n\n' "$smart"
+    printf "%s of the %s Inferno tests in\\n\`app/ferrosmart/inferno/smart_stu2_2_expected.json\` pass; an omitted test\\nis not counted.\\n" "$passed" "$tests"
+    if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
+      printf '\n## Post-quantum\n\nThe inventory and its table are [the post-quantum page](post-quantum.md).\n'
+    fi
+  } > "$out/conformance.md"
 }
 
 # Fails when a badge under $1/conformance/badges, or the README's badge
@@ -243,7 +307,9 @@ labels() {
   [[ "$failures" -eq 0 ]]
 }
 
-# Rewrites the badges of the tree $1, or with $2 = check compares them.
+# Rewrites the badges and docs/conformance.md of the tree $1, or with
+# $2 = check compares them. A badge whose label or message runs long fails
+# before anything is written.
 run() {
   local tree="$1" mode="$2" fresh drift=0
   fresh="$(mktemp -d)"
@@ -251,26 +317,37 @@ run() {
   if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
     pq_page "$tree" > "$fresh/post-quantum.md"
   fi
+  if ! badge_length_check "$fresh"/*.json; then
+    rm -f "$fresh"/*.json "$fresh"/*.md
+    rmdir "$fresh"
+    return 1
+  fi
   if [[ "$mode" == check ]]; then
     if [[ -f "$fresh/post-quantum.md" ]] && ! diff "$fresh/post-quantum.md" "$tree/docs/post-quantum.md" > /dev/null; then
       echo "conformance: the table of docs/post-quantum.md differs from conformance/post-quantum.tsv;" >&2
       echo "run scripts/checks/conformance.sh and commit the page." >&2
       drift=1
     fi
-    if ! diff -r "$fresh" "$tree/conformance/badges" -x post-quantum.md > /dev/null 2>&1; then
+    if ! diff "$fresh/conformance.md" "$tree/docs/conformance.md" > /dev/null 2>&1; then
+      echo "conformance: docs/conformance.md differs from what the tests count;" >&2
+      echo "run scripts/checks/conformance.sh and commit the page." >&2
+      drift=1
+    fi
+    if ! diff -r "$fresh" "$tree/conformance/badges" -x '*.md' > /dev/null 2>&1; then
       echo "conformance: conformance/badges/ differs from what the tests count:" >&2
-      diff -r "$fresh" "$tree/conformance/badges" -x post-quantum.md >&2 || true
+      diff -r "$fresh" "$tree/conformance/badges" -x '*.md' >&2 || true
       echo "run scripts/checks/conformance.sh and commit the badges." >&2
       drift=1
     fi
   else
     mkdir -p "$tree/conformance/badges"
     cp "$fresh"/*.json "$tree/conformance/badges/"
+    cp "$fresh/conformance.md" "$tree/docs/conformance.md"
     if [[ -f "$fresh/post-quantum.md" ]]; then
       cp "$fresh/post-quantum.md" "$tree/docs/post-quantum.md"
     fi
   fi
-  rm -f "$fresh"/*.json "$fresh/post-quantum.md"
+  rm -f "$fresh"/*.json "$fresh"/*.md
   rmdir "$fresh"
   [[ "$drift" -eq 0 ]] || return 1
   labels "$tree"
@@ -282,7 +359,8 @@ clean() {
   local work="$1" tree="$1/repo"
   rm -f "$work/badge" "$tree"/conformance/badges/*.json "$tree/conformance/pid-attributes.tsv" "$tree/app/ferrosmart/pid.rs" \
     "$tree/app/ferrosmart/oidf/expected.tsv" "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json" \
-    "$tree/docs/VERSIONS.md" "$tree/README.md" "$tree/conformance/post-quantum.tsv" "$tree/docs/post-quantum.md"
+    "$tree/docs/VERSIONS.md" "$tree/README.md" "$tree/conformance/post-quantum.tsv" "$tree/docs/post-quantum.md" \
+    "$tree/docs/conformance.md"
   rmdir "$tree/conformance/badges" "$tree/conformance" "$tree/app/ferrosmart/oidf" \
     "$tree/app/ferrosmart/inferno" "$tree/app/ferrosmart" "$tree/app" "$tree/docs" "$tree" "$work"
 }
@@ -312,21 +390,28 @@ self_test() {
   printf '**Conformance**<br>\n%s<br>\n[![x](https://img.shields.io/endpoint?url=conformance/badges/pid-rulebook.json)](x)\n' \
     "$badge_caption" > "$tree/README.md"
   run "$tree" update > /dev/null || fail "a clean tree is refused"
-  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "1/2 data identifiers handled" ]] ||
+  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "1/2 handled" ]] ||
     fail "a row whose test does not exist counted"
   printf 'fn drops() {}\n' >> "$tree/app/ferrosmart/pid.rs"
   run "$tree" update > /dev/null || fail "the rewrite with both tests is refused"
-  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "2/2 data identifiers handled" ]] ||
+  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "2/2 handled" ]] ||
     fail "a not-retained row with its test left out"
   [[ "$(jq -r .label "$tree/conformance/badges/pid-rulebook.json")" == "EUDI PID Rulebook 1.7" ]] ||
     fail "the PID label names the pinned Rulebook"
-  [[ "$(jq -r .message "$tree/conformance/badges/openid4vp.json")" == "1/2 negative tests" ]] ||
+  [[ "$(jq -r .message "$tree/conformance/badges/openid4vp.json")" == "1/2 passed" ]] ||
     fail "the negative-test count"
-  [[ "$(jq -r .message "$tree/conformance/badges/openid-connect-op.json")" == "1/3 modules passed, 1 with a warning, 1 failed, 1 skipped; open: #9, #650" ]] ||
+  [[ "$(jq -r .message "$tree/conformance/badges/openid4vp-accepted.json")" == "1/1 accepted" ]] ||
+    fail "the valid-presentation count: $(jq -r .message "$tree/conformance/badges/openid4vp-accepted.json")"
+  [[ "$(jq -r .message "$tree/conformance/badges/openid-connect-op.json")" == "1/3 passed" ]] ||
     fail "the OpenID Provider count: $(jq -r .message "$tree/conformance/badges/openid-connect-op.json")"
+  grep -qxF '| FAILED | 1 |' "$tree/docs/conformance.md" || fail "the OpenID Provider breakdown names no failed module"
+  grep -qF 'Open issues: [#9](https://github.com/FerroHEALTH/FerroSMART/issues/9), [#650](' "$tree/docs/conformance.md" ||
+    fail "the OpenID Provider breakdown names no open issue"
+  grep -qxF "| Accepted, awaiting the suite's image review (REVIEW) | 1 |" "$tree/docs/conformance.md" ||
+    fail "the page names no presentation awaiting review"
   [[ "$(jq -r .color "$tree/conformance/badges/openid-connect-op.json")" == yellow ]] ||
     fail "the OpenID Provider colour"
-  [[ "$(jq -r .message "$tree/conformance/badges/openid-connect-rp.json")" == "2/2 modules passed" ]] ||
+  [[ "$(jq -r .message "$tree/conformance/badges/openid-connect-rp.json")" == "2/2 passed" ]] ||
     fail "the relying party count"
   [[ "$(jq -r .color "$tree/conformance/badges/openid-connect-rp.json")" == brightgreen ]] ||
     fail "the relying party colour"
@@ -355,6 +440,14 @@ self_test() {
   rm "$tree/conformance/badges/extra.json"
   printf 'given_name\tyes\tgiven_name\tgiven_name\t-\tmaps\n' >> "$tree/conformance/pid-attributes.tsv"
   if run "$tree" check > /dev/null 2>&1; then fail "a stale badge passes"; fi
+  run "$tree" update > /dev/null || fail "the rewrite is refused"
+  printf 'x\n' >> "$tree/docs/conformance.md"
+  if run "$tree" check > /dev/null 2>&1; then fail "a stale conformance page passes"; fi
+  run "$tree" update > /dev/null || fail "the rewrite of the page is refused"
+  badge_length_check "$tree"/conformance/badges/*.json || fail "a rendered badge runs long"
+  jq -c '.message = "1/1 passed, 2 skipped; open: #9"' "$tree/conformance/badges/smart-app-launch.json" > "$tree/conformance/badges/extra.json"
+  if badge_length_check "$tree/conformance/badges/extra.json" 2> /dev/null; then fail "a long message passes"; fi
+  rm "$tree/conformance/badges/extra.json"
   run "$tree" update > /dev/null || fail "the rewrite is refused"
   local word
   for word in certified Compliant conformant; do
@@ -402,6 +495,7 @@ self_test() {
   if labels "$tree" 2> /dev/null; then fail "a location the tree does not hold passes"; fi
   clean "$work"
   badge_post_quantum_self_test || exit 1
+  badge_length_self_test || exit 1
   echo "conformance: self-test OK"
 }
 

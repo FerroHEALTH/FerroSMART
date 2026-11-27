@@ -519,3 +519,44 @@ async fn an_ml_dsa_proof_is_admitted_when_the_settings_name_its_algorithm()
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn a_client_key_signs_its_proofs_with_ml_dsa() -> Result<(), Box<dyn StdError>> {
+    // NOTE: RFC 9449 §4.2 asks only for an asymmetric alg; RFC 9964 §2 and §3, an
+    // ML-DSA key signs under its parameter set and travels as its `AKP` jwk.
+    use ferrohealth_smart::client::dpop::{DpopKey as ClientKey, Role};
+    for algorithm in [Algorithm::MlDsa44, Algorithm::MlDsa65, Algorithm::MlDsa87] {
+        let key = ClientKey::from_pem(&crate::support::ml_dsa_key("dpop", algorithm).pem)?;
+        assert_eq!(algorithm, key.algorithm());
+        let url: url::Url = format!("{EXTERNAL}/token").parse()?;
+        let jwt = key.proof(&Method::POST, &url, Role::Authorization, None)?;
+        assert!(
+            check()
+                .check_token_request(&Method::POST, "/token", &proofs(&[&jwt]))
+                .is_err(),
+            "a check that names no ML-DSA refuses {algorithm}"
+        );
+        let mut settings = ProofSettings::new(EXTERNAL.parse()?);
+        settings.algorithms.push(algorithm);
+        let accepting = ProofCheck::new(settings, Arc::new(MemoryReplayStore::new()))?;
+        let admitted = accepting.check_token_request(&Method::POST, "/token", &proofs(&[&jwt]))?;
+        assert_eq!(key.thumbprint(), admitted.key().jkt(), "{algorithm}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_client_key_of_another_type_is_refused() {
+    // NOTE: no specification governs which asymmetric keys the client takes: our own
+    // design, the EC curves and the ML-DSA parameter sets.
+    use ferrohealth_smart::client::dpop::{DpopKey as ClientKey, DpopKeyError};
+    for pem in [
+        crate::support::rsa_key("dpop", Algorithm::Rs256).pem,
+        crate::support::ed_key("dpop").pem,
+    ] {
+        assert!(matches!(
+            ClientKey::from_pem(&pem),
+            Err(DpopKeyError::Key { source: None })
+        ));
+    }
+}
