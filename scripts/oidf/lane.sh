@@ -114,50 +114,75 @@ wanted_login() {
   esac
 }
 
+# The failures of one expected outcome RESULT and LOGIN of the module
+# MODULE of PLAN, whose row names an issue when NAMED is true and gives
+# REASON.
+check_outcome() {
+  local plan=$1 module=$2 result=$3 login=$4 named=$5 reason=$6 failures=0 wanted
+  case "$result" in
+    PASSED | REVIEW | SKIPPED | NOT-RUN) ;;
+    FAILED | WARNING)
+      $named || {
+        echo "oidf-lane: $plan $module is expected $result and names no issue" >&2
+        failures=$((failures + 1))
+      }
+      ;;
+    # The driver stops a module once FerroSMART's part is over; any other
+    # interruption is a failure.
+    INTERRUPTED)
+      $named || [ "$login" = accepted ] || {
+        echo "oidf-lane: $plan $module is expected $result after a login that was not accepted and names no issue" >&2
+        failures=$((failures + 1))
+      }
+      ;;
+    *)
+      echo "oidf-lane: $plan $module has the unknown result '$result'" >&2
+      failures=$((failures + 1))
+      ;;
+  esac
+  case "$login" in
+    accepted | refused | no-start | started)
+      wanted=$(wanted_login "$module")
+      if [ "$wanted" != any ] && [ "$login" != "$wanted" ] && ! $named; then
+        echo "oidf-lane: $plan $module expects FerroSMART's login $wanted, is expected $login and names no issue" >&2
+        failures=$((failures + 1))
+      fi
+      ;;
+    none | -) ;;
+    *)
+      echo "oidf-lane: $plan $module has the unknown login '$login'" >&2
+      failures=$((failures + 1))
+      ;;
+  esac
+  if [ "$result" != PASSED ] && [ -z "$reason" ]; then
+    echo "oidf-lane: $plan $module is expected $result and gives no reason" >&2
+    failures=$((failures + 1))
+  fi
+  echo "$failures"
+}
+
 check() {
-  local failures=0 plan module result login issue reason wanted named
+  local failures=0 plan module result login issue reason named i
+  local -a results logins
   while IFS=$'\t' read -r plan module result login issue reason; do
     named=false
     if grep -qE '^[0-9]+(,[0-9]+)*$' <<< "$issue"; then named=true; fi
-    case "$result" in
-      PASSED | REVIEW | SKIPPED | NOT-RUN) ;;
-      FAILED | WARNING)
-        $named || {
-          echo "oidf-lane: $plan $module is expected $result and names no issue" >&2
-          failures=$((failures + 1))
-        }
-        ;;
-      # The driver stops a module once FerroSMART's part is over; any other
-      # interruption is a failure.
-      INTERRUPTED)
-        $named || [ "$login" = accepted ] || {
-          echo "oidf-lane: $plan $module is expected $result after a login that was not accepted and names no issue" >&2
-          failures=$((failures + 1))
-        }
-        ;;
-      *)
-        echo "oidf-lane: $plan $module has the unknown result '$result'" >&2
-        failures=$((failures + 1))
-        ;;
-    esac
-    case "$login" in
-      accepted | refused | no-start | started)
-        wanted=$(wanted_login "$module")
-        if [ "$wanted" != any ] && [ "$login" != "$wanted" ] && ! $named; then
-          echo "oidf-lane: $plan $module expects FerroSMART's login $wanted, is expected $login and names no issue" >&2
-          failures=$((failures + 1))
-        fi
-        ;;
-      none | -) ;;
-      *)
-        echo "oidf-lane: $plan $module has the unknown login '$login'" >&2
-        failures=$((failures + 1))
-        ;;
-    esac
-    if [ "$result" != PASSED ] && [ -z "$reason" ]; then
-      echo "oidf-lane: $plan $module is expected $result and gives no reason" >&2
+    # A module whose outcome races the suite lists each outcome it can end
+    # in, `|` between them, the logins paired with the results by position.
+    IFS='|' read -ra results <<< "$result"
+    IFS='|' read -ra logins <<< "$login"
+    if [ "${#results[@]}" -ne "${#logins[@]}" ]; then
+      echo "oidf-lane: $plan $module lists ${#results[@]} results and ${#logins[@]} logins" >&2
+      failures=$((failures + 1))
+      continue
+    fi
+    if [ "${#results[@]}" -gt 1 ] && { ! $named || [ -z "$reason" ]; }; then
+      echo "oidf-lane: $plan $module lists more than one outcome and names no issue and reason" >&2
       failures=$((failures + 1))
     fi
+    for i in "${!results[@]}"; do
+      failures=$((failures + $(check_outcome "$plan" "$module" "${results[$i]}" "${logins[$i]}" "$named" "$reason")))
+    done
   done < <(rows)
   if [ -n "$(rows | cut -f1,2 | sort | uniq -d)" ]; then
     echo "oidf-lane: expected.tsv lists a module of a plan twice" >&2
@@ -368,7 +393,17 @@ compare() {
         "$([ -z "$issue" ] || [ "$issue" = - ] || printf '#%s' "${issue//,/, #}")" "$reason"
     done < "$LANE_DIR/actual.tsv"
   } >> "$summary"
-  rows | cut -f1-4 | awk -F'\t' 'NR == FNR { ran[$1] = 1; next } $1 in ran' "$LANE_DIR/actual.tsv" - > "$LANE_DIR/expected.tsv"
+  # A row listing more than one outcome takes the one this run ended in, when
+  # it is among them.
+  rows | cut -f1-4 | awk -F'\t' -v OFS='\t' '
+    NR == FNR { ran[$1] = 1; got[$1 FS $2] = $3 FS $4; next }
+    !($1 in ran) { next }
+    $3 ~ /\|/ {
+      n = split($3, results, "|"); split($4, logins, "|")
+      for (i = 1; i <= n; i++) if (got[$1 FS $2] == results[i] FS logins[i]) { $3 = results[i]; $4 = logins[i] }
+    }
+    { print }
+  ' "$LANE_DIR/actual.tsv" - > "$LANE_DIR/expected.tsv"
   if ! actual=$(diff "$LANE_DIR/expected.tsv" "$LANE_DIR/actual.tsv"); then
     echo "oidf-lane: the suite's results differ from app/ferrosmart/oidf/expected.tsv (<) in this run (>):" >&2
     echo "$actual" >&2
