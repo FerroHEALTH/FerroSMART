@@ -31,7 +31,8 @@
 #                          omitted, as Inferno scores them
 #   post-quantum.json      conformance/post-quantum.tsv, through the shared
 #                          helper's badge_post_quantum: the post-quantum
-#                          safe uses of all (#890); the same rows are the
+#                          safe uses of those a post-quantum standard covers
+#                          (#890, #965); the same rows are the
 #                          table of docs/post-quantum.md, and each file a
 #                          row's location names exists
 #
