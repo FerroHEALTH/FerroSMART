@@ -1431,7 +1431,9 @@ whole `DPoP` request; a product verifier that does not implement
 `token_binding` says (FerroHEALTH/FerroSMART#318):
 
 - **to a DPoP key** (`client::dpop::DpopKey`, P-256 signing ES256 or P-384
-  signing ES384, `rfc7518 §3.4`). Every token request carries a proof whose
+  signing ES384, `rfc7518 §3.4`, or an ML-DSA key signing ML-DSA-44,
+  ML-DSA-65 or ML-DSA-87, `rfc9964 §2`, #944; `rfc9449 §4.2` asks only for
+  an asymmetric algorithm). Every token request carries a proof whose
   header has `typ` `dpop+jwt` and the public `jwk`, and whose claims are
   `htm`, `htu` (the URL with no query or fragment), `iat` and a fresh `jti`
   (`rfc9449 §4.2`). A request that presents the token adds `ath`, the
