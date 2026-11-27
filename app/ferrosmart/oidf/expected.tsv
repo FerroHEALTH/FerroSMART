@@ -24,7 +24,7 @@ oidcc-client-test-plan	oidcc-client-test-idtoken-sig-rs256	INTERRUPTED	accepted	
 oidcc-client-test-plan	oidcc-client-test-missing-sub	PASSED	refused	-	
 oidcc-client-test-plan	oidcc-client-test-invalid-sig-rs256	PASSED	refused	-	
 oidcc-client-test-plan	oidcc-client-test-invalid-iss	PASSED	refused	-	
-oidcc-client-test-plan	oidcc-client-test-userinfo-invalid-sub	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
+oidcc-client-test-plan	oidcc-client-test-userinfo-invalid-sub	PASSED	refused	-	
 oidcc-client-test-plan	oidcc-client-test-userinfo-bearer-header	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
 oidcc-client-test-plan	oidcc-client-test-userinfo-bearer-body	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
 oidcc-client-test-plan	oidcc-client-test-invalid-sig-es256	PASSED	refused	-	
@@ -48,7 +48,7 @@ oidcc-client-basic-certification-test-plan	oidcc-client-test-kid-absent-multiple
 oidcc-client-basic-certification-test-plan	oidcc-client-test-idtoken-sig-rs256	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
 oidcc-client-basic-certification-test-plan	oidcc-client-test-idtoken-sig-none	SKIPPED	refused	-	the suite skips an unsigned ID Token in the code flow; FerroSMART refused it
 oidcc-client-basic-certification-test-plan	oidcc-client-test-invalid-sig-rs256	PASSED	refused	-	
-oidcc-client-basic-certification-test-plan	oidcc-client-test-userinfo-invalid-sub	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
+oidcc-client-basic-certification-test-plan	oidcc-client-test-userinfo-invalid-sub	PASSED	refused	-	
 oidcc-client-basic-certification-test-plan	oidcc-client-test-nonce-invalid	PASSED	refused	-	
 oidcc-client-basic-certification-test-plan	oidcc-client-test-scope-userinfo-claims	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted
 oidcc-client-basic-certification-test-plan	oidcc-client-test-client-secret-basic	INTERRUPTED	accepted	-	FerroSMART makes no UserInfo request (OpenID Connect Core 1.0 §5.3), so the driver stops the module once the login is accepted

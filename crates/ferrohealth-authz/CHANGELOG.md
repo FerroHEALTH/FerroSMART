@@ -14,6 +14,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.29.0] - Unreleased
+
 ## [0.28.0] - 2026-11-25
 
 Releases beside `ferrohealth-smart` 0.35.0, whose types this crate carries in
