@@ -62,7 +62,7 @@ impl Confirmation {
 }
 
 /// The `invalid_dpop_proof` refusal (RFC 9449 §5).
-const fn invalid_proof() -> Refusal {
+pub(crate) const fn invalid_proof() -> Refusal {
     Refusal {
         error: "invalid_dpop_proof",
         description: "the DPoP proof is invalid",
@@ -78,29 +78,39 @@ pub(crate) async fn presented(
     headers: &HeaderMap,
     certificates: Option<&PeerCertificates>,
 ) -> Result<Presented, Refusal> {
-    let jkt = if headers.contains_key(DPOP) {
-        let check = ProofCheck::new(proof_settings(state.settings()), replays(state))
-            .map_err(|error| server_error("the DPoP proof check cannot be built", &error))?;
-        let proof = check
-            .check_token_request(&Method::POST, TOKEN_ROUTE, headers)
-            .map_err(|_refused| invalid_proof())?;
-        check
-            .consume(&proof)
-            .await
-            .map_err(|refused| match refused {
-                Rejection::Upstream { source, .. } => {
-                    server_error("the DPoP proof cannot be recorded", &*source)
-                }
-                _ => invalid_proof(),
-            })?;
-        Some(proof.key().jkt().to_owned())
-    } else {
-        None
-    };
+    let jkt = proof_key(state, headers, TOKEN_ROUTE).await?;
     let certificate = certificates
         .and_then(|chain| chain.0.first())
         .map(|leaf| ClientCertificate::from_der(leaf).thumbprint().to_owned());
     Ok(Presented { jkt, certificate })
+}
+
+/// Returns the JWK SHA-256 thumbprint of the key of the `DPoP` proof in
+/// `headers`, checked as a `POST` to `route` with its `jti` recorded once
+/// (RFC 9449 §4.3, §11.1), or none when the request carries no proof.
+pub(crate) async fn proof_key(
+    state: &AppState,
+    headers: &HeaderMap,
+    route: &str,
+) -> Result<Option<String>, Refusal> {
+    if !headers.contains_key(DPOP) {
+        return Ok(None);
+    }
+    let check = ProofCheck::new(proof_settings(state.settings()), replays(state))
+        .map_err(|error| server_error("the DPoP proof check cannot be built", &error))?;
+    let proof = check
+        .check_token_request(&Method::POST, route, headers)
+        .map_err(|_refused| invalid_proof())?;
+    check
+        .consume(&proof)
+        .await
+        .map_err(|refused| match refused {
+            Rejection::Upstream { source, .. } => {
+                server_error("the DPoP proof cannot be recorded", &*source)
+            }
+            _ => invalid_proof(),
+        })?;
+    Ok(Some(proof.key().jkt().to_owned()))
 }
 
 impl Presented {

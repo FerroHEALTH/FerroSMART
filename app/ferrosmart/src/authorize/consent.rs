@@ -350,6 +350,7 @@ pub(super) async fn approve(
         client_id: client_id.clone(),
         redirect_uri: pending.redirect_uri.clone(),
         code_challenge: pending.code_challenge.clone(),
+        dpop_jkt: pending.dpop_jkt.clone(),
         audience: pending.audience.clone(),
         subject: subject.clone(),
         fhir_user: pending.fhir_user.clone(),

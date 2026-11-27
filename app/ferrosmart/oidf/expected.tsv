@@ -125,9 +125,9 @@ fapi2-security-profile-final-test-plan	fapi2-security-profile-final-access-token
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-check-dpop-proof-nbf-exp	PASSED	-	-	-
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-dpopproof-with-iat-10seconds-before-succeeds	PASSED	-	-	-
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-dpopproof-with-iat-10seconds-after-succeeds	PASSED	-	-	-
-fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-mismatched-dpop-jkt-fails	FAILED	-	972	FerroSMART does not yet bind the authorization code to the DPoP key, so dpop_jkt and a DPoP header at the PAR endpoint are not checked (RFC 9449 §10, §10.1)
-fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-token-endpoint-fails-with-mismatched-dpop-proof-jkt	FAILED	-	972	FerroSMART does not yet bind the authorization code to the DPoP key, so dpop_jkt and a DPoP header at the PAR endpoint are not checked (RFC 9449 §10, §10.1)
-fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-token-endpoint-fails-with-mismatched-dpop-jkt	FAILED	-	972	FerroSMART does not yet bind the authorization code to the DPoP key, so dpop_jkt and a DPoP header at the PAR endpoint are not checked (RFC 9449 §10, §10.1)
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-mismatched-dpop-jkt-fails	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-token-endpoint-fails-with-mismatched-dpop-proof-jkt	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-token-endpoint-fails-with-mismatched-dpop-jkt	PASSED	-	-	-
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-dpopproof-at-par-endpoint-binding-success	PASSED	-	-	-
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-dpop-auth-code-binding-success	PASSED	-	-	-
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-different-nonce-inside-and-outside-request-object	PASSED	-	-	-
