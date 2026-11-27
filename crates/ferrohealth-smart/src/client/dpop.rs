@@ -63,8 +63,8 @@ pub const USE_NONCE: &str = "use_dpop_nonce";
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum DpopKeyError {
-    /// The PEM is no EC private key.
-    #[error("the DPoP key is not an EC private key in PEM form")]
+    /// The PEM is no EC or ML-DSA private key.
+    #[error("the DPoP key is not an EC or ML-DSA private key in PEM form")]
     Key {
         /// What the key reader reported, when it read no key at all.
         #[source]
@@ -149,13 +149,16 @@ struct Claims<'a> {
 }
 
 impl DpopKey {
-    /// Returns the EC private key `pem` holds, PKCS#8 or SEC 1: a P-256 key
-    /// signs ES256, a P-384 key ES384 (RFC 7518 §3.4).
+    /// Returns the private key `pem` holds: an EC key, PKCS#8 or SEC 1, a
+    /// P-256 key signing ES256 and a P-384 key ES384 (RFC 7518 §3.4), or an
+    /// ML-DSA key, PKCS#8 (RFC 9881 §6), signing with its parameter set
+    /// (RFC 9964 §2), each an asymmetric algorithm as RFC 9449 §4.2 asks.
     ///
     /// # Errors
     ///
-    /// Returns [`DpopKeyError::Key`] for a PEM that is no EC private key and
-    /// [`DpopKeyError::Curve`] for a key on another curve.
+    /// Returns [`DpopKeyError::Key`] for a PEM that is no EC or ML-DSA
+    /// private key and [`DpopKeyError::Curve`] for an EC key on another
+    /// curve.
     pub fn from_pem(pem: &[u8]) -> Result<Self, DpopKeyError> {
         let private = PrivateKey::from_pem(pem).map_err(|source| match source {
             KeyError::Curve => DpopKeyError::Curve,
@@ -163,7 +166,14 @@ impl DpopKey {
                 source: Some(source),
             },
         })?;
-        let Some(algorithm @ (Algorithm::Es256 | Algorithm::Es384)) = private.algorithm() else {
+        let Some(
+            algorithm @ (Algorithm::Es256
+            | Algorithm::Es384
+            | Algorithm::MlDsa44
+            | Algorithm::MlDsa65
+            | Algorithm::MlDsa87),
+        ) = private.algorithm()
+        else {
             return Err(DpopKeyError::Key { source: None });
         };
         let signing = SigningKey::new(private, algorithm).map_err(|source| DpopKeyError::Key {
