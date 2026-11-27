@@ -28,6 +28,8 @@
 <sub>(self-tested and self-assessed counts; none is a certification)</sub><br>
 [![EUDI PID Rulebook 1.6, attributes handled, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fpid-rulebook.json)](conformance/pid-attributes.tsv)
 [![OpenID4VP 1.0, negative tests, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fopenid4vp.json)](app/ferrosmart/oidf/expected.tsv)
+[![OpenID Connect Core 1.0, OIDF OP plans, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fopenid-connect-op.json)](app/ferrosmart/oidf/expected.tsv)
+[![OpenID Connect Core 1.0, OIDF RP plans, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fopenid-connect-rp.json)](app/ferrosmart/oidf/expected.tsv)
 [![SMART App Launch 2.2.0, Inferno tests, self-tested](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fsmart-app-launch.json)](app/ferrosmart/inferno/smart_stu2_2_expected.json)
 [![Post-quantum safe uses, self-assessed](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FFerroHEALTH%2FFerroSMART%2Fmain%2Fconformance%2Fbadges%2Fpost-quantum.json)](docs/post-quantum.md)
 
