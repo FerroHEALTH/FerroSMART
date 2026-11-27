@@ -28,7 +28,7 @@
         },
         {
           "task": "Verify Complete",
-          "match": "*/test/*/callback*",
+          "match": "https://localhost.emobix.co.uk:8443/test/*/callback*",
           "commands": [
             ["wait", "id", "submission_complete", 10]
           ]
@@ -63,7 +63,7 @@
             {
               "task": "Verify Complete",
               "optional": true,
-              "match": "*/test/*/callback*",
+              "match": "https://localhost.emobix.co.uk:8443/test/*/callback*",
               "commands": [
                 ["wait", "id", "submission_complete", 10]
               ]
@@ -98,7 +98,7 @@
             {
               "task": "Verify Complete",
               "optional": true,
-              "match": "*/test/*/callback*",
+              "match": "https://localhost.emobix.co.uk:8443/test/*/callback*",
               "commands": [
                 ["wait", "id", "submission_complete", 10]
               ]

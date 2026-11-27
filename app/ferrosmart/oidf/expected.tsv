@@ -116,7 +116,7 @@ oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-rev
 oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-credential-on-identifier-list	PASSED	refused	-	
 oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-credential-without-status	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-discovery-end-point-verification	PASSED	-	-	-
-fapi2-security-profile-final-test-plan	fapi2-security-profile-final-happy-flow	PASSED	-	-	-
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-happy-flow	WARNING	-	deviation	the ID Token carries the fhirUser claim, which SMART App Launch 2.2.0 (Scopes for requesting identity data) has the server include for a grant of openid and fhirUser; the suite warns of a claim it does not know
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-user-rejects-authentication	PASSED	-	-	-
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-authorization-request-without-state-success	FAILED	-	deviation	SMART App Launch 2.2.0 (Obtain authorization code) requires state, which the module leaves out of the pushed request, so FerroSMART refuses it with invalid_request
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-authorization-request-without-nonce-success	PASSED	-	-	-

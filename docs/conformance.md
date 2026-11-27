@@ -96,7 +96,8 @@ carry the S256 PKCE challenge SMART App Launch 2.2.0 requires.
 
 | Result | Modules |
 |---|---|
-| PASSED | 42 |
+| PASSED | 41 |
+| WARNING | 1 |
 | FAILED | 5 |
 | REVIEW | 3 |
 | SKIPPED | 2 |
