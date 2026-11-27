@@ -14,7 +14,11 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.32.0] - Unreleased
+## [0.32.0] - 2026-11-27
+
+### Removed
+
+- Breaking: the removal aid of the sealed session store is deleted, one release after the store. `StoreKind::Sealed`, the `key` and `key_file` fields of `SessionSection`, and the `ConfigError` variants `SealedRemoved` and `SealingKeyRemoved` are gone, so `[session] store = "sealed"` is an unknown value and `key` and `key_file` are unknown keys, refused when the configuration reads (#906).
 
 ## [0.31.0] - 2026-11-26
 
@@ -551,7 +555,8 @@ FerroHEALTH operator consoles, over the relying party of `ferrohealth-smart`
   its request's `record::Held` and the `routes::Pages` trait a console draws
   a stopped sign-in through.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.31.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.32.0...HEAD
+[0.32.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.31.0...ferrohealth-session-v0.32.0
 [0.31.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.30.1...ferrohealth-session-v0.31.0
 [0.30.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.30.0...ferrohealth-session-v0.30.1
 [0.30.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.29.0...ferrohealth-session-v0.30.0
