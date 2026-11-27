@@ -315,6 +315,7 @@ labels() {
   badge_logo_readme "$tree/README.md" || failures=$((failures + 1))
   badge_caption_check "$tree/README.md" || failures=$((failures + 1))
   badge_color_check "$tree"/conformance/badges/*.json || failures=$((failures + 1))
+  badge_length_readme "$tree/README.md" || failures=$((failures + 1))
   if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
     pq_locations "$tree" || failures=$((failures + 1))
   fi
@@ -498,6 +499,9 @@ self_test() {
   printf '[![x](https://img.shields.io/badge/x-y-blue)](x)\n' >> "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a static badge without a logo passes"; fi
   cp "$work/badge" "$tree/README.md"
+  printf '[![x](https://img.shields.io/badge/CRA-information%%20for%%20all%%20users-blue?logo=x)](x)\n' >> "$tree/README.md"
+  if labels "$tree" 2> /dev/null; then fail "a static badge past the length limits passes"; fi
+  cp "$work/badge" "$tree/README.md"
   grep -vF "$badge_caption" "$work/badge" > "$tree/README.md"
   if labels "$tree" 2> /dev/null; then fail "a README without the conformance caption passes"; fi
   cp "$work/badge" "$tree/README.md"
@@ -519,6 +523,7 @@ self_test() {
   clean "$work"
   badge_post_quantum_self_test || exit 1
   badge_length_self_test || exit 1
+  badge_count_color_self_test || exit 1
   echo "conformance: self-test OK"
 }
 
