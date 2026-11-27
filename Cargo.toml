@@ -70,8 +70,8 @@ rustix = { version = "1.1.6", default-features = false, features = ["std", "proc
 # document model it reads.
 ferrobridge-validator = "0.22.0"
 fhir-types = { version = "0.2.0", default-features = false, features = ["r4"] }
-# ferrohealth-session: the private (AES-256-GCM) cookie jar of the sealed
-# store, and the session-watch wire FerroUI's script reads. Verified against
+# ferrohealth-session: the session cookie, and the session-watch wire
+# FerroUI's script reads. Verified against
 # crates.io on 2026-11-23.
 cookie = { version = "0.18.3", default-features = false }
 ferrohealth-ui = { version = "0.6.6", default-features = false }

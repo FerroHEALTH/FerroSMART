@@ -4,7 +4,7 @@
 name = "ferrohealth-session"
 description = "The OpenID Connect sign-in and the session of the FerroHEALTH operator consoles: the authorization code flow with PKCE over ferrohealth-smart, a server-side session with idle and absolute lifetimes counted from the sign-in time, and the session-watch route"
 # Its own version line, released by the tag ferrohealth-session-v<version>.
-version = "0.31.0"
+version = "0.32.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

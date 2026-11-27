@@ -58,8 +58,8 @@ tokens for other resource servers and its justifications stay in the
 console's process and never reach the browser. A restart signs every
 operator out. A console that runs as several instances routes each session
 to one of them at its ingress (sticky sessions, on the session cookie).
-`store = "sealed"`, `key` and `key_file` belong to the removed sealed store
-and are refused when the configuration loads.
+`store` takes `memory` alone, and the section refuses a key it does not
+know.
 
 ```rust,ignore
 use ferrohealth_session::cookies::CookieNames;
