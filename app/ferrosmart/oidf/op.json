@@ -35,5 +35,77 @@
         }
       ]
     }
-  ]
+  ],
+  "override": {
+    "oidcc-ensure-registered-redirect-uri": {
+      "browser": [
+        {
+          "match": "https://localhost.emobix.co.uk:9443/authorize*",
+          "tasks": [
+            {
+              "task": "Log in at Keycloak",
+              "optional": true,
+              "match": "http://localhost:8180/realms/ferrosmart/protocol/openid-connect/auth*",
+              "commands": [
+                ["text", "id", "username", "clinician"],
+                ["text", "id", "password", "issued for the run"],
+                ["click", "id", "kc-login"]
+              ]
+            },
+            {
+              "task": "Show FerroSMART's error page",
+              "optional": true,
+              "match": "https://localhost.emobix.co.uk:9443/authorize*",
+              "commands": [
+                ["wait", "id", "main", 10, "(?s).+", "update-image-placeholder"]
+              ]
+            },
+            {
+              "task": "Verify Complete",
+              "optional": true,
+              "match": "*/test/*/callback*",
+              "commands": [
+                ["wait", "id", "submission_complete", 10]
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "oidcc-ensure-request-object-with-redirect-uri": {
+      "browser": [
+        {
+          "match": "https://localhost.emobix.co.uk:9443/authorize*",
+          "tasks": [
+            {
+              "task": "Log in at Keycloak",
+              "optional": true,
+              "match": "http://localhost:8180/realms/ferrosmart/protocol/openid-connect/auth*",
+              "commands": [
+                ["text", "id", "username", "clinician"],
+                ["text", "id", "password", "issued for the run"],
+                ["click", "id", "kc-login"]
+              ]
+            },
+            {
+              "task": "Show FerroSMART's error page",
+              "optional": true,
+              "match": "https://localhost.emobix.co.uk:9443/authorize*",
+              "commands": [
+                ["wait", "id", "main", 10, "(?s).+", "update-image-placeholder"]
+              ]
+            },
+            {
+              "task": "Verify Complete",
+              "optional": true,
+              "match": "*/test/*/callback*",
+              "commands": [
+                ["wait", "id", "submission_complete", 10]
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
 }

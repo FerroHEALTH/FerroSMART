@@ -137,10 +137,13 @@ pq_locations() {
 }
 
 # Prints, for the modules of expected.tsv $1 whose plan matches the regular
-# expression $2, the line "<passed> <total>" (passed: PASSED, or WARNING,
-# which the suite passes with a remark), then one "<result> <count>" line
-# per result in the suite's order, then "issues" and the issues the rows
-# that did not pass name, ascending.
+# expression $2, the line "<passed> <total> <deviations>" (passed: PASSED;
+# WARNING, which the suite passes with a remark; or REVIEW, which waits on
+# the screenshot the lane uploads and checks; a deviation: a module that
+# did not pass whose row names `deviation`, as a specification FerroSMART
+# follows asks for the outcome), then one "<result> <count>" line per result
+# in the suite's order, then "issues" and the issues the rows that did not
+# pass name, ascending.
 oidf_counts() {
   rows "$1" | awk -F'\t' -v plans="$2" '
     $1 ~ plans {
@@ -148,16 +151,17 @@ oidf_counts() {
       # A module whose outcome races the suite counts as its first outcome.
       r = $3
       sub(/\|.*/, "", r)
-      if (r == "PASSED" || r == "WARNING") passed++
+      if (r == "PASSED" || r == "WARNING" || r == "REVIEW") passed++
       result[r]++
-      if (r != "PASSED" && r != "WARNING") {
+      if (r != "PASSED" && r != "WARNING" && r != "REVIEW" && $5 == "deviation") deviated++
+      if (r != "PASSED" && r != "WARNING" && r != "REVIEW") {
         m = split($5, named, /[ ,]+/)
         for (i = 1; i <= m; i++) if (named[i] ~ /^#?[0-9]+$/) { sub(/^#/, "", named[i]); issue[named[i]] = 1 }
       }
     }
     END {
       if (total == 0) exit 1
-      print passed + 0, total
+      print passed + 0, total, deviated + 0
       split("PASSED WARNING FAILED REVIEW INTERRUPTED SKIPPED NOT-RUN", order, " ")
       for (i = 1; i <= 7; i++) if (order[i] in result) { print order[i], result[order[i]]; delete result[order[i]] }
       n = 0
@@ -172,6 +176,33 @@ oidf_counts() {
       print line
     }
   '
+}
+
+# Prints the endpoint JSON of the OpenID Foundation badge labelled $1 from
+# the oidf_counts output $2: "<passed>/<total> passed", or with deviations
+# "<passed>/<total>, <n> deviations".
+oidf_badge() {
+  local -a count
+  read -r -a count <<< "$(head -n 1 <<< "$2")"
+  if [[ "${count[2]}" -eq 0 ]]; then
+    badge "$1" "${count[0]}" "${count[1]}" passed openid
+  elif [[ "${count[2]}" -eq 1 ]]; then
+    message_badge "$1" "${count[0]}/${count[1]}, 1 deviation" openid
+  else
+    message_badge "$1" "${count[0]}/${count[1]}, ${count[2]} deviations" openid
+  fi
+}
+
+# Prints the markdown table of the deviations among the modules of
+# expected.tsv $1 whose plan matches the regular expression $2: each module
+# and the reason its row gives, with the specification text it follows.
+oidf_deviations() {
+  local table
+  table="$(rows "$1" | awk -F'\t' -v plans="$2" '
+    $1 ~ plans && $5 == "deviation" && $3 !~ /^(PASSED|WARNING|REVIEW)/ { printf "| `%s` | %s |\n", $2, $6 }')"
+  [[ -n "$table" ]] || return 0
+  printf '\nDeviations, each a module whose outcome a specification FerroSMART follows asks for:\n\n'
+  printf '| Module | Why |\n|---|---|\n%s\n' "$table"
 }
 
 # Prints the markdown breakdown of the oidf_counts output $1.
@@ -199,7 +230,7 @@ message_badge() {
   local color logo passed total
   passed="${2%%/*}"
   total="${2#*/}"
-  total="${total%% *}"
+  total="${total%%[!0-9]*}"
   color="$(badge_count_color "$passed" "$total")"
   logo="$(badge_logo_fields "$3")"
   jq -cn --arg label "$1" --arg message "$2" --arg color "$color" --argjson logo "$logo" \
@@ -229,20 +260,17 @@ render() {
     END { print n + 0, a + 0, r + 0 }
   ')
   badge "OpenID4VP 1.0 positive tests" "$accepted" "$positive" accepted openid > "$out/openid4vp-accepted.json"
-  local op rp count
+  local op rp
   op="$(oidf_counts "$expected" '^oidcc-(basic|config)-certification-test-plan$')" ||
     { echo "conformance: expected.tsv holds no OpenID Provider module" >&2; return 2; }
-  read -r -a count <<< "$(head -n 1 <<< "$op")"
-  badge "OIDC Core 1.0 OIDF OP" "${count[0]}" "${count[1]}" passed openid > "$out/openid-connect-op.json"
+  oidf_badge "OIDC Core 1.0 OIDF OP" "$op" > "$out/openid-connect-op.json"
   rp="$(oidf_counts "$expected" '^oidcc-client-(basic-certification-)?test-plan$')" ||
     { echo "conformance: expected.tsv holds no relying party module" >&2; return 2; }
-  read -r -a count <<< "$(head -n 1 <<< "$rp")"
-  badge "OIDC Core 1.0 OIDF RP" "${count[0]}" "${count[1]}" passed openid > "$out/openid-connect-rp.json"
+  oidf_badge "OIDC Core 1.0 OIDF RP" "$rp" > "$out/openid-connect-rp.json"
   local fapi
   fapi="$(oidf_counts "$expected" '^fapi2-security-profile-final-test-plan$')" ||
     { echo "conformance: expected.tsv holds no FAPI 2.0 module" >&2; return 2; }
-  read -r -a count <<< "$(head -n 1 <<< "$fapi")"
-  badge "FAPI 2.0 OIDF OP" "${count[0]}" "${count[1]}" passed openid > "$out/fapi2-op.json"
+  oidf_badge "FAPI 2.0 OIDF OP" "$fapi" > "$out/fapi2-op.json"
   local results="$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
   # NOTE: inferno_core 1.4.3 result.rb:50, result_summarizer.rb and HelpModal.tsx:76: an omit
   # "does not affect passed or failed scores", and a group of passes and omits scores `pass`.
@@ -273,16 +301,20 @@ render() {
     printf '| Positive (a valid presentation), accepted | %s of %s |\n' "$accepted" "$positive"
     printf '| Accepted, awaiting the suite'"'"'s image review (REVIEW) | %s |\n\n' "$review"
     printf '## OpenID Connect Core 1.0: OpenID Provider plans\n\n'
-    printf "The basic and config certification plans in\\n\`app/ferrosmart/oidf/expected.tsv\`. A WARNING passes with a remark.\\n\\n"
+    printf "The basic and config certification plans in\\n\`app/ferrosmart/oidf/expected.tsv\`. A WARNING passes with a remark, and a\\n"
+    printf 'REVIEW, which holds the screenshot of FerroSMART'"'"'s page that the lane uploads\nand checks, passes too.\n\n'
     oidf_section "$op"
+    oidf_deviations "$expected" '^oidcc-(basic|config)-certification-test-plan$'
     printf '\n## OpenID Connect Core 1.0: relying party plans\n\n'
     printf "The client and client basic certification plans in\\n\`app/ferrosmart/oidf/expected.tsv\`.\\n\\n"
     oidf_section "$rp"
+    oidf_deviations "$expected" '^oidcc-client-(basic-certification-)?test-plan$'
     printf '\n## FAPI 2.0 Security Profile: authorization server plan\n\n'
     printf "The FAPI 2.0 Security Profile Final plan in \`app/ferrosmart/oidf/expected.tsv\`,\\n"
     printf 'with private_key_jwt, DPoP and OpenID Connect; its authorization requests\n'
     printf 'carry the S256 PKCE challenge SMART App Launch 2.2.0 requires.\n\n'
     oidf_section "$fapi"
+    oidf_deviations "$expected" '^fapi2-security-profile-final-test-plan$'
     printf '\n## SMART App Launch %s\n\n' "$smart"
     printf "%s of the %s Inferno tests in\\n\`app/ferrosmart/inferno/smart_stu2_2_expected.json\` pass; an omitted test\\nis not counted.\\n" "$passed" "$tests"
     if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then
@@ -397,6 +429,7 @@ self_test() {
     printf 'oidcc-basic-certification-test-plan\tm5\tFAILED\t-\t650\tx\noidcc-config-certification-test-plan\tm6\tWARNING\t-\t#650\tx\noidcc-basic-certification-test-plan\tm7\tSKIPPED\t-\t#9\tx\n'
     printf 'oidcc-client-test-plan\tm8\tPASSED\trefused\t-\t\noidcc-client-basic-certification-test-plan\tm9\tPASSED\trefused\t-\t\n'
     printf 'fapi2-security-profile-final-test-plan\tm11\tPASSED\t-\t-\t\nfapi2-security-profile-final-test-plan\tm12\tFAILED\t-\t966\tx\n'
+    printf 'fapi2-security-profile-final-test-plan\tm13\tFAILED\t-\tdeviation\tSMART asks it\nfapi2-security-profile-final-test-plan\tm14\tREVIEW\t-\t-\tx\n'
   } > "$tree/app/ferrosmart/oidf/expected.tsv"
   printf '[{"test_id":"a","result":"pass"},{"test_id":"b","result":"omit"},{"test_group_id":"g","result":"pass"}]' \
     > "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
@@ -430,8 +463,10 @@ self_test() {
     fail "the relying party count"
   [[ "$(jq -r .color "$tree/conformance/badges/openid-connect-rp.json")" == brightgreen ]] ||
     fail "the relying party colour"
-  [[ "$(jq -r .message "$tree/conformance/badges/fapi2-op.json")" == "1/2 passed" ]] ||
-    fail "the FAPI 2.0 count"
+  [[ "$(jq -r .message "$tree/conformance/badges/fapi2-op.json")" == "2/4, 1 deviation" ]] ||
+    fail "the FAPI 2.0 count, a REVIEW passed and a deviation counted: $(jq -r .message "$tree/conformance/badges/fapi2-op.json")"
+  # shellcheck disable=SC2016 # the backticks are Markdown code spans, written literally
+  grep -qxF '| `m13` | SMART asks it |' "$tree/docs/conformance.md" || fail "the page lists no deviation"
   cp "$tree/app/ferrosmart/oidf/expected.tsv" "$work/badge"
   printf 'oidcc-client-test-plan\tm10\tFAILED|PASSED\trefused|accepted\t933\tx\n' >> "$tree/app/ferrosmart/oidf/expected.tsv"
   run "$tree" update > /dev/null || fail "a tree with a racing module is refused"
