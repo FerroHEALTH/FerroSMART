@@ -753,6 +753,64 @@ async fn the_entra_id_multitenant_authority_is_refused() {
     );
 }
 
+// NOTE: RFC 8414 §2, token_endpoint_auth_signing_alg_values_supported: an entry
+// whose assertion algorithm the provider does not list is refused at start.
+#[tokio::test]
+async fn an_assertion_algorithm_the_provider_does_not_list_is_refused() {
+    for (listed, refused) in [
+        (json!(["ML-DSA-65"]), true),
+        (json!(["PS256", "ML-DSA-65"]), false),
+    ] {
+        let keys = Keys::new();
+        let mut config = example_config(ENTRA, &keys, None);
+        let server = MockServer::start().await;
+        let authority = format!("{}/tenant/v2.0", server.uri());
+        Mock::given(matchers::method("GET"))
+            .and(matchers::path(
+                "/tenant/v2.0/.well-known/openid-configuration",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "issuer": authority,
+                "authorization_endpoint": format!("{}/tenant/oauth2/v2.0/authorize", server.uri()),
+                "token_endpoint": format!("{}/tenant/oauth2/v2.0/token", server.uri()),
+                "jwks_uri": format!("{}/tenant/discovery/v2.0/keys", server.uri()),
+                "token_endpoint_auth_methods_supported": ["private_key_jwt"],
+                "token_endpoint_auth_signing_alg_values_supported": listed
+            })))
+            .mount(&server)
+            .await;
+        config
+            .ferrosmart
+            .upstream
+            .first_mut()
+            .and_then(|upstream| upstream.oidc.as_mut())
+            .expect("a provider")
+            .issuer = authority.clone();
+        let settings = config.resolve().expect("the configuration resolves");
+        let ferrosmart::upstream::Protocol::Oidc(oidc) =
+            &settings.upstreams.first().expect("an upstream").protocol
+        else {
+            panic!("the provider speaks OpenID Connect");
+        };
+        let party = oidc
+            .relying_party(Url::parse("https://smart.example.org/callback").expect("a URL"))
+            .await;
+        if refused {
+            assert!(
+                matches!(
+                    &party,
+                    Err(ferrosmart::upstream::UpstreamError::AssertionAlgorithm {
+                        algorithm: "PS256"
+                    })
+                ),
+                "{party:?}"
+            );
+        } else {
+            assert!(party.is_ok(), "{party:?}");
+        }
+    }
+}
+
 /// Returns the DER of the PEM certificate `pem`.
 fn x509_der(pem: &str) -> Vec<u8> {
     let body: String = pem

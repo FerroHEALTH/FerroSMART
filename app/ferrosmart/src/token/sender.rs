@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use ferrohealth_server::tls::PeerCertificates;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::resource::Rejection;
 use ferrohealth_smart::sender::ClientCertificate;
 use ferrohealth_smart::sender::proof::{DPOP, ProofCheck, ProofSettings};
@@ -78,11 +79,8 @@ pub(crate) async fn presented(
     certificates: Option<&PeerCertificates>,
 ) -> Result<Presented, Refusal> {
     let jkt = if headers.contains_key(DPOP) {
-        let check = ProofCheck::new(
-            ProofSettings::new(state.settings().issuer_url.clone()),
-            replays(state),
-        )
-        .map_err(|error| server_error("the DPoP proof check cannot be built", &error))?;
+        let check = ProofCheck::new(proof_settings(state.settings()), replays(state))
+            .map_err(|error| server_error("the DPoP proof check cannot be built", &error))?;
         let proof = check
             .check_token_request(&Method::POST, TOKEN_ROUTE, headers)
             .map_err(|_refused| invalid_proof())?;
@@ -141,6 +139,20 @@ impl Presented {
             .then(|| self.jkt.clone())
             .flatten()
     }
+}
+
+/// Returns what FerroSMART checks a `DPoP` proof against.
+///
+/// Its issuer, and the algorithms of `ferrohealth-smart`'s defaults with
+/// ML-DSA-44, ML-DSA-65 and ML-DSA-87 (RFC 9964) beside them, which RFC
+/// 9449 §5.1 lets the server choose.
+#[must_use]
+pub fn proof_settings(settings: &crate::config::settings::Settings) -> ProofSettings {
+    let mut proof = ProofSettings::new(settings.issuer_url.clone());
+    proof
+        .algorithms
+        .extend([Algorithm::MlDsa44, Algorithm::MlDsa65, Algorithm::MlDsa87]);
+    proof
 }
 
 /// Returns the record of the `DPoP` proofs seen, which every endpoint that

@@ -293,6 +293,11 @@ pub struct ResourceSection {
     /// For a FHIR server, the search the patient picker lists a
     /// professional's assigned patients by; unset, it lists none.
     pub assigned: Option<Assigned>,
+    /// The algorithm the access tokens for this server are signed with, one
+    /// a key of `[ferrosmart.keys]` signs: `RS256` by default, or
+    /// `ML-DSA-65` for a server that verifies it (RFC 9964).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token_signing_alg: Option<ferrohealth_smart::jws::algorithm::Algorithm>,
 }
 
 /// The search that lists the patients assigned to a professional, by the
@@ -505,7 +510,9 @@ impl Default for KeysSection {
 #[serde(default, deny_unknown_fields)]
 pub struct BackendSection {
     /// The JWS algorithm of its client assertions: `ES384` or `RS384`, the
-    /// two SMART App Launch 2.2.0's asymmetric client profile names.
+    /// two SMART App Launch 2.2.0's asymmetric client profile names, or
+    /// `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87` (RFC 9964), which its own
+    /// token endpoint also takes.
     pub algorithm: String,
     /// `[ferrosmart.backend.keys]`: the ring that signs its assertions,
     /// sharing no key with `[ferrosmart.keys]`.
