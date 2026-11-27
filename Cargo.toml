@@ -68,8 +68,8 @@ rustix = { version = "1.1.6", default-features = false, features = ["std", "proc
 # The R4 profile validator FerroSMART's Brands Bundle test holds the Bundle
 # to, over the SMART App Launch 2.2.0 package set (#602), and the FHIR
 # document model it reads.
-ferrobridge-validator = "0.22.0"
-fhir-types = { version = "0.2.0", default-features = false, features = ["r4"] }
+ferrobridge-validator = "0.23.1"
+fhir-types = { version = "0.3.0", default-features = false, features = ["r4"] }
 # ferrohealth-session: the session cookie, and the session-watch wire
 # FerroUI's script reads. Verified against
 # crates.io on 2026-11-23.

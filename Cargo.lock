@@ -1190,13 +1190,13 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferrobridge-fhirpath"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae57087f92814880ff00a60cca4b4388369e12835760bfcf8cf16d34c69a7328"
+checksum = "794428610b08154e3a649b9cfa13f37d36c191aef39cae07d3ac3c59e93921e4"
 dependencies = [
  "base64 0.23.1",
  "chumsky",
- "fhir-types 0.2.0",
+ "fhir-types 0.3.0",
  "jiff",
  "logos",
  "quick-xml",
@@ -1209,13 +1209,13 @@ dependencies = [
 
 [[package]]
 name = "ferrobridge-term"
-version = "0.21.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c4f28366d020a44e46c733c5555920d0f4143a76adfcb9e48850df773c51d14"
+checksum = "8b95aecb2c98c01c62bc16f4de30cd3baff2f4558dd0c4d47a278e0322a41ac0"
 dependencies = [
  "async-trait",
  "backon",
- "fhir-types 0.2.0",
+ "fhir-types 0.3.0",
  "http",
  "reqwest",
  "secrecy",
@@ -1227,13 +1227,13 @@ dependencies = [
 
 [[package]]
 name = "ferrobridge-validator"
-version = "0.22.0"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "288ae166065967873fd0df4e54f84900628dccefc3a0fda62213e05773701192"
+checksum = "8b3b180061ac239198ab454fdadaa7d7994f73a1b60ec033b1b432a0ea620b8e"
 dependencies = [
  "ferrobridge-fhirpath",
  "ferrobridge-term",
- "fhir-types 0.2.0",
+ "fhir-types 0.3.0",
  "flate2",
  "http",
  "regex",
@@ -1466,7 +1466,7 @@ dependencies = [
  "ferrohealth-smart",
  "ferrohealth-telemetry",
  "ferrohealth-ui",
- "fhir-types 0.2.0",
+ "fhir-types 0.3.0",
  "flate2",
  "fluent-templates",
  "http",
@@ -1511,9 +1511,9 @@ dependencies = [
 
 [[package]]
 name = "fhir-types"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dc799c13c2e292fbaae7c6aee40daf46d2e0ba4ead0275f6b51b67eeecdd524"
+checksum = "6fb0d50e751cfb35de7aaf6f4a7652488faf6f2511b9c22c2f92831571060eb1"
 dependencies = [
  "quick-xml",
  "regex",
