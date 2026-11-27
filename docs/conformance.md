@@ -61,7 +61,11 @@ carry the S256 PKCE challenge SMART App Launch 2.2.0 requires.
 
 | Result | Modules |
 |---|---|
-| PASSED | 1 |
+| PASSED | 37 |
+| FAILED | 13 |
+| SKIPPED | 2 |
+
+Open issues: [#966](https://github.com/FerroHEALTH/FerroSMART/issues/966), [#972](https://github.com/FerroHEALTH/FerroSMART/issues/972).
 
 ## SMART App Launch 2.2.0
 
