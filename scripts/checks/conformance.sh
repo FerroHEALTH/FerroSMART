@@ -144,9 +144,12 @@ oidf_counts() {
   rows "$1" | awk -F'\t' -v plans="$2" '
     $1 ~ plans {
       total++
-      if ($3 == "PASSED" || $3 == "WARNING") passed++
-      result[$3]++
-      if ($3 != "PASSED" && $3 != "WARNING") {
+      # A module whose outcome races the suite counts as its first outcome.
+      r = $3
+      sub(/\|.*/, "", r)
+      if (r == "PASSED" || r == "WARNING") passed++
+      result[r]++
+      if (r != "PASSED" && r != "WARNING") {
         m = split($5, named, /[ ,]+/)
         for (i = 1; i <= m; i++) if (named[i] ~ /^#?[0-9]+$/) { sub(/^#/, "", named[i]); issue[named[i]] = 1 }
       }
@@ -415,6 +418,13 @@ self_test() {
     fail "the relying party count"
   [[ "$(jq -r .color "$tree/conformance/badges/openid-connect-rp.json")" == brightgreen ]] ||
     fail "the relying party colour"
+  cp "$tree/app/ferrosmart/oidf/expected.tsv" "$work/badge"
+  printf 'oidcc-client-test-plan\tm10\tFAILED|PASSED\trefused|accepted\t933\tx\n' >> "$tree/app/ferrosmart/oidf/expected.tsv"
+  run "$tree" update > /dev/null || fail "a tree with a racing module is refused"
+  [[ "$(jq -r .message "$tree/conformance/badges/openid-connect-rp.json")" == "2/3 passed" ]] ||
+    fail "a racing module counted as other than its first outcome"
+  cp "$work/badge" "$tree/app/ferrosmart/oidf/expected.tsv"
+  run "$tree" update > /dev/null || fail "the rewrite after the racing module is refused"
   [[ "$(jq -r .label "$tree/conformance/badges/smart-app-launch.json")" == "SMART App Launch 2.2.0" ]] ||
     fail "the SMART label"
   [[ "$(jq -r .message "$tree/conformance/badges/smart-app-launch.json")" == "1/1 Inferno tests" ]] ||
