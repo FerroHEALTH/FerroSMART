@@ -53,6 +53,16 @@ The client and client basic certification plans in
 
 Open issues: [#933](https://github.com/FerroHEALTH/FerroSMART/issues/933).
 
+## FAPI 2.0 Security Profile: authorization server plan
+
+The FAPI 2.0 Security Profile Final plan in `app/ferrosmart/oidf/expected.tsv`,
+with private_key_jwt, DPoP and OpenID Connect; its authorization requests
+carry the S256 PKCE challenge SMART App Launch 2.2.0 requires.
+
+| Result | Modules |
+|---|---|
+| PASSED | 1 |
+
 ## SMART App Launch 2.2.0
 
 79 of the 79 Inferno tests in

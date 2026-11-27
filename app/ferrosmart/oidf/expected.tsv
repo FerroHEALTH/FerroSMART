@@ -112,3 +112,4 @@ oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-invalid-ses
 oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-revoked-credential	PASSED	refused	-	
 oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-credential-on-identifier-list	PASSED	refused	-	
 oid4vp-1final-verifier-haip-test-plan.iso_mdl	oid4vp-1final-verifier-present-credential-without-status	REVIEW	accepted	-	the suite gives a module with an image REVIEW, for its reviewers; the lane uploads the screenshot of FerroSMART's page (#851)
+fapi2-security-profile-final-test-plan	fapi2-security-profile-final-discovery-end-point-verification	PASSED	-	-	
