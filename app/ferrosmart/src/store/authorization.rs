@@ -16,7 +16,7 @@ use crate::store::{
 
 /// The columns of a pending authorization, as [`read_pending`] reads them.
 const PENDING: &str = "SELECT id, client_id, redirect_uri, scope, state, nonce, code_challenge, \
-    audience, upstream_state, upstream_nonce, upstream_verifier, form_token, subject, fhir_user, \
+    dpop_jkt, audience, upstream_state, upstream_nonce, upstream_verifier, form_token, subject, fhir_user, \
     display_name, offered_scope, auth_time, extract(epoch FROM expires_at)::bigint AS expires, purpose, \
     upstream_session, launch_context, roles, prompt, max_age, ui_locales, reauthenticated, \
     upstream_provider, person_claims, purpose_of_use, asked_acr, acr FROM pending_authorization";
@@ -30,9 +30,10 @@ impl Store {
         sqlx::query(
             "INSERT INTO pending_authorization (id, client_id, redirect_uri, scope, state, nonce, \
              code_challenge, audience, upstream_state, upstream_nonce, upstream_verifier, form_token, \
-             expires_at, purpose, launch_context, prompt, max_age, ui_locales, upstream_provider, asked_acr) \
+             expires_at, purpose, launch_context, prompt, max_age, ui_locales, upstream_provider, asked_acr, \
+             dpop_jkt) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, to_timestamp($13), $14, $15, \
-             $16, $17, $18, $19, $20)",
+             $16, $17, $18, $19, $20, $21)",
         )
         .bind(&pending.id)
         .bind(&pending.client_id)
@@ -54,6 +55,7 @@ impl Store {
         .bind(&pending.asking.ui_locales)
         .bind(&pending.upstream_provider)
         .bind(pending.asking.acr.map(AssuranceLevel::as_str))
+        .bind(&pending.dpop_jkt)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -234,7 +236,7 @@ impl Store {
     pub async fn finish(&self, id: &str) -> Result<Option<Pending>, StoreError> {
         let row = sqlx::query(
             "DELETE FROM pending_authorization WHERE id = $1 AND expires_at > now() \
-             RETURNING id, client_id, redirect_uri, scope, state, nonce, code_challenge, audience, \
+             RETURNING id, client_id, redirect_uri, scope, state, nonce, code_challenge, dpop_jkt, audience, \
              upstream_state, upstream_nonce, upstream_verifier, form_token, subject, fhir_user, \
              display_name, offered_scope, auth_time, extract(epoch FROM expires_at)::bigint AS expires, purpose, \
              upstream_session, launch_context, roles, prompt, max_age, ui_locales, reauthenticated, \
@@ -253,7 +255,7 @@ impl Store {
     /// Returns [`StoreError::Database`] when the query fails.
     pub async fn code(&self, hash: &str) -> Result<Option<(Code, bool)>, StoreError> {
         let row = sqlx::query(
-            "SELECT client_id, redirect_uri, code_challenge, audience, subject, fhir_user, scope, \
+            "SELECT client_id, redirect_uri, code_challenge, dpop_jkt, audience, subject, fhir_user, scope, \
              nonce, auth_time, extract(epoch FROM expires_at)::bigint AS expires, upstream_session, \
              redeemed_at IS NOT NULL AS redeemed, launch_context, roles, \
              basis, person_claims, acr FROM authorization_code \
@@ -268,6 +270,7 @@ impl Store {
                     client_id: row.try_get("client_id")?,
                     redirect_uri: row.try_get("redirect_uri")?,
                     code_challenge: row.try_get("code_challenge")?,
+                    dpop_jkt: row.try_get("dpop_jkt")?,
                     audience: row.try_get("audience")?,
                     subject: row.try_get("subject")?,
                     fhir_user: row.try_get("fhir_user")?,
@@ -315,9 +318,9 @@ impl Transaction {
         sqlx::query(
             "INSERT INTO authorization_code (code_hash, client_id, redirect_uri, code_challenge, \
              audience, subject, fhir_user, scope, nonce, auth_time, expires_at, upstream_session, \
-             launch_context, roles, basis, person_claims, acr) \
+             launch_context, roles, basis, person_claims, acr, dpop_jkt) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, to_timestamp($11), $12, $13, \
-             $14, $15, $16, $17)",
+             $14, $15, $16, $17, $18)",
         )
         .bind(hash)
         .bind(&code.client_id)
@@ -336,6 +339,7 @@ impl Transaction {
         .bind(&code.basis)
         .bind(Json(&code.person_claims))
         .bind(code.acr.map(AssuranceLevel::as_str))
+        .bind(&code.dpop_jkt)
         .execute(&mut *self.tx)
         .await?;
         Ok(())
@@ -374,6 +378,7 @@ fn read_pending(row: &sqlx::postgres::PgRow) -> Result<Pending, StoreError> {
         state: row.try_get("state")?,
         nonce: row.try_get("nonce")?,
         code_challenge: row.try_get("code_challenge")?,
+        dpop_jkt: row.try_get("dpop_jkt")?,
         audience: row.try_get("audience")?,
         upstream_state: row.try_get("upstream_state")?,
         upstream_nonce: row.try_get("upstream_nonce")?,

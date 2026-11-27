@@ -600,6 +600,9 @@ pub struct Pending {
     pub nonce: Option<String>,
     /// The client's PKCE challenge.
     pub code_challenge: String,
+    /// The JWK thumbprint of the `DPoP` key the code is bound to (RFC 9449
+    /// §10).
+    pub dpop_jkt: Option<String>,
     /// The resource server the token is for.
     pub audience: String,
     /// The upstream login's `state`.
@@ -870,6 +873,9 @@ pub struct Code {
     pub redirect_uri: String,
     /// The PKCE challenge.
     pub code_challenge: String,
+    /// The JWK thumbprint of the `DPoP` key the code is bound to (RFC 9449
+    /// §10).
+    pub dpop_jkt: Option<String>,
     /// The resource server.
     pub audience: String,
     /// The person's `sub`.

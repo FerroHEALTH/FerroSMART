@@ -356,7 +356,14 @@ run_plan() {
       # A module that was stopped has no result, or the suite's UNKNOWN.
       result=$(jq -r 'if (.result // "UNKNOWN") == "UNKNOWN" then .status else .result end' <<< "$info")
       # The suite's own log of a module that did not pass, kept with the lane's artifact.
-      [ "$result" = PASSED ] || get "$suite/api/log/$instance" > "$LANE_DIR/log-$plan-$module.json" || true
+      if [ "$result" != PASSED ]; then
+        get "$suite/api/log/$instance" > "$LANE_DIR/log-$plan-$module.json" || true
+        # Each failed condition with the two entries before it, in the job's log.
+        jq -r --arg module "$module" 'to_entries | map(select(.value.result == "FAILURE") | .key) as $failed
+          | .[] | select(.key as $k | any($failed[]; . - 2 <= $k and $k <= .)) | .value
+          | "oidf-lane: \($module): " + (del(._id, .testId, .testOwner, .time, .blockId) | tostring | .[0:1500])' \
+          "$LANE_DIR/log-$plan-$module.json" 2> /dev/null || true
+      fi
     fi
     login=-
     if [ "$config" != op ] && [ "$config" != fapi ]; then

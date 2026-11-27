@@ -100,15 +100,7 @@ pub(super) async fn authorization_code(
         .map_err(|error| server_error("the code cannot be read", &error))?
         .ok_or(invalid("the code is unknown or expired"))?;
     issued_for(&client, &grant, form)?;
-    // NOTE: RFC 7636 §4.1 and §4.6, a verifier of 43 to 128 unreserved characters
-    // whose S256 is the challenge.
-    let well_formed = (43..=128).contains(&verifier.len())
-        && verifier
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(&byte));
-    if !well_formed || ferrohealth_smart::oidc::challenge(verifier) != grant.code_challenge {
-        return Err(invalid("the code_verifier does not match"));
-    }
+    held(&grant, verifier, presented)?;
     let first = !redeemed
         && state
             .store()
@@ -242,6 +234,36 @@ pub(crate) fn may_use(client: &Client, grant: GrantType) -> Result<(), Refusal> 
     } else {
         Err(unauthorized_client())
     }
+}
+
+/// Refuses the code `grant` unless `verifier` is its PKCE verifier and the
+/// request `presented` a `DPoP` proof for the key it is bound to, if any.
+fn held(grant: &crate::store::Code, verifier: &str, presented: &Presented) -> Result<(), Refusal> {
+    // NOTE: RFC 7636 §4.1 and §4.6, a verifier of 43 to 128 unreserved characters
+    // whose S256 is the challenge.
+    let well_formed = (43..=128).contains(&verifier.len())
+        && verifier
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(&byte));
+    if !well_formed || ferrohealth_smart::oidc::challenge(verifier) != grant.code_challenge {
+        return Err(Refusal {
+            error: "invalid_grant",
+            description: "the code_verifier does not match",
+        });
+    }
+    // NOTE: RFC 9449 §10, a code bound to a key is redeemed only with a DPoP proof
+    // for that key.
+    if grant
+        .dpop_jkt
+        .as_deref()
+        .is_some_and(|bound| presented.jkt.as_deref() != Some(bound))
+    {
+        return Err(Refusal {
+            error: "invalid_dpop_proof",
+            description: "the DPoP proof is not for the key the code is bound to",
+        });
+    }
+    Ok(())
 }
 
 /// Returns the client of `headers` and `form`: authenticated by its secret
