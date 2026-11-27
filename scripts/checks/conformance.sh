@@ -7,10 +7,11 @@
 # to. No specification governs the badges: our own design.
 #
 #   pid-rulebook.json      conformance/pid-attributes.tsv, which the PID
-#                          mapping test holds to the mapping: the attributes
-#                          handled (mapped, or not retained as the law
-#                          requires) whose named test exists under app/, of
-#                          those listed
+#                          mapping test holds to the mapping: of every data
+#                          identifier of the Rulebook docs/VERSIONS.md pins,
+#                          those handled (mapped, not retained as the law
+#                          requires, or not asked for a stated reason) whose
+#                          named test exists under app/
 #   openid4vp.json         app/ferrosmart/oidf/expected.tsv: of the verifier
 #                          plans' negative modules (the login refused), those
 #                          the suite passes
@@ -67,6 +68,11 @@ smart_version() {
     grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
 }
 
+# The EUDI PID Rulebook version docs/VERSIONS.md of the tree $1 pins.
+pid_version() {
+  grep -oE 'EUDI PID Rulebook [0-9]+\.[0-9]+' "$1/docs/VERSIONS.md" | head -1 | grep -oE '[0-9]+\.[0-9]+$' || true
+}
+
 # Counts the rows of the PID table of the tree $1 that name a handling and a
 # test function defined under its app/.
 handled() {
@@ -119,7 +125,9 @@ render() {
   local tree="$1" out="$2" mapped listed refused negative passed tests version
   mapped=$(handled "$tree")
   listed=$(rows "$tree/conformance/pid-attributes.tsv" | wc -l | tr -d ' ')
-  badge "EUDI PID Rulebook 1.6" "$mapped" "$listed" "attributes handled" eu > "$out/pid-rulebook.json"
+  version=$(pid_version "$tree")
+  [[ -n "$version" ]] || { echo "conformance: docs/VERSIONS.md pins no EUDI PID Rulebook version" >&2; return 2; }
+  badge "EUDI PID Rulebook $version" "$mapped" "$listed" "data identifiers handled" eu > "$out/pid-rulebook.json"
   negative=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
     awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused"' | wc -l | tr -d ' ')
   refused=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
@@ -228,16 +236,19 @@ self_test() {
     > "$tree/app/ferrosmart/oidf/expected.tsv"
   printf '[{"test_id":"a","result":"pass"},{"test_id":"b","result":"omit"},{"test_group_id":"g","result":"pass"}]' \
     > "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
-  printf '| Item | Pin |\n|---|---|\n| SMART App Launch | 2.2.0 (STU 2.2) |\n' > "$tree/docs/VERSIONS.md"
+  printf '| Item | Pin |\n|---|---|\n| SMART App Launch | 2.2.0 (STU 2.2) |\n| mdoc sources | the EUDI PID Rulebook 1.7 at commit x |\n' \
+    > "$tree/docs/VERSIONS.md"
   printf '**Conformance**<br>\n%s<br>\n[![x](https://img.shields.io/endpoint?url=conformance/badges/pid-rulebook.json)](x)\n' \
     "$badge_caption" > "$tree/README.md"
   run "$tree" update > /dev/null || fail "a clean tree is refused"
-  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "1/2 attributes handled" ]] ||
+  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "1/2 data identifiers handled" ]] ||
     fail "a row whose test does not exist counted"
   printf 'fn drops() {}\n' >> "$tree/app/ferrosmart/pid.rs"
   run "$tree" update > /dev/null || fail "the rewrite with both tests is refused"
-  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "2/2 attributes handled" ]] ||
+  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "2/2 data identifiers handled" ]] ||
     fail "a not-retained row with its test left out"
+  [[ "$(jq -r .label "$tree/conformance/badges/pid-rulebook.json")" == "EUDI PID Rulebook 1.7" ]] ||
+    fail "the PID label names the pinned Rulebook"
   [[ "$(jq -r .message "$tree/conformance/badges/openid4vp.json")" == "1/2 negative tests" ]] ||
     fail "the negative-test count"
   [[ "$(jq -r .label "$tree/conformance/badges/smart-app-launch.json")" == "SMART App Launch 2.2.0" ]] ||

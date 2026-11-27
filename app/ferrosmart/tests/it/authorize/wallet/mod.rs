@@ -617,7 +617,7 @@ async fn a_wallet_entry_takes_no_assurance_levels_and_asks_for_its_identifier() 
     assert!(refused.to_string().contains("level high"), "{refused}");
 }
 
-/// A JPEG portrait as the PID Rulebook 1.6 §4.1.1 encodes it.
+/// A JPEG portrait as the PID Rulebook 1.7 §4.1.1 encodes it.
 const PORTRAIT: &str = "data:image/jpeg;base64,/9j/4AAQSkZJRg==";
 
 // NOTE: Implementing Regulation (EU) 2024/2977 Art 3a(3); Regulation (EU) 2016/679 Art 5(1)(c).
