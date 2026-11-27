@@ -239,6 +239,7 @@ pub fn metadata_document(metadata: &ServerMetadata) -> Value {
     }
     add_launch_registration(&mut document, metadata);
     add_end_session(&mut document, metadata);
+    add_response_iss(&mut document, metadata);
     document
 }
 
@@ -288,6 +289,21 @@ fn add_end_session(document: &mut Value, metadata: &ServerMetadata) {
         "end_session_endpoint",
         crate::logout::end_session::END_SESSION_ROUTE,
     );
+}
+
+/// Adds `authorization_response_iss_parameter_supported` to `document` when
+/// `metadata` describes the login, whose every authorization response
+/// carries `iss` (RFC 9207 §2, §3).
+fn add_response_iss(document: &mut Value, metadata: &ServerMetadata) {
+    if metadata.authorization_endpoint.is_none() {
+        return;
+    }
+    if let Some(members) = document.as_object_mut() {
+        members.insert(
+            String::from("authorization_response_iss_parameter_supported"),
+            Value::Bool(true),
+        );
+    }
 }
 
 /// Returns the SMART configuration of `metadata` for the server `settings`
@@ -448,5 +464,6 @@ pub fn openid_configuration(
         );
     }
     add_end_session(&mut document, metadata);
+    add_response_iss(&mut document, metadata);
     document
 }
