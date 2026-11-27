@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: Cadasto B.V.
 # SPDX-License-Identifier: BUSL-1.1
-# The README conformance badges (#859, #946): one shields.io endpoint badge
+# The README conformance badges (#859, #946, #950): one shields.io endpoint badge
 # (https://shields.io/badges/endpoint-badge) per self-tested specification,
 # written under conformance/badges/ from the files the tests hold FerroSMART
 # to. No specification governs the badges: our own design.
@@ -15,6 +15,12 @@
 #   openid4vp.json         app/ferrosmart/oidf/expected.tsv: of the verifier
 #                          plans' negative modules (the login refused), those
 #                          the suite passes
+#   openid4vp-accepted.json
+#                          the same file: of the verifier plans' positive
+#                          modules (a valid presentation), those FerroSMART
+#                          accepted and the suite did not fail (PASSED, or
+#                          REVIEW, which the suite gives a module with an
+#                          image for its reviewers), with the REVIEW ones named
 #   openid-connect-op.json app/ferrosmart/oidf/expected.tsv: of the modules
 #                          of the two OpenID Provider plans, those the
 #                          suite passes (PASSED or WARNING), with every
@@ -193,6 +199,18 @@ render() {
   refused=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
     awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused" && $3 == "PASSED"' | wc -l | tr -d ' ')
   badge "OpenID4VP 1.0" "$refused" "$negative" "negative tests" openid > "$out/openid4vp.json"
+  local positive accepted review message
+  read -r positive accepted review < <(rows "$tree/app/ferrosmart/oidf/expected.tsv" | awk -F'\t' '
+    $1 ~ /^oid4vp-/ && $4 != "refused" {
+      n++
+      if ($4 == "accepted" && ($3 == "PASSED" || $3 == "REVIEW")) a++
+      if ($4 == "accepted" && $3 == "REVIEW") r++
+    }
+    END { print n + 0, a + 0, r + 0 }
+  ')
+  message="$accepted/$positive presentations accepted"
+  [[ "$review" -gt 0 ]] && message+=", $review awaiting the suite's image review"
+  message_badge "OpenID4VP 1.0 · valid presentations" "$message" openid > "$out/openid4vp-accepted.json"
   local op rp
   op="$(oidf_message "$tree/app/ferrosmart/oidf/expected.tsv" '^oidcc-(basic|config)-certification-test-plan$')" ||
     { echo "conformance: expected.tsv holds no OpenID Provider module" >&2; return 2; }
@@ -322,6 +340,8 @@ self_test() {
     fail "the PID label names the pinned Rulebook"
   [[ "$(jq -r .message "$tree/conformance/badges/openid4vp.json")" == "1/2 negative tests" ]] ||
     fail "the negative-test count"
+  [[ "$(jq -r .message "$tree/conformance/badges/openid4vp-accepted.json")" == "1/1 presentations accepted, 1 awaiting the suite's image review" ]] ||
+    fail "the valid-presentation count: $(jq -r .message "$tree/conformance/badges/openid4vp-accepted.json")"
   [[ "$(jq -r .message "$tree/conformance/badges/openid-connect-op.json")" == "1/3 modules passed, 1 with a warning, 1 failed, 1 skipped; open: #9, #650" ]] ||
     fail "the OpenID Provider count: $(jq -r .message "$tree/conformance/badges/openid-connect-op.json")"
   [[ "$(jq -r .color "$tree/conformance/badges/openid-connect-op.json")" == yellow ]] ||
