@@ -72,6 +72,7 @@ async fn granted(server: &Server, client: &str, basis: &str) -> (String, String,
             roles: &[],
             acr: None,
             dpop_jkt: None,
+            person_claims: None,
         })
         .await
         .expect("recorded");

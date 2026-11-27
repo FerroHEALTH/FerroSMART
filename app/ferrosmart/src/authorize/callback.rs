@@ -77,8 +77,8 @@ pub async fn callback(
         pending.upstream_nonce.clone(),
         Secret::new(pending.upstream_verifier.clone()),
     );
-    let signed_in = match party.exchange(&sign_in, &answer).await {
-        Ok(signed_in) => signed_in,
+    let identity = match signed_in(party, &sign_in, &answer).await {
+        Ok(identity) => identity,
         Err(error) => {
             forget(&state, &pending).await;
             tracing::warn!(error = %ferrohealth_server::run::chain(&error), "the upstream login failed");
@@ -109,8 +109,24 @@ pub async fn callback(
             return deny_unsigned(&state, &pending, denial).await;
         }
     };
-    let identity = Identity::from_id_token(&signed_in.claims);
     complete(&state, &pending, provider, &identity, from).await
+}
+
+/// Returns who logged in at `party`: the ID Token the code exchange
+/// answers, completed by the provider's UserInfo Response when its metadata
+/// names a UserInfo Endpoint (OpenID Connect Core 1.0 §5.3), which holds the
+/// ID Token's `sub` and adds the claims the ID Token leaves out.
+async fn signed_in(
+    party: &ferrohealth_smart::oidc::RelyingParty,
+    sign_in: &PendingSignIn,
+    answer: &Callback,
+) -> Result<Identity, ferrohealth_smart::oidc::OidcError> {
+    let signed_in = party.exchange(sign_in, answer).await?;
+    let mut identity = Identity::from_id_token(&signed_in.claims);
+    if let Some(userinfo) = party.userinfo(&signed_in).await? {
+        identity.complete(userinfo);
+    }
+    Ok(identity)
 }
 
 /// Goes on once the person logged in at `provider` as `identity`: the

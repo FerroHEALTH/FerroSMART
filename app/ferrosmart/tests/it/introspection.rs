@@ -335,6 +335,7 @@ impl Server {
                 roles: &[],
                 acr: Some(AssuranceLevel::Substantial),
                 dpop_jkt: None,
+                person_claims: None,
             })
             .await
             .expect("recorded");
@@ -621,6 +622,7 @@ async fn a_person_s_token_answers_their_mapped_roles() {
             basis: None,
             acr: None,
             dpop_jkt: None,
+            person_claims: None,
         })
         .await
         .expect("recorded");

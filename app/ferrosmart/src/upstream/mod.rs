@@ -453,6 +453,42 @@ impl Identity {
     }
 }
 
+impl Identity {
+    /// Adds each claim of the UserInfo Response `userinfo` the login does
+    /// not carry yet; its `sub` is the ID Token's, which the relying party
+    /// checked (OpenID Connect Core 1.0 §5.3.2).
+    pub fn complete(&mut self, userinfo: serde_json::Map<String, serde_json::Value>) {
+        let text = |name: &str| {
+            userinfo
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        if self.name.is_none() {
+            self.name = text("name");
+        }
+        if self.preferred_username.is_none() {
+            self.preferred_username = text("preferred_username");
+        }
+        if self.display_name.is_none() {
+            self.display_name = [self.name.as_deref(), self.preferred_username.as_deref()]
+                .into_iter()
+                .flatten()
+                .map(str::trim)
+                .find(|name| !name.is_empty())
+                .map(str::to_owned);
+        }
+        for (name, value) in userinfo {
+            if !matches!(
+                name.as_str(),
+                "sub" | "iss" | "aud" | "name" | "preferred_username"
+            ) {
+                self.claims.entry(name).or_insert(value);
+            }
+        }
+    }
+}
+
 /// Returns the FerroSMART `sub` of the user `subject` of the provider
 /// `issuer`.
 ///

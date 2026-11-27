@@ -96,6 +96,9 @@ pub fn metadata(settings: &Settings, login: bool) -> ServerMetadata {
         ]);
         metadata.response_types_supported = strings(&["code"]);
         metadata.code_challenge_methods_supported = strings(&["S256"]);
+        // NOTE: OpenID Connect Discovery 1.0 §3, userinfo_endpoint is RECOMMENDED; the
+        // login is what issues the tokens it answers.
+        metadata.userinfo_endpoint = Some(settings.endpoint(crate::userinfo::USERINFO_ROUTE));
         let mut scopes: Vec<String> = APP_LAUNCH_SCOPES
             .iter()
             .map(|&scope| scope.to_owned())

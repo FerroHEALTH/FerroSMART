@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: Cadasto B.V.
 # SPDX-License-Identifier: BUSL-1.1
-# The README conformance badges (#859): one shields.io endpoint badge
+# The README conformance badges (#859, #946): one shields.io endpoint badge
 # (https://shields.io/badges/endpoint-badge) per self-tested specification,
 # written under conformance/badges/ from the files the tests hold FerroSMART
 # to. No specification governs the badges: our own design.
 #
 #   pid-rulebook.json      conformance/pid-attributes.tsv, which the PID
-#                          mapping test holds to the mapping: the attributes
-#                          handled (mapped, or not retained as the law
-#                          requires) whose named test exists under app/, of
-#                          those listed
+#                          mapping test holds to the mapping: of every data
+#                          identifier of the Rulebook docs/VERSIONS.md pins,
+#                          those handled (mapped, not retained as the law
+#                          requires, or not asked for a stated reason) whose
+#                          named test exists under app/
 #   openid4vp.json         app/ferrosmart/oidf/expected.tsv: of the verifier
 #                          plans' negative modules (the login refused), those
 #                          the suite passes
+#   openid-connect-op.json app/ferrosmart/oidf/expected.tsv: of the modules
+#                          of the two OpenID Provider plans, those the
+#                          suite passes (PASSED or WARNING), with every
+#                          other result counted and the issues the rows
+#                          name
+#   openid-connect-rp.json the same, of the two relying party plans
 #   smart-app-launch.json  app/ferrosmart/inferno/smart_stu2_2_expected.json:
 #                          the Inferno tests that pass, of all run and not
 #                          omitted, as Inferno scores them
@@ -67,6 +74,11 @@ smart_version() {
     grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
 }
 
+# The EUDI PID Rulebook version docs/VERSIONS.md of the tree $1 pins.
+pid_version() {
+  grep -oE 'EUDI PID Rulebook [0-9]+\.[0-9]+' "$1/docs/VERSIONS.md" | head -1 | grep -oE '[0-9]+\.[0-9]+$' || true
+}
+
 # Counts the rows of the PID table of the tree $1 that name a handling and a
 # test function defined under its app/.
 handled() {
@@ -114,17 +126,80 @@ pq_locations() {
   [[ "$failures" -eq 0 ]]
 }
 
+# Prints the badge message of the modules of expected.tsv $1 whose plan
+# matches the regular expression $2: the modules passed (PASSED, or WARNING,
+# which the suite passes with a remark) of all, then each other result by
+# count, then the issues the rows that did not pass name.
+oidf_message() {
+  rows "$1" | awk -F'\t' -v plans="$2" '
+    $1 ~ plans {
+      total++
+      if ($3 == "PASSED" || $3 == "WARNING") passed++
+      if ($3 == "WARNING") warned++
+      else if ($3 != "PASSED") {
+        other[$3]++
+        m = split($5, named, /[ ,]+/)
+        for (i = 1; i <= m; i++) if (named[i] ~ /^#?[0-9]+$/) { sub(/^#/, "", named[i]); issue[named[i]] = 1 }
+      }
+    }
+    END {
+      if (total == 0) exit 1
+      message = (passed + 0) "/" total " modules passed"
+      if (warned) message = message ", " warned " with a warning"
+      split("FAILED REVIEW INTERRUPTED SKIPPED NOT-RUN", order, " ")
+      for (i = 1; i <= 5; i++) if (order[i] in other) {
+        word = tolower(order[i]); sub(/-/, " ", word)
+        message = message ", " other[order[i]] " " word; delete other[order[i]]
+      }
+      n = 0
+      for (r in other) extra[++n] = r
+      for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++) if (extra[j] < extra[i]) { t = extra[i]; extra[i] = extra[j]; extra[j] = t }
+      for (i = 1; i <= n; i++) message = message ", " other[extra[i]] " " tolower(extra[i])
+      n = 0
+      for (k in issue) ids[++n] = k
+      for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++) if (ids[j] + 0 < ids[i] + 0) { t = ids[i]; ids[i] = ids[j]; ids[j] = t }
+      if (n) {
+        message = message "; open: "
+        for (i = 1; i <= n; i++) message = message (i > 1 ? ", " : "") "#" ids[i]
+      }
+      print message
+    }
+  '
+}
+
+# Prints the endpoint JSON of label $1 with the message $2, coloured by the
+# count it opens with, and logo $3.
+message_badge() {
+  local color logo passed total
+  passed="${2%%/*}"
+  total="${2#*/}"
+  total="${total%% *}"
+  color="$(badge_count_color "$passed" "$total")"
+  logo="$(badge_logo_fields "$3")"
+  jq -cn --arg label "$1" --arg message "$2" --arg color "$color" --argjson logo "$logo" \
+    '{schemaVersion: 1, label: $label, message: $message, color: $color} + $logo'
+}
+
 # Writes the badges of the tree $1 into the directory $2.
 render() {
   local tree="$1" out="$2" mapped listed refused negative passed tests version
   mapped=$(handled "$tree")
   listed=$(rows "$tree/conformance/pid-attributes.tsv" | wc -l | tr -d ' ')
-  badge "EUDI PID Rulebook 1.6" "$mapped" "$listed" "attributes handled" eu > "$out/pid-rulebook.json"
+  version=$(pid_version "$tree")
+  [[ -n "$version" ]] || { echo "conformance: docs/VERSIONS.md pins no EUDI PID Rulebook version" >&2; return 2; }
+  badge "EUDI PID Rulebook $version" "$mapped" "$listed" "data identifiers handled" eu > "$out/pid-rulebook.json"
   negative=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
     awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused"' | wc -l | tr -d ' ')
   refused=$(rows "$tree/app/ferrosmart/oidf/expected.tsv" |
     awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused" && $3 == "PASSED"' | wc -l | tr -d ' ')
   badge "OpenID4VP 1.0" "$refused" "$negative" "negative tests" openid > "$out/openid4vp.json"
+  local op rp
+  op="$(oidf_message "$tree/app/ferrosmart/oidf/expected.tsv" '^oidcc-(basic|config)-certification-test-plan$')" ||
+    { echo "conformance: expected.tsv holds no OpenID Provider module" >&2; return 2; }
+  message_badge "OpenID Connect Core 1.0 · OIDF OP plans" "$op" openid > "$out/openid-connect-op.json"
+  rp="$(oidf_message "$tree/app/ferrosmart/oidf/expected.tsv" '^oidcc-client-(basic-certification-)?test-plan$')" ||
+    { echo "conformance: expected.tsv holds no relying party module" >&2; return 2; }
+  message_badge "OpenID Connect Core 1.0 · OIDF RP plans" "$rp" openid > "$out/openid-connect-rp.json"
   local results="$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
   # NOTE: inferno_core 1.4.3 result.rb:50, result_summarizer.rb and HelpModal.tsx:76: an omit
   # "does not affect passed or failed scores", and a group of passes and omits scores `pass`.
@@ -226,20 +301,35 @@ self_test() {
   printf '#[test]\nfn maps() {}\n' > "$tree/app/ferrosmart/pid.rs"
   printf '# c\noid4vp-p\tm1\tPASSED\trefused\t-\t\noid4vp-p\tm2\tFAILED\trefused\t#1\tx\noid4vp-p\tm3\tREVIEW\taccepted\t-\t\noidcc-p\tm4\tPASSED\trefused\t-\t\n' \
     > "$tree/app/ferrosmart/oidf/expected.tsv"
+  printf 'oidcc-basic-certification-test-plan\tm5\tFAILED\t-\t650\tx\noidcc-config-certification-test-plan\tm6\tWARNING\t-\t#650\tx\noidcc-basic-certification-test-plan\tm7\tSKIPPED\t-\t#9\tx\n' \
+    >> "$tree/app/ferrosmart/oidf/expected.tsv"
+  printf 'oidcc-client-test-plan\tm8\tPASSED\trefused\t-\t\noidcc-client-basic-certification-test-plan\tm9\tPASSED\trefused\t-\t\n' \
+    >> "$tree/app/ferrosmart/oidf/expected.tsv"
   printf '[{"test_id":"a","result":"pass"},{"test_id":"b","result":"omit"},{"test_group_id":"g","result":"pass"}]' \
     > "$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
-  printf '| Item | Pin |\n|---|---|\n| SMART App Launch | 2.2.0 (STU 2.2) |\n' > "$tree/docs/VERSIONS.md"
+  printf '| Item | Pin |\n|---|---|\n| SMART App Launch | 2.2.0 (STU 2.2) |\n| mdoc sources | the EUDI PID Rulebook 1.7 at commit x |\n' \
+    > "$tree/docs/VERSIONS.md"
   printf '**Conformance**<br>\n%s<br>\n[![x](https://img.shields.io/endpoint?url=conformance/badges/pid-rulebook.json)](x)\n' \
     "$badge_caption" > "$tree/README.md"
   run "$tree" update > /dev/null || fail "a clean tree is refused"
-  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "1/2 attributes handled" ]] ||
+  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "1/2 data identifiers handled" ]] ||
     fail "a row whose test does not exist counted"
   printf 'fn drops() {}\n' >> "$tree/app/ferrosmart/pid.rs"
   run "$tree" update > /dev/null || fail "the rewrite with both tests is refused"
-  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "2/2 attributes handled" ]] ||
+  [[ "$(jq -r .message "$tree/conformance/badges/pid-rulebook.json")" == "2/2 data identifiers handled" ]] ||
     fail "a not-retained row with its test left out"
+  [[ "$(jq -r .label "$tree/conformance/badges/pid-rulebook.json")" == "EUDI PID Rulebook 1.7" ]] ||
+    fail "the PID label names the pinned Rulebook"
   [[ "$(jq -r .message "$tree/conformance/badges/openid4vp.json")" == "1/2 negative tests" ]] ||
     fail "the negative-test count"
+  [[ "$(jq -r .message "$tree/conformance/badges/openid-connect-op.json")" == "1/3 modules passed, 1 with a warning, 1 failed, 1 skipped; open: #9, #650" ]] ||
+    fail "the OpenID Provider count: $(jq -r .message "$tree/conformance/badges/openid-connect-op.json")"
+  [[ "$(jq -r .color "$tree/conformance/badges/openid-connect-op.json")" == yellow ]] ||
+    fail "the OpenID Provider colour"
+  [[ "$(jq -r .message "$tree/conformance/badges/openid-connect-rp.json")" == "2/2 modules passed" ]] ||
+    fail "the relying party count"
+  [[ "$(jq -r .color "$tree/conformance/badges/openid-connect-rp.json")" == brightgreen ]] ||
+    fail "the relying party colour"
   [[ "$(jq -r .label "$tree/conformance/badges/smart-app-launch.json")" == "SMART App Launch 2.2.0" ]] ||
     fail "the SMART label"
   [[ "$(jq -r .message "$tree/conformance/badges/smart-app-launch.json")" == "1/1 Inferno tests" ]] ||

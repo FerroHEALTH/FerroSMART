@@ -37,8 +37,9 @@ can check who asks and what they may ask for (OpenID4VP 1.0 §5; HAIP 1.0
 `urn:eudi:pid:1` by default) or as an ISO mdoc (`mso_mdoc`, document type
 `eu.europa.ec.eudi.pid.1`), and the wallet presents the one it holds.
 
-The attributes come from the PID Rulebook (Implementing Regulation (EU)
-2024/2977, Annex), which names each attribute and its name in each format:
+The attributes come from the PID Rulebook 1.7 (Implementing Regulation
+(EU) 2024/2977, Annex), which names each attribute and its name in each
+format:
 
 | PID Rulebook attribute | SD-JWT VC claim | mdoc element | FerroSMART uses it as |
 |---|---|---|---|
@@ -47,8 +48,16 @@ The attributes come from the PID Rulebook (Implementing Regulation (EU)
 | `birth_date` | `birthdate` | `birth_date` | ID Token `birthdate`, under `profile` |
 | `birth_place` | `place_of_birth` | `place_of_birth` | ID Token `place_of_birth`, under `profile` |
 | `nationality` | `nationalities` | `nationality` | ID Token `nationalities`, under `profile` |
+| `email_address` | `email` | `email_address` | ID Token `email`, under `email`, when you ask for it |
 | `personal_administrative_number` | the same | the same | The person's identifier |
+| `issuing_country` | the same | the same | The country whose identifier system the number is in |
 | `portrait` | `picture` | `portrait` | Never asked for, and dropped if a wallet sends it |
+
+FerroSMART asks for none of the Rulebook's other data identifiers, such as
+the address, the birth names, `sex` or the document's dates, because no
+token carries them (GDPR Art 5(1)(c)).
+[`conformance/pid-attributes.tsv`](https://github.com/FerroHEALTH/FerroSMART/blob/main/conformance/pid-attributes.tsv)
+gives the reason for each.
 
 FerroSMART never retains the portrait: it identifies the person without it
 (Implementing Regulation (EU) 2024/2977 Art 3a(3); GDPR Art 5(1)(c)). How a

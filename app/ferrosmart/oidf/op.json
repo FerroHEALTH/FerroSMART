@@ -17,6 +17,16 @@
       "match": "https://localhost.emobix.co.uk:9443/authorize*",
       "tasks": [
         {
+          "task": "Log in at Keycloak",
+          "optional": true,
+          "match": "http://localhost:8180/realms/ferrosmart/protocol/openid-connect/auth*",
+          "commands": [
+            ["text", "id", "username", "clinician"],
+            ["text", "id", "password", "issued for the run"],
+            ["click", "id", "kc-login"]
+          ]
+        },
+        {
           "task": "Verify Complete",
           "match": "*/test/*/callback*",
           "commands": [

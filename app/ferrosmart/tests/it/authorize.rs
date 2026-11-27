@@ -58,6 +58,11 @@ pub(crate) struct Provider {
 impl Provider {
     /// Starts a provider serving its metadata and its key set.
     pub(crate) async fn start() -> Self {
+        Self::start_naming(&json!({})).await
+    }
+
+    /// Starts a provider whose metadata also carries `members`.
+    pub(crate) async fn start_naming(members: &Value) -> Self {
         let server = MockServer::start().await;
         let pkcs8 =
             EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &SystemRandom::new())
@@ -72,17 +77,26 @@ impl Provider {
             members.insert(String::from("use"), json!("sig"));
         }
         let uri = server.uri();
+        let mut metadata = json!({
+            "issuer": uri,
+            "authorization_endpoint": format!("{uri}/authorize"),
+            "token_endpoint": format!("{uri}/token"),
+            "jwks_uri": format!("{uri}/jwks"),
+            "end_session_endpoint": format!("{uri}/logout"),
+            "code_challenge_methods_supported": ["S256"],
+            "token_endpoint_auth_methods_supported": ["private_key_jwt", "client_secret_basic"]
+        });
+        if let (Some(base), Some(over)) = (metadata.as_object_mut(), members.as_object()) {
+            base.extend(over.iter().map(|(name, value)| {
+                let value = value
+                    .as_str()
+                    .map_or_else(|| value.clone(), |path| json!(format!("{uri}{path}")));
+                (name.clone(), value)
+            }));
+        }
         Mock::given(matchers::method("GET"))
             .and(matchers::path("/.well-known/oauth-authorization-server"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "issuer": uri,
-                "authorization_endpoint": format!("{uri}/authorize"),
-                "token_endpoint": format!("{uri}/token"),
-                "jwks_uri": format!("{uri}/jwks"),
-                "end_session_endpoint": format!("{uri}/logout"),
-                "code_challenge_methods_supported": ["S256"],
-                "token_endpoint_auth_methods_supported": ["private_key_jwt", "client_secret_basic"]
-            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(metadata))
             .mount(&server)
             .await;
         Mock::given(matchers::method("GET"))
@@ -249,6 +263,22 @@ impl Smart {
         settings: &str,
     ) -> Self {
         let provider = Provider::start().await;
+        Self::start_at(
+            provider, grants, ceiling, role, resource, redirects, settings,
+        )
+        .await
+    }
+
+    /// Starts the server of [`Smart::start_setting`] with `provider` upstream.
+    async fn start_at(
+        provider: Provider,
+        grants: &str,
+        ceiling: &str,
+        role: &str,
+        resource: &str,
+        redirects: &[&str],
+        settings: &str,
+    ) -> Self {
         let keys = Keys::new();
         let database = Database::create().await;
         let assertion = crate::support::upstream_assertion(keys.dir.path());
@@ -2604,6 +2634,7 @@ mod saml;
 mod secret_basic;
 mod self_registered;
 mod token_exchange;
+mod userinfo;
 pub(crate) mod wallet;
 
 /// The capabilities FerroSMART supports with a FHIR resource server and a
