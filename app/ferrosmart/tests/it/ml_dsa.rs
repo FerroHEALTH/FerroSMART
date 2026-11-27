@@ -42,6 +42,20 @@ fn both(keys: &Keys) -> String {
     )
 }
 
+/// The `[ferrosmart.keys]` table of [`both`] with a P-256, an Ed25519 and a
+/// PS256 RSA key beside them.
+fn every(keys: &Keys) -> String {
+    let path = |path: std::path::PathBuf| path.display().to_string();
+    format!(
+        "[ferrosmart.keys]\nprivate_key_files = [{:?}, {:?}, {:?}, {:?}]\nps256_private_key_files = [{:?}]\n",
+        path(rsa_key(keys.dir.path(), "rsa.pem")),
+        path(ml_dsa_key(keys.dir.path(), "ml-dsa-65.pem")),
+        path(crate::support::p256_key(keys.dir.path(), "p256.pem")),
+        path(crate::support::ed25519_key(keys.dir.path(), "ed25519.pem")),
+        path(rsa_key(keys.dir.path(), "ps256.pem")),
+    )
+}
+
 /// A running server whose client `export` has its tokens signed with
 /// `algorithm`, and whose EHR client `ehr` signs launches with an
 /// ML-DSA-65 key.
@@ -89,6 +103,24 @@ impl Server {
         write: fn(&std::path::Path, &str) -> std::path::PathBuf,
         resource_algorithm: Option<&str>,
     ) -> Self {
+        Self::build_signing(algorithm, write, resource_algorithm, false, both).await
+    }
+
+    /// Starts the server of [`Server::start`] whose client `export` signs
+    /// its assertions PS256 with an RSA key.
+    async fn with_ps256_client() -> Self {
+        Self::build_signing("RS256", rsa_key, None, true, both).await
+    }
+
+    /// Starts the server of [`Server::build`], `export` signing PS256 when
+    /// `ps256`.
+    async fn build_signing(
+        algorithm: &str,
+        write: fn(&std::path::Path, &str) -> std::path::PathBuf,
+        resource_algorithm: Option<&str>,
+        ps256: bool,
+        pool: fn(&Keys) -> String,
+    ) -> Self {
         let keys = Keys::new();
         let resource = resource_algorithm.map_or_else(String::new, |named| {
             format!(
@@ -99,7 +131,12 @@ impl Server {
             let pem = std::fs::read(path).expect("the key reads");
             AssertionKey::from_pem(&pem, None, Some(kid.to_owned())).expect("a client key")
         };
-        let client = read(write(keys.dir.path(), "client.pem"), "client-1");
+        let mut client = read(write(keys.dir.path(), "client.pem"), "client-1");
+        if ps256 {
+            client = client
+                .with_algorithm(Algorithm::Ps256)
+                .expect("an RSA key signs PS256");
+        }
         let ehr = read(ml_dsa_key(keys.dir.path(), "ehr.pem"), "ehr-1");
         let set = crate::support::inline(&json!({"keys": [client.public_jwk()]}));
         let ehr_set = crate::support::inline(&json!({"keys": [ehr.public_jwk()]}));
@@ -113,7 +150,7 @@ impl Server {
              scope = [\"system/launch.c\"]\ngrant_types = [\"client_credentials\"]\n\
              [[client]]\nclient_id = \"app\"\ntoken_endpoint_auth_method = \"none\"\n\
              redirect_uris = [\"https://app.example.org/callback\"]\ngrant_types = [\"authorization_code\"]",
-            both(&keys),
+            pool(&keys),
             secrecy::ExposeSecret::expose_secret(&database.url)
         );
         let text = crate::support::reach_every_base(&text);
@@ -469,4 +506,56 @@ async fn a_registration_naming_an_unknown_or_unheld_algorithm_is_refused() {
         assert!(outcome.is_err(), "{refused}");
     }
     database.drop(store).await;
+}
+
+// NOTE: FAPI 2.0 Security Profile §5.4.1 admits PS256, ES256 and EdDSA client
+// assertions; SMART App Launch 2.2.0 asks for at least one of RS384 and ES384 beside.
+#[tokio::test]
+async fn ps256_es256_and_eddsa_client_assertions_authenticate() {
+    type Write = fn(&std::path::Path, &str) -> std::path::PathBuf;
+    let writers: [(Write, Algorithm); 2] = [
+        (crate::support::p256_key, Algorithm::Es256),
+        (crate::support::ed25519_key, Algorithm::EdDsa),
+    ];
+    for (write, algorithm) in writers {
+        let server = Server::with_client("RS256", write).await;
+        assert_eq!(algorithm, server.client.algorithm());
+        let (status, body) = server.grant(&Server::assertion(&server.client)).await;
+        assert_eq!(StatusCode::OK, status, "{algorithm}: {body}");
+        server.stop().await;
+    }
+    let server = Server::with_ps256_client().await;
+    assert_eq!(Algorithm::Ps256, server.client.algorithm());
+    let (status, body) = server.grant(&Server::assertion(&server.client)).await;
+    assert_eq!(StatusCode::OK, status, "PS256: {body}");
+    server.stop().await;
+}
+
+// NOTE: RFC 7518 §3.4 and §3.5, RFC 8037 §3.1: a P-256, an Ed25519 and a PS256 RSA
+// key in the pool sign their algorithms, and discovery lists each.
+#[tokio::test]
+async fn a_resource_server_takes_tokens_in_each_algorithm_the_pool_signs() {
+    for algorithm in ["ES256", "EdDSA", "PS256"] {
+        let server = Server::build_signing("RS256", ec_key, Some(algorithm), false, every).await;
+        let token = server.token().await;
+        let header = ferrohealth_smart::jws::compact::decode(&token)
+            .expect("a JWS")
+            .header()
+            .clone();
+        assert_eq!(algorithm, header.alg.name());
+        let jwks = server.jwks().await;
+        let keys: Vec<ferrohealth_smart::jws::jwk::Jwk> = jwks["keys"]
+            .as_array()
+            .expect("keys")
+            .iter()
+            .map(|key| ferrohealth_smart::jws::jwk::Jwk::try_from(key).expect("a key"))
+            .collect();
+        let key = ferrohealth_smart::jws::jwk::select(&keys, header.kid.as_deref(), header.alg)
+            .expect("the signing key is published");
+        ferrohealth_smart::jws::compact::decode(&token)
+            .expect("a JWS")
+            .verify_claims(key)
+            .expect("the token verifies");
+        server.stop().await;
+    }
 }

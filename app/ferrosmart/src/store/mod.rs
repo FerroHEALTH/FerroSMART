@@ -527,6 +527,9 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
             .as_str()
         {
             "RS256" => ferrohealth_smart::jws::algorithm::Algorithm::Rs256,
+            "PS256" => ferrohealth_smart::jws::algorithm::Algorithm::Ps256,
+            "ES256" => ferrohealth_smart::jws::algorithm::Algorithm::Es256,
+            "EdDSA" => ferrohealth_smart::jws::algorithm::Algorithm::EdDsa,
             "ML-DSA-65" => ferrohealth_smart::jws::algorithm::Algorithm::MlDsa65,
             _ => return Err(corrupt()),
         },

@@ -20,13 +20,20 @@ use super::{
 };
 
 /// The algorithms a client assertion and a signed launch may be signed
-/// with: RS384 and ES384, of which "The FHIR authorization server SHALL be
+/// with.
+///
+/// RS384 and ES384, of which "The FHIR authorization server SHALL be
 /// capable of validating signatures with at least one" (SMART App Launch
-/// 2.2.0, Client Authentication: Asymmetric, Registering a client), and the
-/// three ML-DSA parameter sets (RFC 9964 §5).
-pub(crate) const ALGORITHMS: [Algorithm; 5] = [
+/// 2.2.0, Client Authentication: Asymmetric, Registering a client), PS256,
+/// ES256 and `EdDSA`, the ones FAPI 2.0 Security Profile §5.4.1 admits (RFC
+/// 7518 §3.4, §3.5; RFC 8037 §3.1), and the three ML-DSA parameter sets
+/// (RFC 9964 §5).
+pub(crate) const ALGORITHMS: [Algorithm; 8] = [
     Algorithm::Rs384,
     Algorithm::Es384,
+    Algorithm::Ps256,
+    Algorithm::Es256,
+    Algorithm::EdDsa,
     Algorithm::MlDsa44,
     Algorithm::MlDsa65,
     Algorithm::MlDsa87,

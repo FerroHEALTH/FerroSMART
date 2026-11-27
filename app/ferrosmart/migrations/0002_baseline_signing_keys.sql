@@ -9,7 +9,7 @@
 CREATE TABLE signing_key (
     kid text PRIMARY KEY,
     algorithm text NOT NULL CONSTRAINT signing_key_algorithm_check
-        CHECK (algorithm IN ('RS256', 'ML-DSA-65')),
+        CHECK (algorithm IN ('RS256', 'PS256', 'ES256', 'EdDSA', 'ML-DSA-65')),
     state text NOT NULL CONSTRAINT signing_key_state_check
         CHECK (state IN ('next', 'active', 'retiring', 'retired')),
     published_at timestamptz NOT NULL,

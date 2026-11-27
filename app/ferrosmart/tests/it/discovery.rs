@@ -68,7 +68,16 @@ async fn the_rfc_8414_metadata_names_the_issuer_and_only_what_is_supported() {
         body["token_endpoint_auth_methods_supported"]
     );
     assert_eq!(
-        json!(["RS384", "ES384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]),
+        json!([
+            "RS384",
+            "ES384",
+            "PS256",
+            "ES256",
+            "EdDSA",
+            "ML-DSA-44",
+            "ML-DSA-65",
+            "ML-DSA-87"
+        ]),
         body["token_endpoint_auth_signing_alg_values_supported"]
     );
     // NOTE: RFC 8414 §2, REQUIRED; no authorization endpoint lists no type yet.
@@ -103,7 +112,16 @@ async fn the_metadata_names_introspection_and_revocation_and_how_they_authentica
         body["introspection_endpoint_auth_methods_supported"]
     );
     assert_eq!(
-        json!(["RS384", "ES384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]),
+        json!([
+            "RS384",
+            "ES384",
+            "PS256",
+            "ES256",
+            "EdDSA",
+            "ML-DSA-44",
+            "ML-DSA-65",
+            "ML-DSA-87"
+        ]),
         body["introspection_endpoint_auth_signing_alg_values_supported"]
     );
     assert_eq!(
@@ -116,7 +134,16 @@ async fn the_metadata_names_introspection_and_revocation_and_how_they_authentica
         body["revocation_endpoint_auth_methods_supported"]
     );
     assert_eq!(
-        json!(["RS384", "ES384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]),
+        json!([
+            "RS384",
+            "ES384",
+            "PS256",
+            "ES256",
+            "EdDSA",
+            "ML-DSA-44",
+            "ML-DSA-65",
+            "ML-DSA-87"
+        ]),
         body["revocation_endpoint_auth_signing_alg_values_supported"]
     );
     // NOTE: SMART App Launch 2.2.0, Conformance, Metadata: both RECOMMENDED.
@@ -161,7 +188,16 @@ async fn the_smart_configuration_is_json_whatever_the_accept_header() {
         body["token_endpoint_auth_methods_supported"]
     );
     assert_eq!(
-        json!(["RS384", "ES384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]),
+        json!([
+            "RS384",
+            "ES384",
+            "PS256",
+            "ES256",
+            "EdDSA",
+            "ML-DSA-44",
+            "ML-DSA-65",
+            "ML-DSA-87"
+        ]),
         body["token_endpoint_auth_signing_alg_values_supported"]
     );
     assert_eq!(Value::Null, body["authorization_endpoint"]);

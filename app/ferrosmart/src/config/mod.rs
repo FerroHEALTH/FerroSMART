@@ -447,16 +447,22 @@ impl Default for FerroSmartSection {
     }
 }
 
-/// `[ferrosmart.keys]`: the RSA keys that sign in turn (`docs/architecture.md` §13.11).
+/// `[ferrosmart.keys]`: the keys that sign in turn, each algorithm rotating
+/// on its own (`docs/architecture.md` §13.11).
 ///
-/// They sign under `RS256`, the one algorithm RFC 9068 §2.1 and OpenID
-/// Connect Discovery §3 have every authorization server support.
+/// An RSA key signs `RS256`, the one algorithm RFC 9068 §2.1 and OpenID
+/// Connect Discovery §3 have every authorization server support, and the
+/// pool holds at least one; a P-256 key signs `ES256`, an Ed25519 key
+/// `EdDSA` and an ML-DSA-65 key `ML-DSA-65`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SigningKeysSection {
     /// The PEM files of the keys, in the order they take over; each is
     /// published under its RFC 7638 thumbprint.
     pub private_key_files: Vec<PathBuf>,
+    /// The PEM files of RSA keys that sign `PS256` (RFC 7518 §3.5), in the
+    /// order they take over, none of them among `private_key_files`.
+    pub ps256_private_key_files: Vec<PathBuf>,
     /// How long a key signs before the next one takes over.
     pub rotation_period: Span,
 }
@@ -465,6 +471,7 @@ impl Default for SigningKeysSection {
     fn default() -> Self {
         Self {
             private_key_files: Vec::new(),
+            ps256_private_key_files: Vec::new(),
             rotation_period: Span::from_days(90),
         }
     }

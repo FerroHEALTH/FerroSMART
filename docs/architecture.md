@@ -3590,8 +3590,13 @@ presets or the commands: our own design.
 - **Algorithms.** `RS256` is always available, because RFC 9068 §2.1 and
   OpenID Connect Discovery §3 require it and SMART signs ID Tokens with it,
   so the pool holds at least one RSA key. `ML-DSA-65` (RFC 9964 §5) signs
-  beside it when the pool holds an ML-DSA-65 key (RFC 9881 §6), and
-  `id_token_signing_alg_values_supported` names both. A client's
+  beside it when the pool holds an ML-DSA-65 key (RFC 9881 §6), `ES256`
+  with a P-256 key and `EdDSA` with an Ed25519 key (`rfc7518 §3.4`,
+  `rfc8037 §3.1`), and `PS256` with the RSA keys
+  `ps256_private_key_files` names, each its own key (`rfc8725 §3.1`), the
+  three FAPI 2.0 Security Profile §5.4.1 admits (#966);
+  `id_token_signing_alg_values_supported` names every algorithm the pool
+  signs. A client's
   `id_token_signed_response_alg` (OpenID Connect Dynamic Client
   Registration 1.0 §2), `RS256` by default, picks the algorithm of its ID
   Tokens. An access token is signed with the algorithm its resource server

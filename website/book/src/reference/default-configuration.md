@@ -49,6 +49,7 @@ role = []
 
 [ferrosmart.keys]
 private_key_files = []
+ps256_private_key_files = []
 rotation_period = "90d"
 
 [ferrosmart.database]

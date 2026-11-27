@@ -43,7 +43,16 @@ pub const OPENID_CONFIGURATION_ROUTE: &str = "/.well-known/openid-configuration"
 
 /// The names of the algorithms a client assertion may be signed with
 /// ([`crate::token::assertion::ALGORITHMS`]).
-const ASSERTION_ALGORITHMS: [&str; 5] = ["RS384", "ES384", "ML-DSA-44", "ML-DSA-65", "ML-DSA-87"];
+const ASSERTION_ALGORITHMS: [&str; 8] = [
+    "RS384",
+    "ES384",
+    "PS256",
+    "ES256",
+    "EdDSA",
+    "ML-DSA-44",
+    "ML-DSA-65",
+    "ML-DSA-87",
+];
 
 /// Returns the RFC 8414 §2 metadata of the server `settings` describe;
 /// with `login`, the authorization code flow and its endpoint too.

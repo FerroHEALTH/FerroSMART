@@ -59,7 +59,8 @@ fn a_jwk_set_by_value_holds_bare_public_keys_with_kty_and_kid() {
     let set = json!({"keys": [
         {"kty": "RSA", "kid": "r1", "n": "AQAB", "e": "AQAB", "alg": "RS384"},
         {"kty": "EC", "kid": "e1", "crv": "P-384", "x": "AA", "y": "AA"},
-        {"kty": "AKP", "kid": "m1", "alg": "ML-DSA-65", "pub": "AA"}
+        {"kty": "AKP", "kid": "m1", "alg": "ML-DSA-65", "pub": "AA"},
+        {"kty": "OKP", "kid": "o1", "crv": "Ed25519", "x": "AA"}
     ]});
     let client = admit_with(&by_value(), &set).expect("admitted");
     assert!(matches!(&client.keys, Some(ClientKeys::Set(kept)) if *kept == set));
@@ -72,7 +73,7 @@ fn a_jwk_set_by_value_holds_bare_public_keys_with_kty_and_kid() {
         ),
         (
             json!({"kty": "oct", "kid": "s", "k": "AA"}),
-            "is no RSA, EC or AKP key",
+            "is no RSA, EC, OKP or AKP key",
         ),
         (
             json!({"kty": "AKP", "kid": "m", "pub": "AA"}),
