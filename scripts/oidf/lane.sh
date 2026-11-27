@@ -57,7 +57,7 @@ plans=(
   "oidcc-client-basic-certification-test-plan[request_type=plain_http_request][client_registration=static_client] rp"
   "oidcc-config-certification-test-plan op"
   "oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client] op"
-  "fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][openid=openid_connect][fapi_profile=plain_fapi][fapi_request_method=unsigned][fapi_response_mode=plain_response][authorization_request_type=simple][grant_management=disabled] fapi"
+  "fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][openid=openid_connect][fapi_profile=plain_fapi][authorization_request_type=simple][grant_management=disabled] fapi"
   "oid4vp-1final-verifier-haip-test-plan[credential_format=sd_jwt_vc][response_mode=direct_post.jwt] verifier"
   "oid4vp-1final-verifier-haip-test-plan[credential_format=iso_mdl][response_mode=direct_post.jwt] verifier"
 )
