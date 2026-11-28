@@ -178,6 +178,9 @@ jobs:
       # The release window: while a package's newest dated section is
       # assembled and untagged, changelog.d/<package>/ holds no fragment, so
       # the commit to be tagged carries none.
+      - name: The lock check of the lane gates refuses what it claims to
+        if: ${{ !cancelled() }}
+        run: bash scripts/checks/lock-reaches.sh --self-test
       - name: The release window guard refuses what it claims to
         if: ${{ !cancelled() }}
         run: bash scripts/checks/release-window.sh --self-test
@@ -426,13 +429,16 @@ jobs:
           while IFS= read -r path; do
             case "$path" in
               app/ferrosmart/* | scripts/idp/* | crates/ferrohealth-smart/src/* | tools/zitadel-fhir-user/* | \
-                .github/workflows/ci.yml | docs/VERSIONS.md | Cargo.lock)
+                .github/workflows/ci.yml | docs/VERSIONS.md)
                 echo "reaches the upstream login: $path"
                 run=true
                 ;;
               *) ;;
             esac
           done < <(git diff --name-only "$BASE...$HEAD")
+          if [ "$run" = false ] && bash scripts/checks/lock-reaches.sh "$BASE" "$HEAD"; then
+            run=true
+          fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
       - if: steps.upstream.outputs.run == 'true'
         name: A standalone launch through Keycloak
@@ -511,13 +517,16 @@ jobs:
           while IFS= read -r path; do
             case "$path" in
               app/ferrosmart/* | scripts/oidf/* | crates/ferrohealth-smart/src/* | \
-                docs/specs/oidf-conformance-suite/* | .github/workflows/ci.yml | docs/VERSIONS.md | Cargo.lock)
+                docs/specs/oidf-conformance-suite/* | .github/workflows/ci.yml | docs/VERSIONS.md)
                 echo "reaches the OpenID Foundation lane: $path"
                 run=true
                 ;;
               *) ;;
             esac
           done < <(git diff --name-only "$BASE...$HEAD")
+          if [ "$run" = false ] && bash scripts/checks/lock-reaches.sh "$BASE" "$HEAD"; then
+            run=true
+          fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
       - if: steps.oidf.outputs.run == 'true'
         name: The OpenID Foundation conformance suite lane
@@ -562,13 +571,16 @@ jobs:
           while IFS= read -r path; do
             case "$path" in
               app/ferrosmart/* | scripts/inferno/* | crates/ferrohealth-smart/src/* | \
-                .github/workflows/ci.yml | docs/VERSIONS.md | Cargo.lock)
+                .github/workflows/ci.yml | docs/VERSIONS.md)
                 echo "reaches the Inferno lane: $path"
                 run=true
                 ;;
               *) ;;
             esac
           done < <(git diff --name-only "$BASE...$HEAD")
+          if [ "$run" = false ] && bash scripts/checks/lock-reaches.sh "$BASE" "$HEAD"; then
+            run=true
+          fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
       - if: steps.inferno.outputs.run == 'true'
         name: Check out the Inferno SMART App Launch test kit
@@ -661,13 +673,16 @@ jobs:
             case "$path" in
               app/ferrosmart/* | crates/ferrohealth-smart/src/* | docker/ferrosmart/* | .dockerignore | \
                 compose.yaml | compose.keycloak.yaml | scripts/idp/* | .github/workflows/ci.yml | \
-                docs/VERSIONS.md | Cargo.lock)
+                docs/VERSIONS.md)
                 echo "reaches the quickstart: $path"
                 run=true
                 ;;
               *) ;;
             esac
           done < <(git diff --name-only "$BASE...$HEAD")
+          if [ "$run" = false ] && bash scripts/checks/lock-reaches.sh "$BASE" "$HEAD"; then
+            run=true
+          fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
       - if: steps.reach.outputs.run == 'true'
         uses: ./.github/actions/setup-rust
