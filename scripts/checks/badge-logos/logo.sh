@@ -74,14 +74,14 @@ badge_logo_svg() {
     echo "badge logo: no pictogram named $1" >&2
     return 2
   fi
-  grep -v '^<!--' "$file" | tr -d '\n'
+  awk '!/^<!--/ { printf "%s", $0 }' "$file"
 }
 
 badge_logo_fields() {
   local svg
   case "$1" in
-    eu) jq -cn '{labelColor: "#003399", namedLogo: "europeanunion", logoColor: "#FFCC00"}' ;;
-    openid) jq -cn '{namedLogo: "openid", logoColor: "white"}' ;;
+    eu) echo '{"labelColor":"#003399","namedLogo":"europeanunion","logoColor":"#FFCC00"}' ;;
+    openid) echo '{"namedLogo":"openid","logoColor":"white"}' ;;
     *)
       svg="$(badge_logo_svg "$1")" || return 2
       jq -cn --arg svg "$svg" '{logoSvg: $svg}'
@@ -97,17 +97,19 @@ badge_logo_uri() {
 }
 
 badge_logo_check() {
-  local file failures=0
-  for file in "$@"; do
-    if ! jq -e '(.namedLogo // .logoSvg // "") | length > 0' "$file" > /dev/null; then
-      echo "badge logo: $file carries no namedLogo or logoSvg" >&2
-      failures=$((failures + 1))
-    elif ! jq -e '.namedLogo != "europeanunion" or (.labelColor | ascii_upcase) == "#003399"' "$file" > /dev/null; then
-      echo "badge logo: $file shows the EU emblem without the EU blue label" >&2
-      failures=$((failures + 1))
-    fi
-  done
-  [[ "$failures" -eq 0 ]]
+  local refused
+  [[ "$#" -gt 0 ]] || return 0
+  refused="$(jq -r '
+    if ((.namedLogo // .logoSvg // "") | length) == 0 then
+      "badge logo: \(input_filename) carries no namedLogo or logoSvg"
+    elif .namedLogo == "europeanunion" and ((.labelColor // "") | ascii_upcase) != "#003399" then
+      "badge logo: \(input_filename) shows the EU emblem without the EU blue label"
+    else empty end
+  ' "$@")" || return 1
+  [[ -z "$refused" ]] || {
+    echo "$refused" >&2
+    return 1
+  }
 }
 
 badge_logo_readme() {
@@ -180,16 +182,21 @@ badge_count_color_self_test() {
 }
 
 badge_color_check() {
-  local entry file held message color want failures=0
+  local entry file held message color want failures=0 i=0
+  local -a files=() helds=()
+  [[ "$#" -gt 0 ]] || return 0
   for entry in "$@"; do
-    file="$entry"
-    held=0
     if [[ "$entry" =~ ^(.+)=([0-9]+)$ && ! -f "$entry" ]]; then
-      file="${BASH_REMATCH[1]}"
-      held="${BASH_REMATCH[2]}"
+      files+=("${BASH_REMATCH[1]}")
+      helds+=("${BASH_REMATCH[2]}")
+    else
+      files+=("$entry")
+      helds+=(0)
     fi
-    message="$(jq -r .message "$file")"
-    color="$(jq -r .color "$file")"
+  done
+  while IFS=$'\x1f' read -r file message color; do
+    held="${helds[$i]}"
+    i=$((i + 1))
     if [[ "$message" =~ ([0-9]+)\ ?/\ ?([0-9]+) ]]; then
       want="$(badge_count_color "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "$held")"
     else
@@ -199,8 +206,8 @@ badge_color_check() {
       echo "badge logo: $file is $color, and its message '$message' asks for $want" >&2
       failures=$((failures + 1))
     fi
-  done
-  [[ "$failures" -eq 0 ]]
+  done < <(jq -r '[input_filename, .message, .color] | map(tostring) | join("\u001f")' "${files[@]}")
+  [[ "$i" -eq "${#files[@]}" && "$failures" -eq 0 ]]
 }
 
 # NOTE: owner decision 2026-11-27; the label names the specification, the message is the count, the breakdown sits on the linked page.
@@ -208,24 +215,24 @@ badge_label_max=30
 badge_message_max=20
 
 badge_length_check() {
-  local file label message failures=0
-  for file in "$@"; do
-    label="$(jq -r .label "$file")"
-    message="$(jq -r .message "$file")"
-    if [[ "$(jq '.label | length' "$file")" -gt "$badge_label_max" ]]; then
+  local file label message label_length message_length failures=0 seen=0
+  [[ "$#" -gt 0 ]] || return 0
+  while IFS=$'\x1f' read -r file label message label_length message_length; do
+    seen=$((seen + 1))
+    if [[ "$label_length" -gt "$badge_label_max" ]]; then
       echo "badge length: $file has a label longer than $badge_label_max characters: $label" >&2
       failures=$((failures + 1))
     fi
-    if [[ "$(jq '.message | length' "$file")" -gt "$badge_message_max" ]]; then
+    if [[ "$message_length" -gt "$badge_message_max" ]]; then
       echo "badge length: $file has a message longer than $badge_message_max characters: $message" >&2
       failures=$((failures + 1))
     fi
-    if grep -qiE '[0-9]{4}-[0-9]{2}-[0-9]{2}|by hand' <<< "$message"; then
+    if [[ "$message" =~ [0-9]{4}-[0-9]{2}-[0-9]{2}|[Bb][Yy]\ [Hh][Aa][Nn][Dd] ]]; then
       echo "badge length: $file names a date or 'by hand' in its message, which belongs on the linked page: $message" >&2
       failures=$((failures + 1))
     fi
-  done
-  [[ "$failures" -eq 0 ]]
+  done < <(jq -r '[input_filename, .label, .message, (.label | length), (.message | length)] | map(tostring) | join("\u001f")' "$@")
+  [[ "$seen" -eq "$#" && "$failures" -eq 0 ]]
 }
 
 # NOTE: owner decision 2026-11-27; a badge block is headings and badges, with at most one short line, the rest on the linked pages.
@@ -251,7 +258,11 @@ badge_block_prose() {
 badge_block_check() {
   local prose count
   prose="$(badge_block_prose "$1")"
-  count="$(grep -c . <<< "$prose" || true)"
+  local line
+  count=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] || count=$((count + 1))
+  done <<< "$prose"
   if [[ "$count" -gt "$badge_block_max_prose" ]]; then
     echo "badge block: $1 holds $count lines of prose among its badges, more than $badge_block_max_prose; move them to the page the badges link to:" >&2
     printf '  %s\n' "${prose//$'\n'/$'\n'  }" >&2
@@ -319,12 +330,14 @@ badge_static_texts() {
 
 badge_length_readme() {
   local label message failures=0
+  local label_length message_length
   while IFS=$'\t' read -r label message; do
-    if [[ "$(jq -rn --arg s "$label" '$s | length')" -gt "$badge_label_max" ]]; then
+    read -r label_length message_length < <(jq -rn --arg l "$label" --arg m "$message" '"\($l | length) \($m | length)"')
+    if [[ "$label_length" -gt "$badge_label_max" ]]; then
       echo "badge length: $1 has a static badge whose label runs past $badge_label_max characters: $label" >&2
       failures=$((failures + 1))
     fi
-    if [[ "$(jq -rn --arg s "$message" '$s | length')" -gt "$badge_message_max" ]]; then
+    if [[ "$message_length" -gt "$badge_message_max" ]]; then
       echo "badge length: $1 has a static badge whose message runs past $badge_message_max characters: $message" >&2
       failures=$((failures + 1))
     fi

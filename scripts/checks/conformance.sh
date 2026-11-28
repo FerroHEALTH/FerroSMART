@@ -65,11 +65,6 @@ readonly root
 source "$root/scripts/checks/badge-logos/logo.sh"
 readonly REFUSED='certified|compliant|conformant'
 
-# The rows of a table, without its comments.
-rows() {
-  grep -vE '^(#|$)' "$1"
-}
-
 # Prints the endpoint JSON of label $1 with the message $2/$3 $4 and logo $5.
 badge() {
   local color logo
@@ -81,30 +76,31 @@ badge() {
 
 # The SMART App Launch version docs/VERSIONS.md pins.
 smart_version() {
-  awk -F'|' '$2 ~ /^ SMART App Launch $/ { print $3 }' "$1/docs/VERSIONS.md" |
-    grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+  awk -F'|' '$2 ~ /^ SMART App Launch $/ && match($3, /[0-9]+\.[0-9]+\.[0-9]+/) { print substr($3, RSTART, RLENGTH); exit }' \
+    "$1/docs/VERSIONS.md"
 }
 
 # The EUDI PID Rulebook version docs/VERSIONS.md of the tree $1 pins.
 pid_version() {
-  grep -oE 'EUDI PID Rulebook [0-9]+\.[0-9]+' "$1/docs/VERSIONS.md" | head -1 | grep -oE '[0-9]+\.[0-9]+$' || true
+  awk 'match($0, /EUDI PID Rulebook [0-9]+\.[0-9]+/) { print substr($0, RSTART + 18, RLENGTH - 18); exit }' "$1/docs/VERSIONS.md"
 }
 
 # Counts the rows of the PID table of the tree $1 that name a handling and a
 # test function defined under its app/.
 handled() {
-  local tree="$1" count=0 handling test
-  while IFS=$'\t' read -r _ _ _ _ handling test; do
-    [[ -n "$handling" && "$handling" != "-" && -n "$test" ]] || continue
-    grep -rqE "fn ${test}\(" "$tree/app" && count=$((count + 1))
-  done < <(rows "$tree/conformance/pid-attributes.tsv")
-  echo "$count"
+  local tree="$1"
+  { grep -rhoE 'fn [A-Za-z0-9_]+\(' "$tree/app" || true; } | awk -F'\t' '
+    FILENAME == "-" { sub(/^fn /, ""); sub(/\($/, ""); defined[$0] = 1; next }
+    /^(#|$)/ { next }
+    $5 != "" && $5 != "-" && $6 != "" && ($6 in defined) { count++ }
+    END { print count + 0 }
+  ' - "$tree/conformance/pid-attributes.tsv"
 }
 
 # Prints the markdown table of the post-quantum inventory $1.
 pq_table() {
   printf '| Use | Algorithm | Safe | Post-quantum standard | Location |\n|---|---|---|---|---|\n'
-  rows "$1" | tail -n +2 | awk -F'\t' '{ printf "| %s | %s | %s | %s | `%s` |\n", $1, $2, $3, $4, $5 }'
+  awk -F'\t' '/^(#|$)/ { next } header++ { printf "| %s | %s | %s | %s | `%s` |\n", $1, $2, $3, $4, $5 }' "$1"
 }
 
 # Prints the docs/post-quantum.md of the tree $1 with its table rewritten
@@ -126,14 +122,14 @@ pq_locations() {
   while IFS=$'\t' read -r _ _ _ _ location; do
     IFS=',' read -ra items <<< "$location"
     for item in "${items[@]}"; do
-      path="$(awk '{ print $1 }' <<< "$item")"
+      read -r path _ <<< "$item"
       [[ "$path" == */* ]] || continue
       if [[ ! -e "$tree/$path" ]]; then
         echo "conformance: the post-quantum inventory names $path, which the tree does not hold" >&2
         failures=$((failures + 1))
       fi
     done
-  done < <(rows "$tree/conformance/post-quantum.tsv" | tail -n +2)
+  done < <(awk '/^(#|$)/ { next } header++' "$tree/conformance/post-quantum.tsv")
   [[ "$failures" -eq 0 ]]
 }
 
@@ -146,7 +142,8 @@ pq_locations() {
 # "<result> <count>" line per result in the suite's order, then "issues"
 # and the issues the rows that did not pass name, ascending.
 oidf_counts() {
-  rows "$1" | awk -F'\t' -v plans="$2" '
+  awk -F'\t' -v plans="$2" '
+    /^(#|$)/ { next }
     $1 ~ plans {
       total++
       # A module whose outcome races the suite counts as its first outcome.
@@ -176,7 +173,7 @@ oidf_counts() {
       for (i = 1; i <= n; i++) line = line " " ids[i]
       print line
     }
-  '
+  ' "$1"
 }
 
 # Prints the endpoint JSON of the OpenID Foundation badge labelled $1 from
@@ -184,7 +181,7 @@ oidf_counts() {
 # "<passed>/<total>, <n> deviations".
 oidf_badge() {
   local -a count
-  read -r -a count <<< "$(head -n 1 <<< "$2")"
+  read -r -a count <<< "$2"
   if [[ "${count[2]}" -eq 0 ]]; then
     badge "$1" "${count[0]}" "${count[1]}" passed openid
   elif [[ "${count[2]}" -eq 1 ]]; then
@@ -199,8 +196,9 @@ oidf_badge() {
 # and the reason its row gives, with the specification text it follows.
 oidf_deviations() {
   local table
-  table="$(rows "$1" | awk -F'\t' -v plans="$2" '
-    $1 ~ plans && $5 == "deviation" && $3 !~ /^PASSED/ { printf "| `%s` | %s |\n", $2, $6 }')"
+  table="$(awk -F'\t' -v plans="$2" '
+    /^(#|$)/ { next }
+    $1 ~ plans && $5 == "deviation" && $3 !~ /^PASSED/ { printf "| `%s` | %s |\n", $2, $6 }' "$1")"
   [[ -n "$table" ]] || return 0
   printf '\nDeviations, each a module whose outcome a specification FerroSMART follows asks for:\n\n'
   printf '| Module | Why |\n|---|---|\n%s\n' "$table"
@@ -212,8 +210,9 @@ oidf_deviations() {
 # FerroSMART's page that the run's browser filled, and none counts as passed.
 oidf_review() {
   local table
-  table="$(rows "$1" | awk -F'\t' -v plans="$2" '
-    $1 ~ plans && $3 ~ /^REVIEW/ { printf "| `%s` | %s |\n", $2, $6 }')"
+  table="$(awk -F'\t' -v plans="$2" '
+    /^(#|$)/ { next }
+    $1 ~ plans && $3 ~ /^REVIEW/ { printf "| `%s` | %s |\n", $2, $6 }' "$1")"
   [[ -n "$table" ]] || return 0
   printf '\nAwaiting review, each holding the screenshot of FerroSMART'"'"'s page for the\ncertification team; none counts as passed:\n\n'
   printf '| Module | Screenshot |\n|---|---|\n%s\n' "$table"
@@ -221,13 +220,17 @@ oidf_review() {
 
 # Prints the markdown breakdown of the oidf_counts output $1.
 oidf_section() {
-  local result count issues id first=1
+  local result count issues="" id first=1 line=0
   printf '| Result | Modules |\n|---|---|\n'
   while read -r result count; do
-    [[ "$result" == issues ]] || printf '| %s | %s |\n' "$result" "$count"
-  done < <(tail -n +2 <<< "$1")
-  issues="$(tail -n 1 <<< "$1")"
-  issues="${issues#issues}"
+    line=$((line + 1))
+    [[ "$line" -gt 1 ]] || continue
+    if [[ "$result" == issues ]]; then
+      issues="$count"
+    else
+      printf '| %s | %s |\n' "$result" "$count"
+    fi
+  done <<< "$1"
   [[ -n "${issues// /}" ]] || return 0
   printf '\nOpen issues:'
   for id in $issues; do
@@ -257,22 +260,26 @@ render() {
   local tree="$1" out="$2" mapped listed refused negative passed tests pid smart
   local expected="$tree/app/ferrosmart/oidf/expected.tsv"
   mapped=$(handled "$tree")
-  listed=$(rows "$tree/conformance/pid-attributes.tsv" | wc -l | tr -d ' ')
+  listed=$(awk '!/^(#|$)/ { n++ } END { print n + 0 }' "$tree/conformance/pid-attributes.tsv")
   pid=$(pid_version "$tree")
   [[ -n "$pid" ]] || { echo "conformance: docs/VERSIONS.md pins no EUDI PID Rulebook version" >&2; return 2; }
   badge "EUDI PID Rulebook $pid" "$mapped" "$listed" handled eu > "$out/pid-rulebook.json"
-  negative=$(rows "$expected" | awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused"' | wc -l | tr -d ' ')
-  refused=$(rows "$expected" | awk -F'\t' '$1 ~ /^oid4vp-/ && $4 == "refused" && $3 == "PASSED"' | wc -l | tr -d ' ')
+  read -r negative refused < <(awk -F'\t' '
+    /^(#|$)/ { next }
+    $1 ~ /^oid4vp-/ && $4 == "refused" { n++; if ($3 == "PASSED") p++ }
+    END { print n + 0, p + 0 }
+  ' "$expected")
   badge "OpenID4VP 1.0 negative tests" "$refused" "$negative" passed openid > "$out/openid4vp.json"
   local positive accepted review
-  read -r positive accepted review < <(rows "$expected" | awk -F'\t' '
+  read -r positive accepted review < <(awk -F'\t' '
+    /^(#|$)/ { next }
     $1 ~ /^oid4vp-/ && $4 != "refused" {
       n++
       if ($4 == "accepted" && ($3 == "PASSED" || $3 == "REVIEW")) a++
       if ($4 == "accepted" && $3 == "REVIEW") r++
     }
     END { print n + 0, a + 0, r + 0 }
-  ')
+  ' "$expected")
   badge "OpenID4VP 1.0 positive tests" "$accepted" "$positive" accepted openid > "$out/openid4vp-accepted.json"
   local op rp
   op="$(oidf_counts "$expected" '^oidcc-(basic|config)-certification-test-plan$')" ||
@@ -288,8 +295,8 @@ render() {
   local results="$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
   # NOTE: inferno_core 1.4.3 result.rb:50, result_summarizer.rb and HelpModal.tsx:76: an omit
   # "does not affect passed or failed scores", and a group of passes and omits scores `pass`.
-  tests=$(jq '[.[] | select(.test_id and .result != "omit")] | length' "$results")
-  passed=$(jq '[.[] | select(.test_id and .result == "pass")] | length' "$results")
+  read -r tests passed < <(jq -r '[.[] | select(.test_id)] |
+    "\(map(select(.result != "omit")) | length) \(map(select(.result == "pass")) | length)"' "$results")
   smart=$(smart_version "$tree")
   [[ -n "$smart" ]] || { echo "conformance: docs/VERSIONS.md pins no SMART App Launch version" >&2; return 2; }
   badge "SMART App Launch $smart" "$passed" "$tests" "Inferno tests" key > "$out/smart-app-launch.json"
@@ -345,18 +352,20 @@ render() {
 # text, uses a refused word, a badge label names no version, or a badge
 # carries no logo.
 labels() {
-  local tree="$1" failures=0 file label
-  for file in "$tree"/conformance/badges/*.json; do
-    label=$(jq -r .label "$file")
-    if grep -qiE "$REFUSED" <<< "$label"; then
-      echo "conformance: $(basename "$file") claims more than a self-test: $label" >&2
+  local tree="$1" failures=0 file label refused
+  while IFS=$'\x1f' read -r file label; do
+    shopt -s nocasematch
+    [[ "$label" =~ $REFUSED ]] && refused=1 || refused=0
+    shopt -u nocasematch
+    if [[ "$refused" -eq 1 ]]; then
+      echo "conformance: ${file##*/} claims more than a self-test: $label" >&2
       failures=$((failures + 1))
     fi
-    if [[ "$label" != post-quantum ]] && ! grep -qE '[0-9]+\.[0-9]+' <<< "$label"; then
-      echo "conformance: $(basename "$file") names no version: $label" >&2
+    if [[ "$label" != post-quantum && ! "$label" =~ [0-9]+\.[0-9]+ ]]; then
+      echo "conformance: ${file##*/} names no version: $label" >&2
       failures=$((failures + 1))
     fi
-  done
+  done < <(jq -r '[input_filename, .label] | map(tostring) | join("\u001f")' "$tree"/conformance/badges/*.json)
   if grep -E 'conformance/badges/' "$tree/README.md" | grep -qiE "$REFUSED"; then
     echo "conformance: a README badge claims more than a self-test" >&2
     failures=$((failures + 1))
@@ -418,7 +427,7 @@ run() {
   rmdir "$fresh"
   [[ "$drift" -eq 0 ]] || return 1
   labels "$tree"
-  echo "conformance: OK, $(cd "$tree/conformance/badges" && jq -r '"\(.label) \(.message)"' ./*.json | paste -sd ';' -)"
+  echo "conformance: OK, $(jq -rn '[inputs | "\(.label) \(.message)"] | join(";")' "$tree"/conformance/badges/*.json)"
 }
 
 # Removes the self-test's tree under $1, file by file.
