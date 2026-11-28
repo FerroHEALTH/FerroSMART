@@ -11,7 +11,17 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.37.0] - Unreleased
+## [0.37.0] - 2026-11-28
+
+The move to `ferrohealth-server` 0.13, with ML-DSA certificates in TLS 1.3.
+`ferrohealth-authz` 0.30.0 and `ferrohealth-session` 0.34.0 follow it.
+
+### Changed
+
+- Breaking: the `server-tls` feature requires `ferrohealth-server` 0.13 in
+  place of 0.12, whose TLS 1.3 listener and clients present and verify
+  ML-DSA certificates and whose revocation check verifies CRLs and OCSP
+  answers an ML-DSA key signs (RFC 9881) (#981).
 
 ## [0.36.0] - 2026-11-27
 
@@ -2698,7 +2708,8 @@ it issues no token and holds no key that signs one.
   `TODO(#N)` guards, the issue and pull request templates, the labels, the
   rulesets and the `crates-io` environment.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.36.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.37.0...HEAD
+[0.37.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.36.0...ferrohealth-smart-v0.37.0
 [0.36.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.35.0...ferrohealth-smart-v0.36.0
 [0.35.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.34.0...ferrohealth-smart-v0.35.0
 [0.34.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.33.1...ferrohealth-smart-v0.34.0
