@@ -233,6 +233,9 @@ pub struct ServiceProviderSettings {
     pub mutual_tls: bool,
     /// The HTTP client of every call to an identity provider.
     pub http: reqwest::Client,
+    /// The TLS `http` was built from, held so its endpoints stay cleared
+    /// for revocation while the settings live.
+    pub tls: ferrohealth_smart::client::PresentedTls,
 }
 
 impl ServiceProviderSettings {
@@ -355,6 +358,7 @@ pub fn service_provider(
         name_id_formats,
         mutual_tls,
         http,
+        tls: presented,
     })
 }
 

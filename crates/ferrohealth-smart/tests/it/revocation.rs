@@ -15,9 +15,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ferrohealth_secret::secret_url::SecretUrl;
+use ferrohealth_smart::client::outbound::OutboundClient;
+use ferrohealth_smart::client::outbound::SendError;
 use ferrohealth_smart::config::AuthSection;
 use ferrohealth_smart::config::IssuerEntry;
 use ferrohealth_smart::config::TlsBuilder as _;
+use ferrohealth_smart::config::endpoint::EndpointSection;
+use ferrohealth_smart::config::endpoint::RetrySection;
 use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::kind::IssuerKind;
 use ferrohealth_smart::metadata::DiscoveryError;
@@ -320,6 +324,54 @@ async fn a_key_set_on_another_host_is_read_only_once_cleared() {
                     jwks_uri, url,
                     "the metadata is read and the key set refused"
                 );
+            }
+            Err(other) => panic!("revoked {revoked}: {other:?}"),
+        }
+    }
+}
+
+// NOTE: the same policy for an outbound integration: the client holds its endpoint's
+// clearing for its lifetime, so a call after build connects or is refused by the CRL.
+#[tokio::test]
+async fn an_outbound_client_keeps_its_endpoint_cleared_after_build() {
+    for revoked in [false, true] {
+        let root = Root::new(revoked).await;
+        let url = root
+            .serve(SERIAL, |_| vec![("/ping", String::from("{}"))])
+            .await;
+        let endpoint = EndpointSection {
+            url: SecretUrl::new(url.as_str()),
+            retry: RetrySection {
+                max_attempts: 1,
+                ..RetrySection::default()
+            },
+            tls: ferrohealth_config::tls::TlsClientSection {
+                trust_roots_file: Some(root.roots.path().to_path_buf()),
+                ..ferrohealth_config::tls::TlsClientSection::default()
+            },
+            ..EndpointSection::default()
+        };
+        let client = OutboundClient::build(
+            &endpoint,
+            "test.endpoint",
+            &ferrohealth_smart::config::ServerTls,
+        )
+        .expect("built");
+        assert!(
+            format!("{client:?}").contains("clearance: true"),
+            "the client holds its clearing"
+        );
+        let ping = url.join("/ping").expect("a URL");
+        match client
+            .send(&http::Method::GET, &ping, |request| request)
+            .await
+        {
+            Ok(answer) => {
+                assert!(!revoked, "a revoked endpoint is never reached");
+                assert_eq!(http::StatusCode::OK, answer.status());
+            }
+            Err(SendError::Transport(_)) => {
+                assert!(revoked, "an endpoint its CRL holds good is reached");
             }
             Err(other) => panic!("revoked {revoked}: {other:?}"),
         }
