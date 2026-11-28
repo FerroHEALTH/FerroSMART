@@ -23,6 +23,7 @@ use ferrohealth_secret::secret::Secret;
 use ferrohealth_secret::secret_url::SecretUrl;
 use ferrohealth_smart::client::{PresentedTls, Reach, Tls};
 use ferrohealth_smart::config::TlsBuilder;
+use ferrohealth_smart::jws::algorithm::Algorithm;
 use ferrohealth_smart::metadata::{DiscoveryError, Http, ServerMetadata};
 use ferrohealth_smart::oidc::{OFFLINE_ACCESS, OPENID, OidcError, Provider, RelyingParty};
 use serde::{Deserialize, Serialize};
@@ -161,6 +162,12 @@ pub struct OidcSection {
     pub tls: TlsClientSection,
     /// How long one call to the provider may take; never zero.
     pub timeout: ConfigDuration,
+    /// The signature algorithms an ID Token may be signed with, ML-DSA-44,
+    /// ML-DSA-65 and ML-DSA-87 among the names (RFC 9964 §5); unset, the
+    /// relying party's own list. No symmetric algorithm or `none` has a
+    /// name (RFC 8725 §3.1, §3.2).
+    #[cfg_attr(feature = "schema", schemars(with = "Option<Vec<String>>"))]
+    pub algorithms: Option<Vec<Algorithm>>,
 }
 
 impl Default for OidcSection {
@@ -182,6 +189,7 @@ impl Default for OidcSection {
             resolve: Vec::new(),
             tls: TlsClientSection::default(),
             timeout: ConfigDuration::from_secs(10),
+            algorithms: None,
         }
     }
 }
@@ -200,6 +208,7 @@ pub struct OidcSettings {
     tls: Tls,
     reach: Reach,
     timeout: Duration,
+    algorithms: Option<Vec<Algorithm>>,
 }
 
 impl fmt::Debug for OidcSettings {
@@ -210,6 +219,7 @@ impl fmt::Debug for OidcSettings {
             .field("redirect_uri", &self.redirect_uri.as_str())
             .field("scopes", &self.scopes)
             .field("offline_access", &self.offline_access)
+            .field("algorithms", &self.algorithms)
             .finish_non_exhaustive()
     }
 }
@@ -220,7 +230,7 @@ impl OidcSection {
     /// # Errors
     ///
     /// Returns [`ConfigError::Missing`] for an empty `issuer`, `client_id`
-    /// or `redirect_uri`, [`ConfigError::Url`] for a value that is not a
+    /// or `redirect_uri` or an empty `algorithms` list, [`ConfigError::Url`] for a value that is not a
     /// URL, [`ConfigError::UrlShape`] for a provider URL that is not `https`
     /// off loopback or a redirection endpoint that is no `http` or `https`
     /// URL with a host, no userinfo and no fragment,
@@ -316,6 +326,11 @@ impl OidcSection {
                 key: "oidc.timeout",
             });
         }
+        if self.algorithms.as_ref().is_some_and(Vec::is_empty) {
+            return Err(ConfigError::Missing {
+                key: "oidc.algorithms",
+            });
+        }
         let client_secret = read_secret(
             "oidc.client_secret",
             self.client_secret.clone(),
@@ -342,6 +357,7 @@ impl OidcSection {
             tls,
             reach,
             timeout: self.timeout.get(),
+            algorithms: self.algorithms.clone(),
         })
     }
 }
@@ -412,6 +428,9 @@ impl OidcSettings {
         }
         if let Some(redirect) = &self.post_logout_redirect_uri {
             party = party.with_post_logout_redirect_uri(redirect.clone());
+        }
+        if let Some(algorithms) = &self.algorithms {
+            party = party.with_algorithms(algorithms.iter().copied());
         }
         Ok(party)
     }
@@ -625,6 +644,28 @@ mod tests {
     use ferrohealth_smart::oidc::{OFFLINE_ACCESS, OPENID};
 
     use super::{ConfigError, OidcSection, SessionSection};
+
+    // NOTE: RFC 9964 §5 names the ML-DSA algorithms, and RFC 8725 §3.1 and §3.2 leave
+    // `none` and the HMAC algorithms no name, so the list cannot hold one.
+    #[test]
+    fn algorithms_name_ml_dsa_and_refuse_an_empty_list_and_a_symmetric_name() {
+        let base = "issuer = \"https://idp.example.org\"\nclient_id = \"console\"\nredirect_uri = \"https://console.example.org/auth/callback\"\n";
+        let named: OidcSection =
+            toml::from_str(&format!("{base}algorithms = [\"ML-DSA-65\", \"ES256\"]"))
+                .expect("reads");
+        assert!(named.check().is_ok(), "an ML-DSA list is accepted");
+        let empty: OidcSection = toml::from_str(&format!("{base}algorithms = []")).expect("reads");
+        assert!(matches!(
+            empty.check(),
+            Err(ConfigError::Missing {
+                key: "oidc.algorithms"
+            })
+        ));
+        for name in ["HS256", "none"] {
+            let read = toml::from_str::<OidcSection>(&format!("{base}algorithms = [\"{name}\"]"));
+            assert!(read.is_err(), "{name} is no algorithm");
+        }
+    }
 
     #[test]
     fn the_sections_refuse_an_unknown_key() {

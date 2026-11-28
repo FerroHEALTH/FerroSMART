@@ -35,6 +35,7 @@ client_secret_file = "/run/secrets/oidc-client"
 redirect_uri = "https://console.example.org/auth/callback"
 # resolve = ["idp.internal=10.0.0.12:443"]     # a host reached at a fixed address
 # timeout = "10s"                              # one call to the provider
+# algorithms = ["ML-DSA-65", "ES256"]          # the ID Token algorithms accepted; unset, the relying party's list
 
 # [oidc.tls]                                   # built by the console's TLS reader
 # trust_roots_file = "/run/secrets/private-ca.pem"   # roots beside the platform's, revocation-checked
