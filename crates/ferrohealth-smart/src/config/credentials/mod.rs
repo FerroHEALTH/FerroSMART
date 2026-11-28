@@ -296,7 +296,13 @@ impl OauthSection {
     /// `certificate_bound` when the built configuration presents no
     /// certificate.
     pub fn resolve_with_tls(&self, tls: &dyn TlsBuilder) -> Result<ClientCredentials, ConfigError> {
-        let presented = build_tls(tls, "credentials.oauth.tls", &self.tls)?;
+        // NOTE: no specification governs which endpoints are cleared: the token endpoint
+        // or the issuer naming it, whichever is set (resolve refuses a malformed one).
+        let endpoints: Vec<url::Url> = [&self.token_endpoint, &self.issuer]
+            .into_iter()
+            .filter_map(|url| url::Url::parse(url.expose()).ok())
+            .collect();
+        let presented = build_tls(tls, "credentials.oauth.tls", &self.tls, &endpoints)?;
         self.resolve_presenting(Some(presented))
     }
 

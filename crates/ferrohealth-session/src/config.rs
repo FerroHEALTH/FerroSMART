@@ -245,8 +245,11 @@ impl OidcSection {
     /// The errors of [`Self::check`], and [`ConfigError::TlsBuild`] when
     /// `tls` refuses `oidc.tls`.
     pub fn check_with_tls(&self, tls: &dyn TlsBuilder) -> Result<OidcSettings, ConfigError> {
+        // NOTE: no specification governs which endpoints are cleared: the issuer, whose
+        // metadata and token endpoint `oidc.tls` reaches (check refuses a malformed one).
+        let endpoints: Vec<Url> = Url::parse(self.issuer.expose()).into_iter().collect();
         let presented = tls
-            .build("oidc.tls", &self.tls)
+            .build("oidc.tls", &self.tls, &endpoints)
             .map_err(ConfigError::TlsBuild)?;
         self.check_over(Some(presented))
     }
@@ -994,6 +997,7 @@ post_logout_redirect_uri = "https://u:LOGOUT_REDIRECT_PW@console.example.org/"
             &self,
             _key: &str,
             _section: &ferrohealth_config::tls::TlsClientSection,
+            _endpoints: &[url::Url],
         ) -> Result<ferrohealth_smart::client::PresentedTls, Box<dyn std::error::Error + Send + Sync>>
         {
             if self.refuse {

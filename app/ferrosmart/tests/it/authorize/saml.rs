@@ -127,7 +127,7 @@ impl Saml {
         );
         let tls = ars.as_ref().map_or_else(String::new, |ars| {
             format!(
-                "[ferrosmart.saml.tls]\nclient_identity_file = {}\ntrust_roots_file = {}\n",
+                "[ferrosmart.saml.tls]\nclient_identity_file = {}\ntrust_roots_without_revocation_file = {}\n",
                 written(dir, "tls-identity.pem", &ars.client_identity),
                 written(dir, "tls-roots.pem", &ars.ca_pem),
             )

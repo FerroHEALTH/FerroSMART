@@ -11,6 +11,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.38.0] - Unreleased
+
 ## [0.37.0] - 2026-11-28
 
 The move to `ferrohealth-server` 0.13, with ML-DSA certificates in TLS 1.3.

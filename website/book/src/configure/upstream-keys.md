@@ -158,4 +158,4 @@ FerroSMART as one SAML 2.0 service provider, which every entry with a
 | `signing_key_file` | The PKCS#8 PEM key that signs every `AuthnRequest` and `ArtifactResolve`: RSA of 2048 bits or more, or ECDSA on P-256 or P-384 |
 | `signing_certificate_file` | The PEM certificate of that key, which the metadata publishes |
 | `[[ferrosmart.saml.decryption]]` | `key_file` and `certificate_file` of an RSA key a provider encrypts assertions, identifiers and attributes for |
-| `[ferrosmart.saml.tls]` | `client_identity_file`, the certificate and key artifact resolution presents, and `trust_roots_file`, roots beside the platform's for every call to a provider |
+| `[ferrosmart.saml.tls]` | `client_identity_file`, the certificate and key artifact resolution presents, `trust_roots_file`, roots beside the platform's for every call to a provider, whose chains pass only once a revocation check cleared the provider's metadata host (it fails closed when no CRL or OCSP source answers), and `trust_roots_without_revocation_file`, roots of a private PKI with no revocation service, trusted unchecked and logged |

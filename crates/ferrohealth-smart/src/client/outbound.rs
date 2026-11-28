@@ -255,8 +255,13 @@ impl OutboundBuilder<'_> {
             source: Box::new(source),
         };
         let url = endpoint.validate().map_err(refused)?;
-        let presented =
-            crate::config::build_tls(tls, &format!("{key}.tls"), &endpoint.tls).map_err(refused)?;
+        let presented = crate::config::build_tls(
+            tls,
+            &format!("{key}.tls"),
+            &endpoint.tls,
+            std::slice::from_ref(&url),
+        )
+        .map_err(refused)?;
         let mut builder = reqwest::Client::builder()
             .timeout(endpoint.timeout.get())
             .redirect(reqwest::redirect::Policy::none())

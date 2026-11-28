@@ -166,6 +166,7 @@ async fn the_saml_and_audit_feed_tls_prefers_x25519mlkem768() {
             .build(
                 "ferrosmart.saml.tls",
                 &ferrohealth_config::tls::TlsClientSection::default(),
+                &[],
             )
             .expect("the TLS of the SAML client");
         let connector = tokio_rustls::TlsConnector::from(Arc::clone(presented.config()));
