@@ -94,6 +94,10 @@ pub enum RemoteError {
 #[derive(Debug)]
 pub struct RemotePdp {
     client: reqwest::Client,
+    /// The outbound client `client` came from, held so the connections to
+    /// its URL stay cleared for revocation while the point lives.
+    #[expect(dead_code, reason = "held for its lifetime, never read")]
+    outbound: Option<OutboundClient>,
     settings: RemoteSettings,
     retry: RetrySection,
     token: Option<TokenSource>,
@@ -125,6 +129,7 @@ impl RemotePdp {
         Ok(Self {
             per_try: Some(settings.request_timeout),
             client,
+            outbound: None,
             settings,
             retry,
             token,
@@ -173,6 +178,7 @@ impl RemotePdp {
         Ok(Self {
             per_try: Some(settings.request_timeout),
             client,
+            outbound: None,
             settings,
             retry,
             token,
@@ -218,6 +224,7 @@ impl RemotePdp {
         };
         Ok(Self {
             client: outbound.http().clone(),
+            outbound: Some(outbound.clone()),
             settings,
             retry: *outbound.retry(),
             token,

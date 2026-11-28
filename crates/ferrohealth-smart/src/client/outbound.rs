@@ -298,6 +298,7 @@ impl OutboundBuilder<'_> {
         Ok(OutboundClient {
             url,
             http,
+            presented,
             authorization,
             retry: endpoint.retry,
         })
@@ -320,6 +321,7 @@ impl fmt::Debug for OutboundBuilder<'_> {
 pub struct OutboundClient {
     url: Url,
     http: reqwest::Client,
+    presented: PresentedTls,
     authorization: Option<Authorization>,
     retry: RetrySection,
 }
@@ -387,7 +389,9 @@ impl OutboundClient {
         &self.url
     }
 
-    /// Returns the HTTP engine.
+    /// Returns the HTTP engine. Its connections to the integration's URL
+    /// stay cleared for revocation while this client lives, so a caller
+    /// that sends through it keeps the client.
     #[must_use]
     pub const fn http(&self) -> &reqwest::Client {
         &self.http
@@ -465,6 +469,7 @@ impl OutboundClient {
     where
         F: Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
     {
+        self.presented.clear(url).await;
         let request = || prepare(self.http.request(method.clone(), url.clone()));
         match &self.authorization {
             None => request().send().await.map_err(SendError::Transport),
