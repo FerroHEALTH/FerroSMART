@@ -14,6 +14,14 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-28
+
+### Fixed
+
+- `RemotePdp::from_outbound` holds the outbound client it was built from, so
+  under `trust_roots_file` the decision point's endpoint stays cleared for
+  revocation while the point lives. It needs `ferrohealth-smart` 0.38.2 (#1000).
+
 ## [0.31.0] - 2026-11-28
 
 Releases beside `ferrohealth-smart` 0.38.0, whose types this crate carries in
@@ -490,7 +498,8 @@ point behind `remote`. Products pin `=0.1.0` beside `ferrohealth-smart`
   `200` a permit, a `4xx` a deny and every other answer no decision,
   authorized with the client credentials token of `ferrohealth-smart`.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.31.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.31.1...HEAD
+[0.31.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.31.0...ferrohealth-authz-v0.31.1
 [0.31.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.30.0...ferrohealth-authz-v0.31.0
 [0.30.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.29.0...ferrohealth-authz-v0.30.0
 [0.29.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.28.0...ferrohealth-authz-v0.29.0
