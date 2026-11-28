@@ -14,7 +14,18 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.36.0] - Unreleased
+## [0.36.0] - 2026-11-28
+
+An ID Token algorithm list in `[oidc]`, so a console can accept ML-DSA ID
+Tokens; it requires `ferrohealth-smart` 0.38.2.
+
+### Added
+
+- `[oidc] algorithms` lists the signature algorithms a console accepts on an
+  ID Token, ML-DSA-44, ML-DSA-65 and ML-DSA-87 among them (RFC 9964 §5);
+  unset, the relying party's own list applies, and an empty list is refused.
+  Breaking: `OidcSection` has the new public field `algorithms`, so a console
+  that builds the section with a struct literal adds it or `..Default::default()` (#1003).
 
 ## [0.35.0] - 2026-11-28
 
@@ -589,7 +600,8 @@ FerroHEALTH operator consoles, over the relying party of `ferrohealth-smart`
   its request's `record::Held` and the `routes::Pages` trait a console draws
   a stopped sign-in through.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.35.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.36.0...HEAD
+[0.36.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.35.0...ferrohealth-session-v0.36.0
 [0.35.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.34.0...ferrohealth-session-v0.35.0
 [0.34.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.33.0...ferrohealth-session-v0.34.0
 [0.33.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.32.0...ferrohealth-session-v0.33.0
