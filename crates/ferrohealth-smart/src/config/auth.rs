@@ -283,11 +283,12 @@ impl AuthSection {
         Ok(())
     }
 
-    /// Returns the endpoints `auth.tls` reaches, which its builder keeps
-    /// cleared for revocation.
+    /// Returns the endpoints `auth.tls` reaches from the start, which its
+    /// builder clears for revocation at once; a key set or other endpoint
+    /// the metadata names is cleared before its first connection.
     fn tls_endpoints(&self) -> Vec<url::Url> {
-        // NOTE: no specification governs which endpoints are cleared: each issuer, whose
-        // keys and metadata `auth.tls` reaches (resolve refuses a malformed one).
+        // NOTE: no specification governs which endpoints are cleared at once: each issuer
+        // (resolve refuses a malformed one).
         self.issuers()
             .filter_map(|(_, entry)| url::Url::parse(entry.issuer.expose()).ok())
             .collect()

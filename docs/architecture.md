@@ -1891,10 +1891,15 @@ refresh_margin = "30s"
 a root of `trust_roots_file` is verified by webpki (ML-DSA certificates
 included, RFC 9881) and opens a connection only once a revocation check has
 cleared its endpoint. The check fails closed when no CRL or OCSP source
-answers. `ServerTls` keeps the table's endpoints cleared with one
-`revocation::Clearing` for as long as the configuration lives: the
-connection's endpoint, the issuers of `auth.tls`, the token endpoint or
-issuer of a credentials grant, and the session's provider. A chain to a
+answers. `ServerTls` keeps the table's endpoints cleared, one
+`revocation::Clearing` per origin, for as long as the configuration lives
+(`client::Clearance`). The endpoints the configuration names are cleared at
+once: the connection's endpoint, the issuers of `auth.tls`, the token
+endpoint or issuer of a credentials grant, and the session's provider.
+Every call the crate sends first clears its own endpoint and waits for that
+origin's first round, so a `jwks_uri`, an introspection endpoint or a token
+endpoint that only the metadata names, on another host under the same
+root, connects too (#993). A chain to a
 root of `trust_roots_without_revocation_file` is trusted with no check and
 logged at start and at each connection, and `PresentedTls::unchecked_roots`
 names those roots for a banner. Any other chain goes to the platform's

@@ -585,6 +585,9 @@ pub fn locations(issuer: &Url) -> [Url; 2] {
 pub struct Http {
     /// The engine.
     client: reqwest::Client,
+    /// The configuration the product built, whose endpoints are cleared
+    /// for revocation before a connection.
+    presented: Option<crate::client::PresentedTls>,
 }
 
 #[cfg(feature = "fetch")]
@@ -648,7 +651,10 @@ impl Http {
         let client = builder
             .build()
             .map_err(|source| DiscoveryError::Build { source })?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            presented: tls.presented.clone(),
+        })
     }
 
     /// Returns an engine over `client`, a product's own, used as built.
@@ -657,12 +663,26 @@ impl Http {
     /// redirect policy, timeout and TLS material the product gave it.
     #[must_use]
     pub const fn from_client(client: reqwest::Client) -> Self {
-        Self { client }
+        Self {
+            client,
+            presented: None,
+        }
     }
 
-    /// Returns the underlying engine, for the token request.
+    /// Returns the underlying engine, for a call to an endpoint
+    /// [`Http::clear`] cleared.
     pub(crate) const fn client(&self) -> &reqwest::Client {
         &self.client
+    }
+
+    /// Clears `endpoint` for revocation before a call to it, when the
+    /// product's configuration admits only a cleared chain; every call this
+    /// crate sends first clears its endpoint, so one learned from metadata
+    /// connects as a configured one does.
+    pub(crate) async fn clear(&self, endpoint: &Url) {
+        if let Some(presented) = &self.presented {
+            presented.clear(endpoint).await;
+        }
     }
 
     /// Returns the metadata of `issuer`.
@@ -728,6 +748,7 @@ impl Http {
         &self,
         url: Url,
     ) -> Result<(Url, StatusCode, String, Option<String>), DiscoveryError> {
+        self.clear(&url).await;
         let mut response = self
             .client
             .get(url.clone())
