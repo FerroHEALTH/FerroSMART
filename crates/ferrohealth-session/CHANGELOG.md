@@ -14,7 +14,15 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.34.0] - Unreleased
+## [0.34.0] - 2026-11-28
+
+Releases beside `ferrohealth-smart` 0.37.0, whose types this crate carries in
+its public API.
+
+### Changed
+
+- Breaking: requires `ferrohealth-smart` 0.37 in place of 0.36, which moves
+  to `ferrohealth-server` 0.13 (#981).
 
 ## [0.33.0] - 2026-11-27
 
@@ -567,7 +575,8 @@ FerroHEALTH operator consoles, over the relying party of `ferrohealth-smart`
   its request's `record::Held` and the `routes::Pages` trait a console draws
   a stopped sign-in through.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.33.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.34.0...HEAD
+[0.34.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.33.0...ferrohealth-session-v0.34.0
 [0.33.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.32.0...ferrohealth-session-v0.33.0
 [0.32.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.31.0...ferrohealth-session-v0.32.0
 [0.31.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.30.1...ferrohealth-session-v0.31.0
