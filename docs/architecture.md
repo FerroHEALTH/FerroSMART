@@ -5150,6 +5150,25 @@ ML-DSA-65 and ML-DSA-87 beside them, a proof of those carrying its `AKP`
 key (`rfc9964`, #935), and `tls_client_certificate_bound_access_tokens`,
 `true` when the listener asks for a certificate (`rfc8705 §3.3`).
 
+A client may also authenticate by that certificate (`rfc8705 §2`, #967),
+which FAPI 2.0 §5.3.3.1 offers beside `private_key_jwt`. A
+`tls_client_auth` client registers exactly one subject, its RFC 4514
+subject DN or one subject alternative name (`rfc8705 §2.1.2`), and its
+certificate is the one the listener verified against `client_ca_file`
+whose subject matches: the DN's attribute types compare without case and
+without the spaces around separators, which `rfc8705 §2.1` leaves to the
+server ("a predictable treatment of DN values"), a `dNSName` without
+case, an IP address in binary form. A `self_signed_tls_client_auth`
+client registers its certificate as the first of a key's `x5c` in its JWK
+Set and authenticates by that certificate alone (`rfc8705 §2.2`); since
+the listener verifies every client certificate, `client_ca_file` holds it.
+Either names itself by `client_id`, at the token, PAR, introspection and
+revocation endpoints, and neither may use `client_credentials`, which SMART
+2.2 Backend Services keeps for an asymmetric JWT. Every other request is
+`invalid_client`. The metadata lists both methods for the token,
+introspection and revocation endpoints once the listener asks for a
+certificate.
+
 ### 13.32 Upstream providers: the EUDI Wallet
 
 A person can log in by presenting their person identification data (PID)

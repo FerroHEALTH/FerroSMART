@@ -221,7 +221,14 @@ pub(crate) async fn admitted(
     presented: &Presented,
     grant: GrantType,
 ) -> Result<(Client, Confirmation), Refusal> {
-    let client = identify(state, headers, form, Endpoint::Token).await?;
+    let client = identify(
+        state,
+        headers,
+        form,
+        Endpoint::Token,
+        presented.leaf.as_deref(),
+    )
+    .await?;
     may_use(&client, grant)?;
     let confirmation = presented.bind(&client)?;
     Ok((client, confirmation))
@@ -267,15 +274,16 @@ fn held(grant: &crate::store::Code, verifier: &str, presented: &Presented) -> Re
 }
 
 /// Returns the client of `headers` and `form`: authenticated by its secret
-/// (RFC 6749 §2.3.1) or its assertion, or a registered public client named
-/// by `client_id`, which cannot
-/// authenticate (RFC 6749 §2.1, §3.2.1; SMART App Launch 2.2.0, Refresh
-/// access token, Request), at `endpoint`.
+/// (RFC 6749 §2.3.1), its assertion or the connection's certificate `leaf`
+/// (RFC 8705 §2), or a registered public client named by `client_id`, which
+/// cannot authenticate (RFC 6749 §2.1, §3.2.1; SMART App Launch 2.2.0,
+/// Refresh access token, Request), at `endpoint`.
 pub(crate) async fn identify(
     state: &AppState,
     headers: &http::HeaderMap,
     form: &Params,
     endpoint: Endpoint,
+    leaf: Option<&[u8]>,
 ) -> Result<Client, Refusal> {
     if let Some(presented) = super::secret::presented(headers, form)? {
         return super::secret::authenticate(state, presented).await;
@@ -288,8 +296,14 @@ pub(crate) async fn identify(
         .ok_or(Refusal::client("the request names no client"))?;
     match state.store().client(client_id).await {
         Ok(Some(client)) if client.kind() == ClientKind::Public => Ok(client),
+        // NOTE: RFC 8705 §2, a mutual-TLS client names itself by client_id and
+        // authenticates by the connection's certificate.
+        Ok(Some(client)) if client.kind() == ClientKind::ConfidentialCertificate => {
+            super::mtls::authenticate(state, &client, leaf).await?;
+            Ok(client)
+        }
         Ok(_) => Err(Refusal::client(
-            "the client is not a registered public client",
+            "the client is not a registered public or mutual-TLS client",
         )),
         Err(error) => Err(server_error("the client registry cannot be read", &error)),
     }

@@ -103,6 +103,13 @@ pub fn metadata(settings: &Settings, login: bool) -> ServerMetadata {
             "client_secret_post",
             "none",
         ]);
+        // NOTE: RFC 8705 §2.1.1 and §2.2.1, a mutual-TLS client is one that signs in
+        // a person, over a listener that asks for its certificate.
+        if metadata.tls_client_certificate_bound_access_tokens == Some(true)
+            && let Some(methods) = metadata.token_endpoint_auth_methods_supported.as_mut()
+        {
+            methods.extend(MTLS_METHODS.iter().map(|&method| method.to_owned()));
+        }
         metadata.response_types_supported = strings(&["code"]);
         metadata.code_challenge_methods_supported = strings(&["S256"]);
         // NOTE: OpenID Connect Discovery 1.0 §3, userinfo_endpoint is RECOMMENDED; the
@@ -157,6 +164,18 @@ const APP_LAUNCH: [&str; 5] = [
     "authorize-post",
 ];
 
+/// The mutual-TLS client authentication methods (RFC 8705 §2.1.1, §2.2.1).
+const MTLS_METHODS: [&str; 2] = ["tls_client_auth", "self_signed_tls_client_auth"];
+
+/// Returns whether `metadata` offers mutual-TLS client authentication: the
+/// token endpoint lists it once the listener asks for a certificate.
+fn mtls_offered(metadata: &ServerMetadata) -> bool {
+    metadata
+        .token_endpoint_auth_methods_supported
+        .as_ref()
+        .is_some_and(|methods| methods.iter().any(|method| method == "tls_client_auth"))
+}
+
 /// Returns the capabilities `settings` add to [`APP_LAUNCH`]:
 /// `context-standalone-patient` when the patient picker can search one of
 /// the resource servers, `context-standalone-encounter` when one of them is
@@ -210,27 +229,36 @@ fn configured_capabilities(settings: &Settings) -> Vec<String> {
 pub fn metadata_document(metadata: &ServerMetadata) -> Value {
     let mut document =
         serde_json::to_value(metadata).expect("the metadata should serialize as JSON");
+    let mtls: &[&str] = if mtls_offered(metadata) {
+        &MTLS_METHODS
+    } else {
+        &[]
+    };
     if let Some(members) = document.as_object_mut() {
+        let mut introspection = vec![
+            "private_key_jwt",
+            "client_secret_basic",
+            "client_secret_post",
+        ];
+        introspection.extend_from_slice(mtls);
         members.insert(
             String::from("introspection_endpoint_auth_methods_supported"),
-            json!([
-                "private_key_jwt",
-                "client_secret_basic",
-                "client_secret_post"
-            ]),
+            json!(introspection),
         );
         members.insert(
             String::from("introspection_endpoint_auth_signing_alg_values_supported"),
             json!(ASSERTION_ALGORITHMS),
         );
+        let mut revocation = vec![
+            "private_key_jwt",
+            "client_secret_basic",
+            "client_secret_post",
+            "none",
+        ];
+        revocation.extend_from_slice(mtls);
         members.insert(
             String::from("revocation_endpoint_auth_methods_supported"),
-            json!([
-                "private_key_jwt",
-                "client_secret_basic",
-                "client_secret_post",
-                "none"
-            ]),
+            json!(revocation),
         );
         members.insert(
             String::from("revocation_endpoint_auth_signing_alg_values_supported"),

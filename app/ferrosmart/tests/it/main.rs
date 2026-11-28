@@ -24,6 +24,7 @@ mod ig_examples;
 mod introspection;
 mod launch;
 mod ml_dsa;
+mod mtls;
 mod openapi;
 mod post_quantum;
 mod reference_pages;

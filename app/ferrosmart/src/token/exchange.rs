@@ -61,8 +61,14 @@ pub(super) async fn token_exchange(
     from: IpAddr,
     presented: &super::sender::Presented,
 ) -> Result<Issued, Refusal> {
-    let client =
-        super::grants::identify(state, headers, form, super::assertion::Endpoint::Token).await?;
+    let client = super::grants::identify(
+        state,
+        headers,
+        form,
+        super::assertion::Endpoint::Token,
+        presented.leaf.as_deref(),
+    )
+    .await?;
     let confirmation = presented.bind(&client)?;
     // NOTE: RFC 8693 §2.1, the client authenticates as RFC 6749 §3.2.1 has it, so a
     // public client, which cannot, is refused.

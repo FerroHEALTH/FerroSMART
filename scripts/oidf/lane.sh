@@ -58,6 +58,7 @@ plans=(
   "oidcc-config-certification-test-plan op"
   "oidcc-basic-certification-test-plan[server_metadata=discovery][client_registration=static_client] op"
   "fapi2-security-profile-final-test-plan[client_auth_type=private_key_jwt][sender_constrain=dpop][openid=openid_connect][fapi_profile=plain_fapi][authorization_request_type=simple][grant_management=disabled] fapi"
+  "fapi2-security-profile-final-test-plan[client_auth_type=mtls][sender_constrain=dpop][openid=openid_connect][fapi_profile=plain_fapi][authorization_request_type=simple][grant_management=disabled] fapi-mtls"
   "oid4vp-1final-verifier-haip-test-plan[credential_format=sd_jwt_vc][response_mode=direct_post.jwt] verifier"
   "oid4vp-1final-verifier-haip-test-plan[credential_format=iso_mdl][response_mode=direct_post.jwt] verifier"
 )
@@ -86,7 +87,10 @@ rows() { grep -vE '^(#|$)' "$lane/expected.tsv"; }
 # verifier plan's mdoc variant, `.iso_mdl` after it.
 plan_key() {
   local spec=$1 key=${1%%\[*}
-  case "$spec" in *credential_format=iso_mdl*) key="$key.iso_mdl" ;; esac
+  case "$spec" in
+    *credential_format=iso_mdl*) key="$key.iso_mdl" ;;
+    *client_auth_type=mtls*) key="$key.mtls" ;;
+  esac
   printf '%s\n' "$key"
 }
 
@@ -245,6 +249,16 @@ make_keys() {
   printf 'subjectAltName=DNS:%s\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n' "$host" > "$dir/host.ext"
   openssl x509 -req -in "$dir/host.csr" -CA "$dir/ca.crt" -CAkey "$dir/ca.key" -CAcreateserial \
     -days 1 -extfile "$dir/host.ext" -out "$dir/host.crt" 2> /dev/null
+  # Each FAPI 2.0 mutual-TLS client's certificate, under the lane's CA, which the
+  # listener verifies client certificates against (RFC 8705 §2.1).
+  for name in fapi-mtls-1 fapi-mtls-2; do
+    openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=$name" \
+      -keyout "$dir/$name.key" -out "$dir/$name.csr" 2> /dev/null
+    printf 'subjectAltName=DNS:%s.example.org\nextendedKeyUsage=clientAuth\nbasicConstraints=CA:FALSE\n' "$name" \
+      > "$dir/$name.ext"
+    openssl x509 -req -in "$dir/$name.csr" -CA "$dir/ca.crt" -CAkey "$dir/ca.key" -CAcreateserial \
+      -days 1 -extfile "$dir/$name.ext" -out "$dir/$name.crt" 2> /dev/null
+  done
   rm -f "$dir/ca.key"
   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$dir/signing.pem" 2> /dev/null
   # The ES256 key the FAPI 2.0 clients' ID Tokens are signed with, and each
@@ -321,7 +335,9 @@ start_provider() {
     --set "ferrosmart.keys.private_key_files=[\"$LANE_DIR/signing.pem\", \"$LANE_DIR/signing-es256.pem\"]"
     --set "ferrosmart.backend.keys.private_key_file=$LANE_DIR/backend.pem"
     --set "ferrosmart.upstream.0.oidc.private_key_jwt.keys.private_key_file=$LANE_DIR/assertion.pem"
-    --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_op")
+    --set "ferrosmart.database.url=$LANE_PG/ferrosmart_oidf_op"
+    --set "server.tls.client_auth=optional"
+    --set "server.tls.client_ca_file=$LANE_DIR/ca.crt")
   fapi_config "$password"
   "${op[@]}" client apply "$lane"/op-clients/*.json "$LANE_DIR"/fapi-client-*.json > "$LANE_DIR/apply.log"
   # The suite's configuration takes the secrets FerroSMART issued its two
@@ -346,7 +362,7 @@ run_plan() {
   local spec=$1 config=$2 plan id module instance info result login
   plan=$(plan_key "$spec")
   export OIDF_PLAN=$plan
-  case "$config" in op | fapi) ;; *) spec="$spec{sample-openid-client-nodejs}_" ;; esac
+  case "$config" in op | fapi*) ;; *) spec="$spec{sample-openid-client-nodejs}_" ;; esac
   # NOTE: run-test-plan.py's own verdict wants the suite's expected-failures file, a row
   # for each failing condition; the lane holds each module's result instead, so it is not read.
   (cd "$LANE_DIR" && "$OIDF_PYTHON" "$LANE_DIR/runner/run-test-plan.py" --no-parallel "$spec" "$config.json") \
@@ -374,7 +390,7 @@ run_plan() {
       fi
     fi
     login=-
-    if [ "$config" != op ] && [ "$config" != fapi ]; then
+    if [ "$config" != op ] && [ "${config%%-*}" != fapi ]; then
       login=$(awk -F'\t' -v module="$module" '$1 == module { print $2 }' "$LANE_DIR/logins-$plan.tsv" 2> /dev/null | tail -1)
     fi
     printf '%s\t%s\t%s\t%s\n' "$plan" "$module" "$result" "${login:-none}" >> "$LANE_DIR/actual.tsv"
@@ -468,11 +484,11 @@ run() {
     if [ "${plan##* }" = op ]; then run_plan "${plan%% *}" op; fi
   done
   for plan in "${plans[@]}"; do
-    if [ "${plan##* }" = fapi ]; then run_plan "${plan%% *}" fapi; fi
+    case "${plan##* }" in fapi | fapi-mtls) run_plan "${plan%% *}" "${plan##* }" ;; esac
   done
   # A module the suite holds in REVIEW waits on the screenshot of FerroSMART's error page.
   for plan in "${plans[@]}"; do
-    case "${plan##* }" in op | fapi) screenshots "$(plan_key "${plan%% *}")" ;; esac
+    case "${plan##* }" in op | fapi*) screenshots "$(plan_key "${plan%% *}")" ;; esac
   done
   compare
 }
@@ -548,6 +564,20 @@ fapi_config() {
     '.client.jwks.keys = $one | .client2.jwks.keys = $two
       | ((.. | objects | select(has("commands")) | .commands[]) | select(.[2] == "password")) |= (.[3] = $password)' \
     "$lane/fapi.json" > "$LANE_DIR/fapi.json"
+  # The mutual-TLS variant: the same configuration at its own alias, its clients
+  # authenticating by their certificates (RFC 8705 §2.1).
+  for n in 1 2; do
+    jq --arg n "$n" '.client_id = "fapi-mtls-suite" + (if $n == "1" then "" else "-2" end)
+        | .client_name += ", mutual TLS" | .token_endpoint_auth_method = "tls_client_auth"
+        | del(.jwks) | .tls_client_auth_san_dns = "fapi-mtls-\($n).example.org"
+        | .redirect_uris |= map(sub("/ferrosmart-fapi/"; "/ferrosmart-fapi-mtls/"))' \
+      "$lane/fapi-clients/fapi-suite$([ "$n" = 1 ] || echo -2).json" > "$LANE_DIR/fapi-client-mtls-$n.json"
+  done
+  jq --rawfile cert1 "$LANE_DIR/fapi-mtls-1.crt" --rawfile key1 "$LANE_DIR/fapi-mtls-1.key" \
+    --rawfile cert2 "$LANE_DIR/fapi-mtls-2.crt" --rawfile key2 "$LANE_DIR/fapi-mtls-2.key" \
+    '.alias = "ferrosmart-fapi-mtls" | .client.client_id = "fapi-mtls-suite" | .client2.client_id = "fapi-mtls-suite-2"
+      | .mtls = {cert: $cert1, key: $key1} | .mtls2 = {cert: $cert2, key: $key2}' \
+    "$LANE_DIR/fapi.json" > "$LANE_DIR/fapi-mtls.json"
 }
 
 # The suite's configuration of the verifier plan at the alias ALIAS.

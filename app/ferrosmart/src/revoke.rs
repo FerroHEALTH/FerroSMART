@@ -32,9 +32,11 @@ pub async fn revoke(
     State(state): State<Arc<AppState>>,
     Connected(from): Connected,
     headers: HeaderMap,
+    certificates: Option<axum::Extension<ferrohealth_server::tls::PeerCertificates>>,
     body: Bytes,
 ) -> Response {
-    match revoked(&state, &headers, &body, from).await {
+    let leaf = crate::token::sender::leaf(certificates);
+    match revoked(&state, &headers, &body, from, leaf.as_deref()).await {
         Ok(()) => no_store(StatusCode::OK.into_response()),
         Err(refusal) => {
             tracing::info!(
@@ -55,6 +57,7 @@ async fn revoked(
     headers: &HeaderMap,
     body: &[u8],
     from: IpAddr,
+    leaf: Option<&[u8]>,
 ) -> Result<(), Refusal> {
     let form = read_form(headers, body)?;
     let client = identify(
@@ -62,6 +65,7 @@ async fn revoked(
         headers,
         &form,
         crate::token::assertion::Endpoint::Token,
+        leaf,
     )
     .await?;
     let token = form

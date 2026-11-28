@@ -36,11 +36,17 @@ pub const PUSHED_SECONDS: i64 = 60;
 const AUTHENTICATION: [&str; 3] = ["client_secret", "client_assertion", "client_assertion_type"];
 
 /// `POST {issuer}/par`.
-pub async fn par(State(state): State<Arc<AppState>>, headers: HeaderMap, body: Bytes) -> Response {
+pub async fn par(
+    State(state): State<Arc<AppState>>,
+    certificates: Option<axum::Extension<ferrohealth_server::tls::PeerCertificates>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     if state.providers().is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    match push(&state, &headers, &body).await {
+    let leaf = crate::token::sender::leaf(certificates);
+    match push(&state, &headers, &body, leaf.as_deref()).await {
         Ok(response) => response,
         Err(refusal) => refusal.answer(&headers),
     }
@@ -49,13 +55,19 @@ pub async fn par(State(state): State<Arc<AppState>>, headers: HeaderMap, body: B
 /// Authenticates the client, checks its pushed request as the
 /// authorization endpoint would, and keeps it under a new `request_uri`
 /// (RFC 9126 §2.1, §2.2).
-async fn push(state: &AppState, headers: &HeaderMap, body: &[u8]) -> Result<Response, Refusal> {
+async fn push(
+    state: &AppState,
+    headers: &HeaderMap,
+    body: &[u8],
+    leaf: Option<&[u8]>,
+) -> Result<Response, Refusal> {
     let form = read_form(headers, body)?;
     let client = crate::token::grants::identify(
         state,
         headers,
         &form,
         crate::token::assertion::Endpoint::Par,
+        leaf,
     )
     .await?;
     // NOTE: RFC 9126 §2.1, `client_id` is required, and the request is the

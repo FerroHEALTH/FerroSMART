@@ -16,6 +16,7 @@ pub mod assertion;
 pub mod exchange;
 pub mod grants;
 pub mod mint;
+pub mod mtls;
 pub mod secret;
 pub mod sender;
 

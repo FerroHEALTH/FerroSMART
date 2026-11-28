@@ -10,7 +10,8 @@ CREATE TABLE client (
     client_name text NOT NULL,
     token_endpoint_auth_method text NOT NULL CONSTRAINT client_token_endpoint_auth_method_check
         CHECK (token_endpoint_auth_method IN
-            ('none', 'client_secret_basic', 'client_secret_post', 'private_key_jwt')),
+            ('none', 'client_secret_basic', 'client_secret_post', 'private_key_jwt',
+             'tls_client_auth', 'self_signed_tls_client_auth')),
     jwks_uri text,
     jwks jsonb,
     redirect_uris text[] NOT NULL DEFAULT '{}',
@@ -42,10 +43,22 @@ CREATE TABLE client (
     id_token_signed_response_alg text NOT NULL DEFAULT 'RS256'
         CONSTRAINT client_id_token_signed_response_alg_check
         CHECK (id_token_signed_response_alg IN ('RS256', 'PS256', 'ES256', 'EdDSA', 'ML-DSA-65')),
-    -- A private_key_jwt client has a JWK Set by URL or by value; no other has one.
+    -- RFC 8705 section 2.1.2, the one member that names the subject of a
+    -- tls_client_auth client's certificate, and its value.
+    tls_client_auth_member text CONSTRAINT client_tls_client_auth_member_check
+        CHECK (tls_client_auth_member IN ('tls_client_auth_subject_dn', 'tls_client_auth_san_dns',
+            'tls_client_auth_san_uri', 'tls_client_auth_san_ip', 'tls_client_auth_san_email')),
+    tls_client_auth_value text,
+    -- A private_key_jwt or self_signed_tls_client_auth client has a JWK Set by
+    -- URL or by value; no other has one.
     CONSTRAINT client_keys_check
-        CHECK ((token_endpoint_auth_method = 'private_key_jwt')
+        CHECK ((token_endpoint_auth_method IN ('private_key_jwt', 'self_signed_tls_client_auth'))
             = ((jwks_uri IS NULL) <> (jwks IS NULL))),
+    CONSTRAINT client_tls_subject_check
+        CHECK ((token_endpoint_auth_method = 'tls_client_auth')
+            = (tls_client_auth_member IS NOT NULL AND tls_client_auth_value IS NOT NULL)),
+    CONSTRAINT client_tls_subject_pair_check
+        CHECK ((tls_client_auth_member IS NULL) = (tls_client_auth_value IS NULL)),
     CONSTRAINT client_one_key_set_check CHECK (jwks_uri IS NULL OR jwks IS NULL),
     CONSTRAINT client_secret_check
         CHECK ((token_endpoint_auth_method IN ('client_secret_basic', 'client_secret_post'))

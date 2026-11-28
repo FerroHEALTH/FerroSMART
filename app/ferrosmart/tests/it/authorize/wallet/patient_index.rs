@@ -134,7 +134,7 @@ fn cross_reference(values: &[&str]) -> Value {
 
 #[tokio::test]
 async fn pixm_resolves_an_sd_jwt_vc_login_to_the_patient_of_the_fhir_server() {
-    let wallet = Wallet::start_indexed("pixm", "").await;
+    let wallet = Box::pin(Wallet::start_indexed("pixm", "")).await;
     pixm_answers(wallet.pix(), 200, cross_reference(&["h-7"])).await;
     let begun = wallet.begin().await;
     let presentation = wallet.presentation(&Credential::pid(), &begun);
@@ -172,7 +172,7 @@ async fn pixm_resolves_an_sd_jwt_vc_login_to_the_patient_of_the_fhir_server() {
 async fn pdqm_resolves_an_mdoc_login_to_the_same_patient() {
     let elements = "mdoc_claims = [\"family_name\", \"given_name\", \"birth_date\", \
                     \"nationality\", \"personal_administrative_number\", \"issuing_country\"]\n";
-    let wallet = Wallet::start_indexed("pdqm", elements).await;
+    let wallet = Box::pin(Wallet::start_indexed("pdqm", elements)).await;
     Mock::given(matchers::method("GET"))
         .and(matchers::path("/pix/Patient"))
         .and(matchers::query_param(
@@ -219,7 +219,7 @@ async fn pdqm_resolves_an_mdoc_login_to_the_same_patient() {
 /// Logs in through an index whose ITI-83 answers `status` with `body` and
 /// checks the app is sent `error` with no code.
 async fn refused(status: u16, body: Value, error: &str) {
-    let wallet = Wallet::start_indexed("pixm", "").await;
+    let wallet = Box::pin(Wallet::start_indexed("pixm", "")).await;
     pixm_answers(wallet.pix(), status, body).await;
     let begun = wallet.begin().await;
     let presentation = wallet.presentation(&Credential::pid(), &begun);
@@ -269,7 +269,7 @@ async fn an_index_that_fails_refuses_the_launch_as_the_server_error() {
 
 #[tokio::test]
 async fn a_country_with_no_identifier_system_refuses_the_launch() {
-    let wallet = Wallet::start_indexed("pixm", "").await;
+    let wallet = Box::pin(Wallet::start_indexed("pixm", "")).await;
     let begun = wallet.begin().await;
     let mut credential = Credential::pid();
     for (name, value) in &mut credential.claims {

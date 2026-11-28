@@ -49,8 +49,8 @@ registers itself sends too. `resources`, `launch_uri`, `upstreams` and
 |---|---|
 | `client_id` | The client's id, as the app sends it |
 | `client_name` | The name the consent page shows the person |
-| `token_endpoint_auth_method` | `none`, `client_secret_basic`, `client_secret_post` or `private_key_jwt` |
-| `jwks_uri` | A `private_key_jwt` client's JWK Set URL, `https`; exclusive with `jwks` |
+| `token_endpoint_auth_method` | `none`, `client_secret_basic`, `client_secret_post`, `private_key_jwt`, `tls_client_auth` or `self_signed_tls_client_auth` |
+| `jwks_uri` | A `private_key_jwt` or `self_signed_tls_client_auth` client's JWK Set URL, `https`; exclusive with `jwks` |
 | `jwks` | The client's JWK Set by value |
 | `redirect_uris` | The client's complete redirect URIs, compared by exact string |
 | `post_logout_redirect_uris` | Where the end-session endpoint may send the browser back (RP-Initiated Logout 1.0 §3.1) |
@@ -61,6 +61,7 @@ registers itself sends too. `resources`, `launch_uri`, `upstreams` and
 | `id_token_signed_response_alg` | `RS256` (the default), `PS256`, `ES256`, `EdDSA` or `ML-DSA-65`: the algorithm the client's ID Tokens are signed with; its access tokens follow the resource server's `access_token_signing_alg` (OpenID Connect Dynamic Client Registration 1.0 §2); each but `RS256` needs a key of it in `[ferrosmart.keys]` |
 | `dpop_bound_access_tokens` | `true` when every token request of the client carries a `DPoP` proof (RFC 9449 §5.2); `false` by default |
 | `tls_client_certificate_bound_access_tokens` | `true` when the client's tokens are bound to the certificate of its mutual-TLS connection, which every token request then presents (RFC 8705 §3.4); `false` by default |
+| `tls_client_auth_subject_dn`, `tls_client_auth_san_dns`, `tls_client_auth_san_uri`, `tls_client_auth_san_ip`, `tls_client_auth_san_email` | Exactly one, for a `tls_client_auth` client: the subject DN (RFC 4514) or the subject alternative name its certificate holds (RFC 8705 §2.1.2); no other client names one |
 | `launch_uri` | Optional: the app's launch URL, absolute `https`, by which an EHR's [launch registration](../integrate/ehr-launch.md) may name the app (`app_launch_uri`), as a SMART Task does; compared after RFC 3986 normalization, one client per URL |
 | `client_uri` | Optional: the app's home page, absolute `https`, linked from the consent page |
 | `logo_uri` | Optional: the app's logo, absolute `https`, drawn on the consent page; the page's CSP admits that origin for images alone |
@@ -84,6 +85,9 @@ RFC 7591 §3.2.2 error `invalid_redirect_uri` or `invalid_client_metadata`:
 - a `client_secret_basic` or `client_secret_post` client registers no JWK
   Set and never `client_credentials`, which SMART keeps for asymmetric
   clients;
+- a `tls_client_auth` client names exactly one certificate subject and no
+  JWK Set, a `self_signed_tls_client_auth` client registers its certificate
+  in its JWK Set (`x5c`), and neither uses `client_credentials`;
 - `refresh_token`, `launch_uri` and `first_party` come with
   `authorization_code`;
 - `authorization_code` comes with at least one redirect URI;
@@ -97,6 +101,8 @@ RFC 7591 §3.2.2 error `invalid_redirect_uri` or `invalid_client_metadata`:
 | `client_secret_basic` | `client-confidential-symmetric` | Its client secret by HTTP Basic |
 | `client_secret_post` | `client-confidential-symmetric` | Its client secret in the form |
 | `private_key_jwt` | `client-confidential-asymmetric` | A client assertion signed `RS384`, `ES384`, `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87` (RFC 9964, an `AKP` key) with a key of its registered JWK Set |
+| `tls_client_auth` | none | The certificate of its mutual-TLS connection, verified against `[server.tls] client_ca_file`, whose subject is the one it registered (RFC 8705 §2.1) |
+| `self_signed_tls_client_auth` | none | The certificate of its mutual-TLS connection, the first of a key's `x5c` in its JWK Set (RFC 8705 §2.2); the listener verifies it too, so `client_ca_file` holds it |
 
 A client authenticates only by the method it registered. SMART prefers
 asymmetric authentication for a client that can hold a key pair; a secret
