@@ -521,6 +521,7 @@ impl Introspector {
 
     /// Returns the members of the endpoint's response for `token`.
     async fn introspect(&self, token: &str) -> Result<Map<String, Value>, IntrospectionError> {
+        self.http.clear(&self.endpoint).await;
         // NOTE: no specification governs this: our own design; the form encoder
         // is not `Sync`, so each one is finished and dropped before an await.
         let body = url::form_urlencoded::Serializer::new(String::new())
