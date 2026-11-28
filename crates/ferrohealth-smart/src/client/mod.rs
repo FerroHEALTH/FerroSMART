@@ -190,6 +190,8 @@ impl Tls {
 pub struct PresentedTls {
     config: Arc<rustls::ClientConfig>,
     certificate: Option<rustls::pki_types::CertificateDer<'static>>,
+    unchecked_roots: Option<String>,
+    kept: Option<Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl PresentedTls {
@@ -203,7 +205,33 @@ impl PresentedTls {
         Self {
             config,
             certificate,
+            unchecked_roots: None,
+            kept: None,
         }
+    }
+
+    /// Returns the configuration naming `roots`, the line that names the
+    /// roots it trusts with no revocation check, for the product's startup
+    /// banner.
+    #[must_use]
+    pub fn with_unchecked_roots(mut self, roots: String) -> Self {
+        self.unchecked_roots = Some(roots);
+        self
+    }
+
+    /// Returns the configuration holding `kept` for as long as it lives,
+    /// such as the task that keeps its endpoints cleared for revocation.
+    #[must_use]
+    pub fn keeping(mut self, kept: Arc<dyn std::any::Any + Send + Sync>) -> Self {
+        self.kept = Some(kept);
+        self
+    }
+
+    /// Returns the line that names the roots the configuration trusts with
+    /// no revocation check, or `None` when it trusts none so.
+    #[must_use]
+    pub fn unchecked_roots(&self) -> Option<&str> {
+        self.unchecked_roots.as_deref()
     }
 
     /// Returns the rustls client configuration.
@@ -233,6 +261,8 @@ impl std::fmt::Debug for PresentedTls {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PresentedTls")
             .field("certificate", &self.certificate.is_some())
+            .field("unchecked_roots", &self.unchecked_roots)
+            .field("kept", &self.kept.is_some())
             .finish_non_exhaustive()
     }
 }

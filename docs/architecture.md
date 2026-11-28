@@ -1883,8 +1883,22 @@ refresh_margin = "30s"
 # authorization_details = '[{"type": "nl-gis-v1"}]'               # RFC 9396, sent as written
 # [terminology.credentials.oauth.tls]   # read by the product's TLS reader (ferrohealth-server TlsClient)
 # client_identity_file = "/run/secrets/client.pem"   # the chain and the key in one PEM
-# trust_roots_file = "/run/secrets/private-ca.pem" # roots beside the platform's
+# trust_roots_file = "/run/secrets/private-ca.pem" # roots beside the platform's; a chain to one is revocation-checked
+# trust_roots_without_revocation_file = "/run/secrets/lab-ca.pem"  # a private PKI with no CRL or OCSP: trusted unchecked, logged
 ```
+
+`ferrohealth-server` 0.14 verifies an outbound chain by its root. A chain to
+a root of `trust_roots_file` is verified by webpki (ML-DSA certificates
+included, RFC 9881) and opens a connection only once a revocation check has
+cleared its endpoint. The check fails closed when no CRL or OCSP source
+answers. `ServerTls` keeps the table's endpoints cleared with one
+`revocation::Clearing` for as long as the configuration lives: the
+connection's endpoint, the issuers of `auth.tls`, the token endpoint or
+issuer of a credentials grant, and the session's provider. A chain to a
+root of `trust_roots_without_revocation_file` is trusted with no check and
+logged at start and at each connection, and `PresentedTls::unchecked_roots`
+names those roots for a banner. Any other chain goes to the platform's
+verifier (#988).
 
 `user`/`password` and `oauth` are exclusive; a lane that obtains no token of
 its own refuses an `oauth` table at load (FerroBRIDGE's `NoGrant` shape). The

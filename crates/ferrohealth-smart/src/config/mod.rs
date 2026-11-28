@@ -667,7 +667,9 @@ pub struct Resolved {
 /// `server-tls` implements this trait over it as `ServerTls`). No
 /// specification governs the seam: our own design.
 pub trait TlsBuilder {
-    /// Builds the configuration `section` names, at the dotted `key`.
+    /// Builds the configuration `section` names, at the dotted `key`, for
+    /// connections to `endpoints`, which a builder that checks revocation
+    /// keeps cleared for as long as the configuration lives.
     ///
     /// # Errors
     ///
@@ -677,17 +679,20 @@ pub trait TlsBuilder {
         &self,
         key: &str,
         section: &TlsClientSection,
+        endpoints: &[url::Url],
     ) -> Result<crate::client::PresentedTls, Box<dyn std::error::Error + Send + Sync>>;
 }
 
-/// Builds `section` at `key` with `builder`, naming the key in a refusal.
+/// Builds `section` at `key` with `builder` for connections to
+/// `endpoints`, naming the key in a refusal.
 pub(crate) fn build_tls(
     builder: &dyn TlsBuilder,
     key: &str,
     section: &TlsClientSection,
+    endpoints: &[url::Url],
 ) -> Result<crate::client::PresentedTls, ConfigError> {
     builder
-        .build(key, section)
+        .build(key, section, endpoints)
         .map_err(|source| ConfigError::TlsBuild {
             key: key.to_owned(),
             source,
@@ -697,9 +702,33 @@ pub(crate) fn build_tls(
 /// The [`TlsBuilder`] over `ferrohealth-server`'s `tls_client::TlsClient`:
 /// the table's roots beside the platform's verifier, its identity and its
 /// minimum version.
+///
+/// A chain to a root of `trust_roots_file` opens a connection only once a
+/// revocation check cleared it, so the builder keeps the connection's
+/// endpoints cleared with a `revocation::Clearing` that lives as long as
+/// the configuration; it names the roots of
+/// `trust_roots_without_revocation_file` for the startup banner.
 #[cfg(feature = "server-tls")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ServerTls;
+
+/// How long one endpoint's revocation check may take, as
+/// `ferrohealth-server`'s telemetry clears its collector (no specification
+/// governs the bound: our own design).
+#[cfg(feature = "server-tls")]
+const CLEAR_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A `trust_roots_file` table's endpoints cannot be kept cleared outside a
+/// Tokio runtime.
+#[cfg(feature = "server-tls")]
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "`{key}` names `trust_roots_file`, whose endpoints are cleared for revocation inside the runtime"
+)]
+pub struct NoRuntime {
+    /// The dotted key of the table.
+    key: String,
+}
 
 #[cfg(feature = "server-tls")]
 impl TlsBuilder for ServerTls {
@@ -707,13 +736,36 @@ impl TlsBuilder for ServerTls {
         &self,
         key: &str,
         section: &TlsClientSection,
+        endpoints: &[url::Url],
     ) -> Result<crate::client::PresentedTls, Box<dyn std::error::Error + Send + Sync>> {
         let client = ferrohealth_server::tls_client::TlsClient::read(key, section)?;
-        let config = client.platform_config()?;
-        Ok(crate::client::PresentedTls::new(
-            std::sync::Arc::new(config),
+        let platform = client.platform_config()?;
+        let clearing = match platform.check() {
+            Some(check) if !endpoints.is_empty() => {
+                let runtime = tokio::runtime::Handle::try_current().map_err(|_none| NoRuntime {
+                    key: key.to_owned(),
+                })?;
+                let _entered = runtime.enter();
+                Some(ferrohealth_server::revocation::Clearing::spawn(
+                    check.clone(),
+                    endpoints.to_vec(),
+                    CLEAR_WITHIN,
+                ))
+            }
+            _ => None,
+        };
+        let unchecked = platform.unchecked_roots();
+        let mut presented = crate::client::PresentedTls::new(
+            std::sync::Arc::new(platform.into_config()),
             client.certificate().cloned(),
-        ))
+        );
+        if let Some(roots) = unchecked {
+            presented = presented.with_unchecked_roots(roots);
+        }
+        if let Some(clearing) = clearing {
+            presented = presented.keeping(std::sync::Arc::new(clearing));
+        }
+        Ok(presented)
     }
 }
 

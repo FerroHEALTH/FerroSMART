@@ -4,7 +4,7 @@
 name = "ferrohealth-authz"
 description = "The policy decision of the FerroHEALTH products: the attribute-based request a policy enforcement point puts about the subject ferrohealth-smart authenticated, with an embedded Cedar engine and a remote decision point"
 # Its own version line, released by the tag ferrohealth-authz-v<version>.
-version = "0.30.0"
+version = "0.31.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

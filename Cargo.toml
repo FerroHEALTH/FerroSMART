@@ -6,7 +6,7 @@ resolver = "3"
 members = ["crates/*", "app/*", "tools/*"]
 
 [workspace.package]
-version = "0.37.0"
+version = "0.38.0"
 edition = "2024"
 rust-version = "1.98"
 license = "BUSL-1.1"
@@ -45,14 +45,14 @@ ferrohealth-secret = "0.2.0"
 # The family configuration types: Duration, ByteSize, the retired-key
 # refusal and the outbound TLS section. Verified against crates.io on
 # 2026-11-09.
-ferrohealth-config = "0.4.0"
+ferrohealth-config = "0.5.0"
 # The TLS reader of every FerroHEALTH product, behind `server-tls`.
-ferrohealth-server = { version = "0.13.0", default-features = false, features = ["platform-verifier"] }
+ferrohealth-server = { version = "0.14.0", default-features = false, features = ["platform-verifier"] }
 # The JSON Schema of the configuration sections, behind `schema`.
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
 # ferrohealth-authz reads the subject ferrohealth-smart authenticates; the
 # path is the workspace member, the version the one it publishes.
-ferrohealth-smart = { path = "crates/ferrohealth-smart", version = "0.37.0", default-features = false }
+ferrohealth-smart = { path = "crates/ferrohealth-smart", version = "0.38.0", default-features = false }
 # ferrohealth-authz: the engine seam, the embedded Cedar engine and its
 # hot-swapped policy set. Verified against crates.io on 2026-10-25.
 async-trait = "0.1.92"
@@ -85,7 +85,7 @@ aws-lc-rs = { version = "1.19.0", default-features = false, features = ["aws-lc-
 # FerroSMART, the authorization server under app/ferrosmart: the run path,
 # the console log and the health routes the family's servers share, and the
 # command line. Verified against crates.io on 2026-11-16.
-ferrohealth-telemetry = { version = "0.5.0", default-features = false }
+ferrohealth-telemetry = { version = "0.6.0", default-features = false }
 ferrohealth-health = { version = "0.1.1", default-features = false }
 ehds-logging = { version = "0.23.0", default-features = false }
 ihe-atna = { version = "0.23.0", default-features = false }

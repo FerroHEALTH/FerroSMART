@@ -81,6 +81,8 @@ mod presented_tls;
 #[cfg(feature = "fetch")]
 mod reach;
 mod redaction;
+#[cfg(feature = "server-tls")]
+mod revocation;
 #[cfg(feature = "fetch")]
 mod roles;
 mod schema;

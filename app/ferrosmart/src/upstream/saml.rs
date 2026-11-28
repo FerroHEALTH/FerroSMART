@@ -332,8 +332,14 @@ pub fn service_provider(
     }
     let mutual_tls =
         section.tls.client_identity.is_some() || section.tls.client_identity_file.is_some();
+    // NOTE: no specification governs which endpoints are cleared: each provider's
+    // metadata URL (a malformed one is refused where the metadata is read).
+    let endpoints: Vec<Url> = upstreams
+        .iter()
+        .filter_map(|upstream| Url::parse(&upstream.metadata_url).ok())
+        .collect();
     let presented = ferrohealth_smart::config::ServerTls
-        .build("ferrosmart.saml.tls", &section.tls)
+        .build("ferrosmart.saml.tls", &section.tls, &endpoints)
         .map_err(SamlConfigError::Tls)?;
     let http = reqwest::Client::builder()
         .timeout(super::UPSTREAM_TIMEOUT)

@@ -37,7 +37,8 @@ redirect_uri = "https://console.example.org/auth/callback"
 # timeout = "10s"                              # one call to the provider
 
 # [oidc.tls]                                   # built by the console's TLS reader
-# trust_roots_file = "/run/secrets/private-ca.pem"   # roots beside the platform's
+# trust_roots_file = "/run/secrets/private-ca.pem"   # roots beside the platform's, revocation-checked
+# trust_roots_without_revocation_file = "/run/secrets/lab-ca.pem"  # a private PKI with no CRL or OCSP
 # client_identity_file = "/run/secrets/console.pem"  # mutual TLS (RFC 8705 §2): chain and key
 # min_version = "1.2"                          # the default is "1.3"
 

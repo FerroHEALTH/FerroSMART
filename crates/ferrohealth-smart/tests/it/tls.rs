@@ -375,6 +375,7 @@ impl ferrohealth_smart::config::TlsBuilder for PemTls {
         &self,
         _key: &str,
         section: &ferrohealth_config::tls::TlsClientSection,
+        _endpoints: &[url::Url],
     ) -> Result<ferrohealth_smart::client::PresentedTls, Box<dyn std::error::Error + Send + Sync>>
     {
         let roots = match &section.trust_roots_file {
@@ -415,6 +416,7 @@ impl ferrohealth_smart::config::TlsBuilder for Built {
         &self,
         _key: &str,
         _section: &ferrohealth_config::tls::TlsClientSection,
+        _endpoints: &[url::Url],
     ) -> Result<ferrohealth_smart::client::PresentedTls, Box<dyn std::error::Error + Send + Sync>>
     {
         Ok(self.0.clone())

@@ -174,7 +174,12 @@ impl AuthSection {
             .is_some_and(|section| !section.users.is_empty());
         let tls = Tls {
             presented: match builder {
-                Some(builder) => Some(build_tls(builder, "auth.tls", &self.tls)?),
+                Some(builder) => Some(build_tls(
+                    builder,
+                    "auth.tls",
+                    &self.tls,
+                    &self.tls_endpoints(),
+                )?),
                 None if self.tls.names_material() => {
                     return Err(ConfigError::TlsNotBuilt { key: "auth.tls" });
                 }
@@ -276,6 +281,16 @@ impl AuthSection {
             )?;
         }
         Ok(())
+    }
+
+    /// Returns the endpoints `auth.tls` reaches, which its builder keeps
+    /// cleared for revocation.
+    fn tls_endpoints(&self) -> Vec<url::Url> {
+        // NOTE: no specification governs which endpoints are cleared: each issuer, whose
+        // keys and metadata `auth.tls` reaches (resolve refuses a malformed one).
+        self.issuers()
+            .filter_map(|(_, entry)| url::Url::parse(entry.issuer.expose()).ok())
+            .collect()
     }
 
     /// Refuses a capability SMART does not define, a listed scope outside

@@ -307,6 +307,7 @@ impl ferrohealth_smart::config::TlsBuilder for NoTls {
         &self,
         _key: &str,
         _section: &ferrohealth_config::tls::TlsClientSection,
+        _endpoints: &[Url],
     ) -> Result<ferrohealth_smart::client::PresentedTls, Box<dyn std::error::Error + Send + Sync>>
     {
         let config = rustls::ClientConfig::builder_with_provider(Arc::new(
