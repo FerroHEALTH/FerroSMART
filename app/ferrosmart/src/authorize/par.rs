@@ -38,15 +38,14 @@ const AUTHENTICATION: [&str; 3] = ["client_secret", "client_assertion", "client_
 /// `POST {issuer}/par`.
 pub async fn par(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
     certificates: Option<axum::Extension<ferrohealth_server::tls::PeerCertificates>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     if state.providers().is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let leaf =
-        crate::token::sender::leaf_of(certificates.as_ref().map(|axum::Extension(chain)| chain));
+    let leaf = crate::token::sender::leaf(certificates);
     match push(&state, &headers, &body, leaf.as_deref()).await {
         Ok(response) => response,
         Err(refusal) => refusal.answer(&headers),

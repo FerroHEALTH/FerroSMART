@@ -58,9 +58,14 @@ pub async fn introspect(
     certificates: Option<axum::Extension<ferrohealth_server::tls::PeerCertificates>>,
     body: Bytes,
 ) -> Response {
-    let leaf =
-        crate::token::sender::leaf_of(certificates.as_ref().map(|axum::Extension(chain)| chain));
-    match answer(&state, &headers, &body, leaf.as_deref()).await {
+    match answer(
+        &state,
+        &headers,
+        &body,
+        crate::token::sender::leaf(certificates).as_deref(),
+    )
+    .await
+    {
         Ok((caller, answer)) => {
             let active = answer.get("active").and_then(Value::as_bool) == Some(true);
             tracing::info!(

@@ -35,8 +35,7 @@ pub async fn revoke(
     certificates: Option<axum::Extension<ferrohealth_server::tls::PeerCertificates>>,
     body: Bytes,
 ) -> Response {
-    let leaf =
-        crate::token::sender::leaf_of(certificates.as_ref().map(|axum::Extension(chain)| chain));
+    let leaf = crate::token::sender::leaf(certificates);
     match revoked(&state, &headers, &body, from, leaf.as_deref()).await {
         Ok(()) => no_store(StatusCode::OK.into_response()),
         Err(refusal) => {
