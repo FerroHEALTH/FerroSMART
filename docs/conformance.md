@@ -99,12 +99,13 @@ Open issues: [#933](https://github.com/FerroHEALTH/FerroSMART/issues/933).
 ## FAPI 2.0 Security Profile: authorization server plan
 
 The FAPI 2.0 Security Profile Final plan in `app/ferrosmart/oidf/expected.tsv`,
-with private_key_jwt, DPoP and OpenID Connect; its authorization requests
+with DPoP and OpenID Connect, run once with private_key_jwt and once with
+mutual-TLS client authentication (the plan name with `.mtls`); its authorization requests
 carry the S256 PKCE challenge SMART App Launch 2.2.0 requires.
 
 | Result | Modules |
 |---|---|
-| PASSED | 41 |
+| PASSED | 42 |
 | WARNING | 1 |
 | FAILED | 5 |
 | REVIEW | 3 |

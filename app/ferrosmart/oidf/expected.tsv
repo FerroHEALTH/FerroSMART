@@ -167,3 +167,4 @@ fapi2-security-profile-final-test-plan	fapi2-security-profile-final-ensure-pkce-
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-incorrect-pkce-code-verifier-rejected	PASSED	-	-	-
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-plain-pkce-rejected	PASSED	-	-	-
 fapi2-security-profile-final-test-plan	fapi2-security-profile-final-par-without-duplicate-parameters	PASSED	-	-	-
+fapi2-security-profile-final-test-plan.mtls	fapi2-security-profile-final-discovery-end-point-verification	PASSED	-	-	-

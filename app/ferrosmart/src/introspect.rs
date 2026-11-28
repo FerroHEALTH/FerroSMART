@@ -22,7 +22,7 @@ use axum::response::{IntoResponse, Response};
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use serde_json::{Map, Value, json};
 
-use crate::clients::Client;
+use crate::clients::{Client, ClientKind};
 use crate::form::Params;
 use crate::server::AppState;
 use crate::store::grant::{AccessRecord, GrantRecord, RefreshRecord};
@@ -55,9 +55,12 @@ pub(crate) enum Found {
 pub async fn introspect(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    certificates: Option<axum::Extension<ferrohealth_server::tls::PeerCertificates>>,
     body: Bytes,
 ) -> Response {
-    match answer(&state, &headers, &body).await {
+    let leaf =
+        crate::token::sender::leaf_of(certificates.as_ref().map(|axum::Extension(chain)| chain));
+    match answer(&state, &headers, &body, leaf.as_deref()).await {
         Ok((caller, answer)) => {
             let active = answer.get("active").and_then(Value::as_bool) == Some(true);
             tracing::info!(
@@ -149,9 +152,10 @@ async fn answer(
     state: &AppState,
     headers: &HeaderMap,
     body: &[u8],
+    leaf: Option<&[u8]>,
 ) -> Result<(String, Value), Refused> {
     let form = read_form(headers, body).map_err(Refused::Request)?;
-    let caller = caller(state, headers, &form).await?;
+    let caller = caller(state, headers, &form, leaf).await?;
     let token = form.get("token").ok_or(Refused::Request(Refusal::request(
         "the request carries no token",
     )))?;
@@ -169,13 +173,18 @@ async fn answer(
 
 /// Returns the `client_id` of the caller, once it holds the right to
 /// introspect.
-async fn caller(state: &AppState, headers: &HeaderMap, form: &Params) -> Result<String, Refused> {
+async fn caller(
+    state: &AppState,
+    headers: &HeaderMap,
+    form: &Params,
+    leaf: Option<&[u8]>,
+) -> Result<String, Refused> {
     if !uses_basic(headers)
         && let Some(token) = presented(headers)?
     {
         return bearer(state, token, INTROSPECT_SCOPE).await;
     }
-    let client = authenticated(state, headers, form).await?;
+    let client = authenticated(state, headers, form, leaf).await?;
     if !client.scopes.iter().any(|scope| scope == INTROSPECT_SCOPE) {
         return Err(Refused::Client(Refusal {
             error: "unauthorized_client",
@@ -188,15 +197,23 @@ async fn caller(state: &AppState, headers: &HeaderMap, form: &Params) -> Result<
 /// Returns the confidential client of `headers` and `form`, authenticated
 /// as at the token endpoint: by its client secret, in the `Authorization`
 /// header or the form (RFC 6749 §2.3.1), or by its client assertion (RFC
-/// 7523 §2.2). A public client cannot authenticate (RFC 6749 §2.1), so a
-/// request that only names a `client_id` is refused `invalid_client`.
+/// 7523 §2.2), or by the connection's certificate `leaf` (RFC 8705 §2). A
+/// public client cannot authenticate (RFC 6749 §2.1), so a request that
+/// only names a `client_id` is refused `invalid_client`.
 async fn authenticated(
     state: &AppState,
     headers: &HeaderMap,
     form: &Params,
+    leaf: Option<&[u8]>,
 ) -> Result<Client, Refused> {
     let client = match secret::presented(headers, form) {
         Ok(Some(presented)) => secret::authenticate(state, presented).await,
+        Ok(None)
+            if form.get("client_assertion_type").is_none()
+                && form.get("client_assertion").is_none() =>
+        {
+            certificate_client(state, form, leaf).await
+        }
         Ok(None) => assertion::authenticate(state, form, assertion::Endpoint::Token).await,
         Err(refusal) => Err(refusal),
     };
@@ -206,6 +223,28 @@ async fn authenticated(
         "invalid_client" => Refused::Client(refusal),
         _ => Refused::Request(refusal),
     })
+}
+
+/// Returns the mutual-TLS client `form` names, authenticated by the
+/// connection's certificate `leaf` (RFC 8705 §2); any other client named
+/// without credentials is refused.
+async fn certificate_client(
+    state: &AppState,
+    form: &Params,
+    leaf: Option<&[u8]>,
+) -> Result<Client, Refusal> {
+    let client_id = form
+        .get("client_id")
+        .ok_or(Refusal::client("the request carries no client credentials"))?;
+    let client = state
+        .store()
+        .client(client_id)
+        .await
+        .map_err(|error| server_error("the client registry cannot be read", &error))?
+        .filter(|client| client.kind() == ClientKind::ConfidentialCertificate)
+        .ok_or(Refusal::client("the request carries no client credentials"))?;
+    crate::token::mtls::authenticate(state, &client, leaf).await?;
+    Ok(client)
 }
 
 /// Returns the bearer token the `Authorization` header presents (RFC 6750

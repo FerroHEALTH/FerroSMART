@@ -15,6 +15,7 @@ use url::Url;
 
 use crate::clients::{
     AuthMethod, Client, ClientKeys, ClientKind, ClientMetadata, GrantType, Material,
+    TlsSubjectFields,
 };
 use crate::store::admin::Registered;
 
@@ -173,6 +174,17 @@ pub struct Fields {
     /// Whether the client's tokens are bound to its mutual-TLS certificate
     /// (RFC 8705 §3.4).
     pub tls_client_certificate_bound_access_tokens: bool,
+    /// The subject DN a `tls_client_auth` certificate holds (RFC 8705
+    /// §2.1.2); empty for none.
+    pub tls_client_auth_subject_dn: String,
+    /// The `dNSName` it holds; empty for none.
+    pub tls_client_auth_san_dns: String,
+    /// The `uniformResourceIdentifier` it holds; empty for none.
+    pub tls_client_auth_san_uri: String,
+    /// The `iPAddress` it holds; empty for none.
+    pub tls_client_auth_san_ip: String,
+    /// The `rfc822Name` it holds; empty for none.
+    pub tls_client_auth_san_email: String,
     /// The algorithm the client's ID Tokens and access tokens are signed
     /// with (OpenID Connect Dynamic Client Registration 1.0 §2); `RS256`
     /// when empty.
@@ -205,6 +217,11 @@ impl Default for Fields {
             require_pushed_authorization_requests: false,
             dpop_bound_access_tokens: false,
             tls_client_certificate_bound_access_tokens: false,
+            tls_client_auth_subject_dn: String::new(),
+            tls_client_auth_san_dns: String::new(),
+            tls_client_auth_san_uri: String::new(),
+            tls_client_auth_san_ip: String::new(),
+            tls_client_auth_san_email: String::new(),
             id_token_signed_response_alg: String::new(),
         }
     }
@@ -212,7 +229,7 @@ impl Default for Fields {
 
 /// The members a [`ClientDocument`] reads; a registration request's other
 /// members are ignored (RFC 7591 §2).
-const MEMBERS: [&str; 23] = [
+const MEMBERS: [&str; 28] = [
     "client_id",
     "client_name",
     "token_endpoint_auth_method",
@@ -234,6 +251,11 @@ const MEMBERS: [&str; 23] = [
     "require_pushed_authorization_requests",
     "dpop_bound_access_tokens",
     "tls_client_certificate_bound_access_tokens",
+    "tls_client_auth_subject_dn",
+    "tls_client_auth_san_dns",
+    "tls_client_auth_san_uri",
+    "tls_client_auth_san_ip",
+    "tls_client_auth_san_email",
     "id_token_signed_response_alg",
     "client_secret",
 ];
@@ -282,6 +304,13 @@ impl Fields {
             dpop_bound_access_tokens: self.dpop_bound_access_tokens,
             tls_client_certificate_bound_access_tokens: self
                 .tls_client_certificate_bound_access_tokens,
+            tls_client_auth: TlsSubjectFields {
+                subject_dn: self.tls_client_auth_subject_dn,
+                san_dns: self.tls_client_auth_san_dns,
+                san_uri: self.tls_client_auth_san_uri,
+                san_ip: self.tls_client_auth_san_ip,
+                san_email: self.tls_client_auth_san_email,
+            },
             id_token_signed_response_alg: self.id_token_signed_response_alg,
         };
         let material = Material {
@@ -349,6 +378,10 @@ pub struct ClientView<'a> {
     dpop_bound_access_tokens: bool,
     /// Whether its tokens are bound to its mutual-TLS certificate.
     tls_client_certificate_bound_access_tokens: bool,
+    /// The subject its `tls_client_auth` certificate holds, under the RFC
+    /// 8705 §2.1.2 member that names it.
+    #[serde(flatten)]
+    tls_subject: std::collections::BTreeMap<&'static str, String>,
     /// The algorithm its ID Tokens and access tokens are signed with.
     id_token_signed_response_alg: &'static str,
     /// `admin`, or `self` for an app that registered itself (RFC 7591 §5).
@@ -400,6 +433,11 @@ impl<'a> From<&'a Registered> for ClientView<'a> {
             dpop_bound_access_tokens: client.dpop_bound_access_tokens,
             tls_client_certificate_bound_access_tokens: client
                 .tls_client_certificate_bound_access_tokens,
+            tls_subject: client
+                .tls_subject
+                .iter()
+                .map(|subject| (subject.member(), subject.value()))
+                .collect(),
             id_token_signed_response_alg: client.id_token_signed_response_alg.name(),
             registered_by: registered.by.as_str(),
             disabled_at: registered.disabled_at.map(instant),

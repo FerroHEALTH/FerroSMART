@@ -41,6 +41,9 @@ pub(crate) struct Presented {
     /// The SHA-256 thumbprint of the connection's client certificate, when
     /// the connection presented one.
     pub(crate) certificate: Option<String>,
+    /// The DER of that certificate, which mutual-TLS client authentication
+    /// reads (RFC 8705 §2).
+    pub(crate) leaf: Option<Vec<u8>>,
 }
 
 /// The `cnf` claim of an access token (RFC 7800 §3.1).
@@ -79,10 +82,22 @@ pub(crate) async fn presented(
     certificates: Option<&PeerCertificates>,
 ) -> Result<Presented, Refusal> {
     let jkt = proof_key(state, headers, TOKEN_ROUTE).await?;
-    let certificate = certificates
+    let leaf = leaf_of(certificates);
+    let certificate = leaf
+        .as_deref()
+        .map(|der| ClientCertificate::from_der(der).thumbprint().to_owned());
+    Ok(Presented {
+        jkt,
+        certificate,
+        leaf,
+    })
+}
+
+/// Returns the DER of the leaf of the connection's `certificates`.
+pub(crate) fn leaf_of(certificates: Option<&PeerCertificates>) -> Option<Vec<u8>> {
+    certificates
         .and_then(|chain| chain.0.first())
-        .map(|leaf| ClientCertificate::from_der(leaf).thumbprint().to_owned());
-    Ok(Presented { jkt, certificate })
+        .map(|leaf| leaf.as_ref().to_vec())
 }
 
 /// Returns the JWK SHA-256 thumbprint of the key of the `DPoP` proof in

@@ -30,6 +30,12 @@ pub enum AuthMethod {
     /// A JWT assertion signed with a key of the client's JWK Set (RFC 7523
     /// §2.2).
     PrivateKeyJwt,
+    /// The mutual-TLS connection's certificate, issued under a PKI and
+    /// matched by its subject (RFC 8705 §2.1).
+    TlsClientAuth,
+    /// The mutual-TLS connection's self-signed certificate, matched against
+    /// the certificates of the client's JWK Set (RFC 8705 §2.2).
+    SelfSignedTlsClientAuth,
 }
 
 impl AuthMethod {
@@ -41,6 +47,8 @@ impl AuthMethod {
             Self::ClientSecretBasic => "client_secret_basic",
             Self::ClientSecretPost => "client_secret_post",
             Self::PrivateKeyJwt => "private_key_jwt",
+            Self::TlsClientAuth => "tls_client_auth",
+            Self::SelfSignedTlsClientAuth => "self_signed_tls_client_auth",
         }
     }
 
@@ -52,6 +60,8 @@ impl AuthMethod {
             Self::ClientSecretBasic,
             Self::ClientSecretPost,
             Self::PrivateKeyJwt,
+            Self::TlsClientAuth,
+            Self::SelfSignedTlsClientAuth,
         ]
         .into_iter()
         .find(|method| method.as_str() == text)
@@ -64,6 +74,9 @@ impl AuthMethod {
             Self::None => ClientKind::Public,
             Self::ClientSecretBasic | Self::ClientSecretPost => ClientKind::ConfidentialSymmetric,
             Self::PrivateKeyJwt => ClientKind::ConfidentialAsymmetric,
+            Self::TlsClientAuth | Self::SelfSignedTlsClientAuth => {
+                ClientKind::ConfidentialCertificate
+            }
         }
     }
 }
@@ -79,6 +92,9 @@ pub enum ClientKind {
     ConfidentialAsymmetric,
     /// A client secret (`client-confidential-symmetric`).
     ConfidentialSymmetric,
+    /// The certificate of a mutual-TLS connection (RFC 8705 §2), which SMART
+    /// App Launch 2.2.0 names no client type for.
+    ConfidentialCertificate,
 }
 
 impl ClientKind {
@@ -89,6 +105,7 @@ impl ClientKind {
             Self::Public => "public",
             Self::ConfidentialAsymmetric => "confidential_asymmetric",
             Self::ConfidentialSymmetric => "confidential_symmetric",
+            Self::ConfidentialCertificate => "confidential_certificate",
         }
     }
 }
@@ -186,6 +203,12 @@ pub struct ClientMetadata {
     /// Whether the client's tokens are bound to its mutual-TLS certificate
     /// (RFC 8705 §3.4).
     pub tls_client_certificate_bound_access_tokens: bool,
+    /// The subject a `tls_client_auth` client's certificate holds: its
+    /// `tls_client_auth_subject_dn`, `tls_client_auth_san_dns`,
+    /// `tls_client_auth_san_uri`, `tls_client_auth_san_ip` or
+    /// `tls_client_auth_san_email` (RFC 8705 §2.1.2), each empty when
+    /// unset.
+    pub tls_client_auth: TlsSubjectFields,
     /// The algorithm its ID Tokens are signed with (OpenID Connect Dynamic
     /// Client Registration 1.0 §2, `id_token_signed_response_alg`), which
     /// signs its access tokens too: `RS256` or `ML-DSA-65`; `RS256` when
@@ -240,6 +263,9 @@ pub struct Client {
     /// Whether its tokens are bound to its mutual-TLS certificate (RFC 8705
     /// §3.4).
     pub tls_client_certificate_bound_access_tokens: bool,
+    /// The subject a `tls_client_auth` client's certificate holds (RFC 8705
+    /// §2.1.2).
+    pub tls_subject: Option<TlsSubject>,
     /// The algorithm its ID Tokens and access tokens are signed with.
     pub id_token_signed_response_alg: Algorithm,
 }
@@ -424,6 +450,78 @@ pub enum ClientKeys {
     Set(Value),
 }
 
+/// The five RFC 8705 §2.1.2 registration members that name the subject of
+/// a `tls_client_auth` client's certificate, each empty when unset.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TlsSubjectFields {
+    /// `tls_client_auth_subject_dn`, an RFC 4514 distinguished name.
+    pub subject_dn: String,
+    /// `tls_client_auth_san_dns`, a `dNSName` subject alternative name.
+    pub san_dns: String,
+    /// `tls_client_auth_san_uri`, a `uniformResourceIdentifier` one.
+    pub san_uri: String,
+    /// `tls_client_auth_san_ip`, an `iPAddress` one.
+    pub san_ip: String,
+    /// `tls_client_auth_san_email`, an `rfc822Name` one.
+    pub san_email: String,
+}
+
+/// The one subject a `tls_client_auth` client's certificate is matched by
+/// (RFC 8705 §2.1.2: "exactly one of" the five members).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TlsSubject {
+    /// The subject distinguished name, in its RFC 4514 string form.
+    SubjectDn(String),
+    /// A `dNSName` subject alternative name.
+    SanDns(String),
+    /// A `uniformResourceIdentifier` subject alternative name.
+    SanUri(String),
+    /// An `iPAddress` subject alternative name.
+    SanIp(std::net::IpAddr),
+    /// An `rfc822Name` subject alternative name.
+    SanEmail(String),
+}
+
+impl TlsSubject {
+    /// Returns the RFC 8705 §2.1.2 member that names this subject.
+    #[must_use]
+    pub const fn member(&self) -> &'static str {
+        match self {
+            Self::SubjectDn(_) => "tls_client_auth_subject_dn",
+            Self::SanDns(_) => "tls_client_auth_san_dns",
+            Self::SanUri(_) => "tls_client_auth_san_uri",
+            Self::SanIp(_) => "tls_client_auth_san_ip",
+            Self::SanEmail(_) => "tls_client_auth_san_email",
+        }
+    }
+
+    /// Returns the member's value as it is registered and stored.
+    #[must_use]
+    pub fn value(&self) -> String {
+        match self {
+            Self::SubjectDn(value)
+            | Self::SanDns(value)
+            | Self::SanUri(value)
+            | Self::SanEmail(value) => value.clone(),
+            Self::SanIp(address) => address.to_string(),
+        }
+    }
+
+    /// Returns the subject the stored `member` and `value` name, or `None`
+    /// for a pair no registration writes.
+    #[must_use]
+    pub fn parse(member: &str, value: &str) -> Option<Self> {
+        match member {
+            "tls_client_auth_subject_dn" => Some(Self::SubjectDn(value.to_owned())),
+            "tls_client_auth_san_dns" => Some(Self::SanDns(value.to_owned())),
+            "tls_client_auth_san_uri" => Some(Self::SanUri(value.to_owned())),
+            "tls_client_auth_san_ip" => value.parse().ok().map(Self::SanIp),
+            "tls_client_auth_san_email" => Some(Self::SanEmail(value.to_owned())),
+            _ => None,
+        }
+    }
+}
+
 /// Why a registration was refused, naming the client and the member.
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -563,44 +661,8 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
     if grant_types.is_empty() {
         return Err(rule("no `grant_types`"));
     }
-    let jwks = !section.jwks_uri.is_empty() || material.jwks.is_some();
-    let kind = section.auth_method.kind();
-    if kind != ClientKind::ConfidentialSymmetric && material.secret_hash.is_some() {
-        return Err(rule(
-            "only a confidential symmetric client registers a secret hash",
-        ));
-    }
-    let (keys, secret_hash) = match kind {
-        ClientKind::Public => {
-            if jwks {
-                return Err(rule("a public client registers no JWK Set"));
-            }
-            // NOTE: SMART App Launch 2.2.0, Backend Services, the client
-            // credentials grant authenticates with an asymmetric key.
-            if grant_types.contains(&GrantType::ClientCredentials) {
-                return Err(rule("a public client cannot use `client_credentials`"));
-            }
-            // NOTE: RFC 8693 §2.1, the exchanging client authenticates.
-            if grant_types.contains(&GrantType::TokenExchange) {
-                return Err(rule("a public client cannot use the token exchange grant"));
-            }
-            (None, None)
-        }
-        ClientKind::ConfidentialAsymmetric => (Some(keys(section, material.jwks)?), None),
-        ClientKind::ConfidentialSymmetric => {
-            if jwks {
-                return Err(rule("a confidential symmetric client registers no JWK Set"));
-            }
-            // NOTE: SMART App Launch 2.2.0, Client Authentication: Symmetric, the
-            // profile "SHALL NOT be used" for SMART Backend Services.
-            if grant_types.contains(&GrantType::ClientCredentials) {
-                return Err(rule(
-                    "a confidential symmetric client cannot use `client_credentials`",
-                ));
-            }
-            (None, Some(secret_hash(section, material.secret_hash)?))
-        }
-    };
+    let (keys, secret_hash) = credentials(section, material, &grant_types)?;
+    let tls_subject = tls_subject(section)?;
     // NOTE: SMART App Launch 2.2.0, Backend Services, refresh tokens SHOULD NOT be
     // issued there; a refresh token continues an authorization code grant.
     if grant_types.contains(&GrantType::RefreshToken)
@@ -652,8 +714,114 @@ pub fn resolve(section: &ClientMetadata, material: Material) -> Result<Client, C
         dpop_bound_access_tokens: section.dpop_bound_access_tokens,
         tls_client_certificate_bound_access_tokens: section
             .tls_client_certificate_bound_access_tokens,
+        tls_subject,
         id_token_signed_response_alg: signing_algorithm(section)?,
     })
+}
+
+/// Returns the JWK Set and the secret hash the client `section` registers
+/// with `material`, checked against its kind and `grant_types`.
+fn credentials(
+    section: &ClientMetadata,
+    material: Material,
+    grant_types: &[GrantType],
+) -> Result<(Option<ClientKeys>, Option<SecretHash>), ClientError> {
+    let rule = |rule| ClientError::Rule {
+        client_id: section.client_id.clone(),
+        rule,
+    };
+    let jwks = !section.jwks_uri.is_empty() || material.jwks.is_some();
+    let kind = section.auth_method.kind();
+    if kind != ClientKind::ConfidentialSymmetric && material.secret_hash.is_some() {
+        return Err(rule(
+            "only a confidential symmetric client registers a secret hash",
+        ));
+    }
+    Ok(match kind {
+        ClientKind::Public => {
+            if jwks {
+                return Err(rule("a public client registers no JWK Set"));
+            }
+            // NOTE: SMART App Launch 2.2.0, Backend Services, the client
+            // credentials grant authenticates with an asymmetric key.
+            if grant_types.contains(&GrantType::ClientCredentials) {
+                return Err(rule("a public client cannot use `client_credentials`"));
+            }
+            // NOTE: RFC 8693 §2.1, the exchanging client authenticates.
+            if grant_types.contains(&GrantType::TokenExchange) {
+                return Err(rule("a public client cannot use the token exchange grant"));
+            }
+            (None, None)
+        }
+        ClientKind::ConfidentialAsymmetric => (Some(keys(section, material.jwks)?), None),
+        ClientKind::ConfidentialSymmetric => {
+            if jwks {
+                return Err(rule("a confidential symmetric client registers no JWK Set"));
+            }
+            // NOTE: SMART App Launch 2.2.0, Client Authentication: Symmetric, the
+            // profile "SHALL NOT be used" for SMART Backend Services.
+            if grant_types.contains(&GrantType::ClientCredentials) {
+                return Err(rule(
+                    "a confidential symmetric client cannot use `client_credentials`",
+                ));
+            }
+            (None, Some(secret_hash(section, material.secret_hash)?))
+        }
+        ClientKind::ConfidentialCertificate => {
+            // NOTE: SMART App Launch 2.2.0, Backend Services, the client
+            // credentials grant authenticates with an asymmetric JWT.
+            if grant_types.contains(&GrantType::ClientCredentials) {
+                return Err(rule("a mutual-TLS client cannot use `client_credentials`"));
+            }
+            // NOTE: RFC 8705 §2.2, a self-signed certificate is registered in the
+            // client's JWK Set; §2.1 matches a PKI one by its subject instead.
+            if section.auth_method == AuthMethod::SelfSignedTlsClientAuth {
+                (Some(keys(section, material.jwks)?), None)
+            } else if jwks {
+                return Err(rule("a `tls_client_auth` client registers no JWK Set"));
+            } else {
+                (None, None)
+            }
+        }
+    })
+}
+
+/// Returns the subject a `tls_client_auth` client `section` registers,
+/// exactly one of the five members (RFC 8705 §2.1.2), and none for any
+/// other method, which registers none of them.
+fn tls_subject(section: &ClientMetadata) -> Result<Option<TlsSubject>, ClientError> {
+    let rule = |rule| ClientError::Rule {
+        client_id: section.client_id.clone(),
+        rule,
+    };
+    let fields = &section.tls_client_auth;
+    let named: Vec<Option<TlsSubject>> = [
+        (&fields.subject_dn, "tls_client_auth_subject_dn"),
+        (&fields.san_dns, "tls_client_auth_san_dns"),
+        (&fields.san_uri, "tls_client_auth_san_uri"),
+        (&fields.san_ip, "tls_client_auth_san_ip"),
+        (&fields.san_email, "tls_client_auth_san_email"),
+    ]
+    .into_iter()
+    .filter(|(value, _)| !value.is_empty())
+    .map(|(value, member)| TlsSubject::parse(member, value))
+    .collect();
+    if section.auth_method != AuthMethod::TlsClientAuth {
+        return if named.is_empty() {
+            Ok(None)
+        } else {
+            Err(rule(
+                "only a `tls_client_auth` client names a certificate subject",
+            ))
+        };
+    }
+    match named.as_slice() {
+        [Some(subject)] => Ok(Some(subject.clone())),
+        [None] => Err(rule("`tls_client_auth_san_ip` is no IP address")),
+        _ => Err(rule(
+            "a `tls_client_auth` client names exactly one certificate subject (RFC 8705 §2.1.2)",
+        )),
+    }
 }
 
 /// Returns the algorithm the client `section` has its ID Tokens signed with.

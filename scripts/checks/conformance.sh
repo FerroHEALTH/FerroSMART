@@ -282,7 +282,7 @@ render() {
     { echo "conformance: expected.tsv holds no relying party module" >&2; return 2; }
   oidf_badge "OIDC Core 1.0 OIDF RP" "$rp" > "$out/openid-connect-rp.json"
   local fapi
-  fapi="$(oidf_counts "$expected" '^fapi2-security-profile-final-test-plan$')" ||
+  fapi="$(oidf_counts "$expected" '^fapi2-security-profile-final-test-plan(\.mtls)?$')" ||
     { echo "conformance: expected.tsv holds no FAPI 2.0 module" >&2; return 2; }
   oidf_badge "FAPI 2.0 OIDF OP" "$fapi" > "$out/fapi2-op.json"
   local results="$tree/app/ferrosmart/inferno/smart_stu2_2_expected.json"
@@ -327,11 +327,12 @@ render() {
     oidf_review "$expected" '^oidcc-client-(basic-certification-)?test-plan$'
     printf '\n## FAPI 2.0 Security Profile: authorization server plan\n\n'
     printf "The FAPI 2.0 Security Profile Final plan in \`app/ferrosmart/oidf/expected.tsv\`,\\n"
-    printf 'with private_key_jwt, DPoP and OpenID Connect; its authorization requests\n'
+    printf 'with DPoP and OpenID Connect, run once with private_key_jwt and once with\n'
+    printf "mutual-TLS client authentication (the plan name with \`.mtls\`); its authorization requests\\n"
     printf 'carry the S256 PKCE challenge SMART App Launch 2.2.0 requires.\n\n'
     oidf_section "$fapi"
-    oidf_deviations "$expected" '^fapi2-security-profile-final-test-plan$'
-    oidf_review "$expected" '^fapi2-security-profile-final-test-plan$'
+    oidf_deviations "$expected" '^fapi2-security-profile-final-test-plan(\.mtls)?$'
+    oidf_review "$expected" '^fapi2-security-profile-final-test-plan(\.mtls)?$'
     printf '\n## SMART App Launch %s\n\n' "$smart"
     printf "%s of the %s Inferno tests in\\n\`app/ferrosmart/inferno/smart_stu2_2_expected.json\` pass; an omitted test\\nis not counted.\\n" "$passed" "$tests"
     if [[ -f "$tree/conformance/post-quantum.tsv" ]]; then

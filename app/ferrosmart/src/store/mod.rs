@@ -32,7 +32,9 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Postgres, Row as _};
 use url::Url;
 
-use crate::clients::{About, AuthMethod, Client, ClientKeys, GrantType, Registration, SecretHash};
+use crate::clients::{
+    About, AuthMethod, Client, ClientKeys, GrantType, Registration, SecretHash, TlsSubject,
+};
 use crate::launch::context::Context;
 
 /// How long a request waits for a connection before the store answers that
@@ -410,16 +412,17 @@ pub(crate) async fn write_client(
          launch_uri, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
          post_logout_redirect_uris, upstreams, registered_by, resources, default_acr_values, \
          require_pushed_authorization_requests, dpop_bound_access_tokens, \
-         tls_client_certificate_bound_access_tokens, id_token_signed_response_alg) \
+         tls_client_certificate_bound_access_tokens, id_token_signed_response_alg, \
+         tls_client_auth_member, tls_client_auth_value) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, \
-         $22, $23, $24) \
+         $22, $23, $24, $25, $26) \
          ON CONFLICT (client_id) DO UPDATE SET client_name = $2, token_endpoint_auth_method = $3, jwks_uri = $4, jwks = $5, \
          redirect_uris = $6, scope = $7, grant_types = $8, secret_hash = $9, launch_uri = $10, first_party = $11, \
          client_uri = $12, logo_uri = $13, policy_uri = $14, tos_uri = $15, post_logout_redirect_uris = $16, upstreams = $17, \
          registered_by = $18, resources = $19, default_acr_values = $20, \
          require_pushed_authorization_requests = $21, dpop_bound_access_tokens = $22, \
          tls_client_certificate_bound_access_tokens = $23, id_token_signed_response_alg = $24, \
-         updated_at = now()",
+         tls_client_auth_member = $25, tls_client_auth_value = $26, updated_at = now()",
     )
     .bind(&client.client_id)
     .bind(&client.name)
@@ -445,6 +448,8 @@ pub(crate) async fn write_client(
     .bind(client.dpop_bound_access_tokens)
     .bind(client.tls_client_certificate_bound_access_tokens)
     .bind(client.id_token_signed_response_alg.name())
+    .bind(client.tls_subject.as_ref().map(TlsSubject::member))
+    .bind(client.tls_subject.as_ref().map(TlsSubject::value))
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -454,7 +459,8 @@ pub(crate) async fn write_client(
 pub(crate) const CLIENT_COLUMNS: &str = "client_id, client_name, token_endpoint_auth_method, jwks_uri, jwks, secret_hash, redirect_uris, \
      post_logout_redirect_uris, upstreams, resources, scope, grant_types, launch_uri, first_party, client_uri, logo_uri, policy_uri, tos_uri, \
      default_acr_values, registered_by, require_pushed_authorization_requests, dpop_bound_access_tokens, \
-     tls_client_certificate_bound_access_tokens, id_token_signed_response_alg";
+     tls_client_certificate_bound_access_tokens, id_token_signed_response_alg, tls_client_auth_member, \
+     tls_client_auth_value";
 
 /// Reads a `client` row.
 pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreError> {
@@ -522,6 +528,16 @@ pub(crate) fn read_client(row: &sqlx::postgres::PgRow) -> Result<Client, StoreEr
         dpop_bound_access_tokens: row.try_get("dpop_bound_access_tokens")?,
         tls_client_certificate_bound_access_tokens: row
             .try_get("tls_client_certificate_bound_access_tokens")?,
+        tls_subject: match (
+            row.try_get::<Option<String>, _>("tls_client_auth_member")?,
+            row.try_get::<Option<String>, _>("tls_client_auth_value")?,
+        ) {
+            (Some(member), Some(value)) => {
+                Some(TlsSubject::parse(&member, &value).ok_or_else(corrupt)?)
+            }
+            (None, None) => None,
+            _ => return Err(corrupt()),
+        },
         id_token_signed_response_alg: match row
             .try_get::<String, _>("id_token_signed_response_alg")?
             .as_str()
