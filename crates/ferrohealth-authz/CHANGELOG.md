@@ -14,7 +14,15 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.31.0] - Unreleased
+## [0.31.0] - 2026-11-28
+
+Releases beside `ferrohealth-smart` 0.38.0, whose types this crate carries in
+its public API.
+
+### Changed
+
+- Breaking: requires `ferrohealth-smart` 0.38 in place of 0.37, which moves
+  to `ferrohealth-server` 0.14 and `ferrohealth-config` 0.5 (#988).
 
 ## [0.30.0] - 2026-11-28
 
@@ -482,7 +490,8 @@ point behind `remote`. Products pin `=0.1.0` beside `ferrohealth-smart`
   `200` a permit, a `4xx` a deny and every other answer no decision,
   authorized with the client credentials token of `ferrohealth-smart`.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.30.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.31.0...HEAD
+[0.31.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.30.0...ferrohealth-authz-v0.31.0
 [0.30.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.29.0...ferrohealth-authz-v0.30.0
 [0.29.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.28.0...ferrohealth-authz-v0.29.0
 [0.28.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-authz-v0.27.0...ferrohealth-authz-v0.28.0
