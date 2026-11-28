@@ -11,6 +11,16 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.38.2] - 2026-11-28
+
+### Fixed
+
+- `client::outbound::OutboundClient` holds the TLS it was built from for its
+  lifetime, so under `trust_roots_file` its endpoint stays cleared for
+  revocation after `build` returns, and `send` clears the URL it calls before
+  it connects. Every outbound client whose `tls` named `trust_roots_file`
+  failed closed once its clearing ended (#1000).
+
 ## [0.38.1] - 2026-11-28
 
 ### Fixed
@@ -2739,7 +2749,8 @@ it issues no token and holds no key that signs one.
   `TODO(#N)` guards, the issue and pull request templates, the labels, the
   rulesets and the `crates-io` environment.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.38.1...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.38.2...HEAD
+[0.38.2]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.38.1...ferrohealth-smart-v0.38.2
 [0.38.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.38.0...ferrohealth-smart-v0.38.1
 [0.38.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.37.0...ferrohealth-smart-v0.38.0
 [0.37.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.36.0...ferrohealth-smart-v0.37.0
