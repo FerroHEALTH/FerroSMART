@@ -11,6 +11,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.37.0] - Unreleased
+
 ## [0.36.0] - 2026-11-27
 
 The relying party's UserInfo request, ML-DSA DPoP keys and the shared

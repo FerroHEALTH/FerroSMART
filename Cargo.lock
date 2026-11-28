@@ -1245,7 +1245,7 @@ dependencies = [
 
 [[package]]
 name = "ferrohealth-authz"
-version = "0.29.0"
+version = "0.30.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1308,9 +1308,9 @@ dependencies = [
 
 [[package]]
 name = "ferrohealth-server"
-version = "0.12.4"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b70fdd6d5e2c17d72b91fe98d92a66f6c37f9292867b3a3bf3a691084ea5dd4e"
+checksum = "c4fe42068aa5c014fad2fe1d41431b70179ae871915c46c89ac367b2bedd1108"
 dependencies = [
  "axum",
  "clap",
@@ -1341,7 +1341,7 @@ dependencies = [
 
 [[package]]
 name = "ferrohealth-session"
-version = "0.33.0"
+version = "0.34.0"
 dependencies = [
  "aws-lc-rs",
  "axum",
@@ -1372,7 +1372,7 @@ dependencies = [
 
 [[package]]
 name = "ferrohealth-smart"
-version = "0.36.0"
+version = "0.37.0"
 dependencies = [
  "argon2",
  "aws-lc-rs",
