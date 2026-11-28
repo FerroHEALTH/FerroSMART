@@ -14,7 +14,17 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.35.0] - Unreleased
+## [0.35.0] - 2026-11-28
+
+Releases beside `ferrohealth-smart` 0.38.0, whose types this crate carries in
+its public API.
+
+### Changed
+
+- Breaking: requires `ferrohealth-smart` 0.38 and `ferrohealth-config` 0.5 in
+  place of 0.37 and 0.4; `[oidc.tls] trust_roots_file` roots are now
+  revocation-checked, with `trust_roots_without_revocation_file` for a
+  private PKI without a revocation service (#988).
 
 ## [0.34.0] - 2026-11-28
 
@@ -577,7 +587,8 @@ FerroHEALTH operator consoles, over the relying party of `ferrohealth-smart`
   its request's `record::Held` and the `routes::Pages` trait a console draws
   a stopped sign-in through.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.34.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.35.0...HEAD
+[0.35.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.34.0...ferrohealth-session-v0.35.0
 [0.34.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.33.0...ferrohealth-session-v0.34.0
 [0.33.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.32.0...ferrohealth-session-v0.33.0
 [0.32.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-session-v0.31.0...ferrohealth-session-v0.32.0
