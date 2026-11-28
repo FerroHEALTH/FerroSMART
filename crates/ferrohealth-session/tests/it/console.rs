@@ -104,12 +104,22 @@ pub(crate) async fn console(provider: &Provider) -> Router {
 
 /// The sign-in of a console at `provider`.
 pub(crate) async fn sign_in(provider: &Provider) -> SignIn<TestPages> {
+    sign_in_accepting(provider, None).await
+}
+
+/// The sign-in of a console at `provider` accepting ID Tokens signed with
+/// `algorithms`, or the relying party's own list when `None`.
+pub(crate) async fn sign_in_accepting(
+    provider: &Provider,
+    algorithms: Option<Vec<ferrohealth_smart::jws::algorithm::Algorithm>>,
+) -> SignIn<TestPages> {
     let oidc = OidcSection {
         issuer: SecretUrl::new(provider.uri()),
         client_id: String::from(CLIENT),
         client_secret: Some(Secret::new(SECRET)),
         redirect_uri: SecretUrl::new(REDIRECT),
         scopes: vec![String::from("openid"), String::from("profile")],
+        algorithms,
         ..OidcSection::default()
     }
     .check()

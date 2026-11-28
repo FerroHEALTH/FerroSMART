@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 //! The test OpenID Provider: discovery, the key set, the token endpoint,
-//! revocation and end-session, with an ES256 key generated per case.
+//! revocation and end-session, with an ES256 or an ML-DSA-65 key generated
+//! per case.
 
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair};
+use ferrohealth_smart::jws::algorithm::Algorithm as JwsAlgorithm;
+use ferrohealth_smart::jws::compact::{self, Header as JwsHeader};
+use ferrohealth_smart::jws::key::{PrivateKey, SigningKey};
 use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use wiremock::matchers;
@@ -26,24 +30,50 @@ pub(crate) const TOKEN: &str = "/token";
 /// The revocation endpoint's path.
 pub(crate) const REVOKE: &str = "/revoke";
 
+/// The key the provider signs its ID Tokens with.
+enum Signer {
+    /// An ES256 key.
+    Es256(EncodingKey),
+    /// An ML-DSA-65 key (RFC 9964 §5).
+    MlDsa65(Box<SigningKey>),
+}
+
 /// The provider and its signing key.
 pub(crate) struct Provider {
     pub(crate) server: MockServer,
-    encoding: EncodingKey,
+    signer: Signer,
 }
 
 impl Provider {
-    /// Starts a provider that serves its metadata and its key set.
+    /// Starts a provider that serves its metadata and its key set, signing
+    /// with ES256.
     pub(crate) async fn start() -> Self {
-        let server = MockServer::start().await;
         let pkcs8 =
             EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &SystemRandom::new())
                 .expect("a key pair");
         let encoding = EncodingKey::from_ec_der(pkcs8.as_ref());
-        let mut jwk = serde_json::to_value(
+        let jwk = serde_json::to_value(
             Jwk::from_encoding_key(&encoding, Algorithm::ES256).expect("a JWK"),
         )
         .expect("the JWK serializes");
+        Self::serving(Signer::Es256(encoding), jwk).await
+    }
+
+    /// Starts a provider as [`Provider::start`] does, signing with
+    /// ML-DSA-65.
+    pub(crate) async fn start_ml_dsa() -> Self {
+        let mut seed = [0_u8; 32];
+        aws_lc_rs::rand::fill(&mut seed).expect("a seed");
+        let private = PrivateKey::from_ml_dsa_seed(JwsAlgorithm::MlDsa65, &seed).expect("a key");
+        let signing = SigningKey::new(private, JwsAlgorithm::MlDsa65).expect("the key signs");
+        let jwk = signing.public_jwk().to_value();
+        Self::serving(Signer::MlDsa65(Box::new(signing)), jwk).await
+    }
+
+    /// Starts the provider whose key set holds `jwk`, the public key of
+    /// `signer`.
+    async fn serving(signer: Signer, mut jwk: serde_json::Value) -> Self {
+        let server = MockServer::start().await;
         if let Some(members) = jwk.as_object_mut() {
             members.insert(String::from("kid"), serde_json::json!("op-1"));
             members.insert(String::from("use"), serde_json::json!("sig"));
@@ -69,7 +99,7 @@ impl Provider {
             )
             .mount(&server)
             .await;
-        Self { server, encoding }
+        Self { server, signer }
     }
 
     /// The issuer identifier.
@@ -80,22 +110,27 @@ impl Provider {
     /// An ID Token for the console carrying `nonce`.
     pub(crate) fn id_token(&self, nonce: &str) -> String {
         let now = jiff::Timestamp::now().as_second();
-        let mut header = Header::new(Algorithm::ES256);
-        header.kid = Some(String::from("op-1"));
-        jsonwebtoken::encode(
-            &header,
-            &serde_json::json!({
-                "iss": self.uri(),
-                "aud": CLIENT,
-                "sub": "synthetic-operator",
-                "nonce": nonce,
-                "iat": now,
-                "exp": now + 300,
-                "name": "Synthetic Operator"
-            }),
-            &self.encoding,
-        )
-        .expect("the ID Token signs")
+        let claims = serde_json::json!({
+            "iss": self.uri(),
+            "aud": CLIENT,
+            "sub": "synthetic-operator",
+            "nonce": nonce,
+            "iat": now,
+            "exp": now + 300,
+            "name": "Synthetic Operator"
+        });
+        match &self.signer {
+            Signer::Es256(encoding) => {
+                let mut header = Header::new(Algorithm::ES256);
+                header.kid = Some(String::from("op-1"));
+                jsonwebtoken::encode(&header, &claims, encoding).expect("the ID Token signs")
+            }
+            Signer::MlDsa65(signing) => {
+                let mut header = JwsHeader::new(JwsAlgorithm::MlDsa65);
+                header.kid = Some(String::from("op-1"));
+                compact::encode(&header, &claims, signing).expect("the ID Token signs")
+            }
+        }
     }
 
     /// Mounts the code exchange: `synthetic-code` with the verifier whose

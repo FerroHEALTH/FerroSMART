@@ -13,7 +13,9 @@ use ferrohealth_session::routes::{Pages as _, SignIn};
 use ferrohealth_session::sessions::Sessions;
 use http::{Method, StatusCode};
 
-use crate::console::{Browser, RESOURCE, TestPages, console, console_of, query, sign_in};
+use crate::console::{
+    Browser, RESOURCE, TestPages, console, console_of, query, sign_in, sign_in_accepting,
+};
 use crate::provider::Provider;
 
 /// The `state`, `nonce` and challenge `GET /login?return=…` sent the
@@ -512,4 +514,41 @@ async fn a_refused_resource_leaves_the_session_and_a_refused_grant_ends_it() {
         home.body
     );
     provider.server.verify().await;
+}
+
+// NOTE: RFC 9964 §5 and OpenID Connect Core 1.0 §3.1.3.7 item 7: an ID Token signed with
+// ML-DSA-65 signs an operator in only when `[oidc] algorithms` names the algorithm.
+#[tokio::test]
+async fn an_ml_dsa_id_token_signs_in_only_when_the_section_names_it() {
+    let provider = Provider::start_ml_dsa().await;
+    for (algorithms, signs_in) in [
+        (
+            Some(vec![ferrohealth_smart::jws::algorithm::Algorithm::MlDsa65]),
+            true,
+        ),
+        (None, false),
+    ] {
+        let app = console_of(sign_in_accepting(&provider, algorithms).await);
+        let mut browser = Browser::default();
+        let begun = begin(&app, &mut browser, &provider).await;
+        provider
+            .mount_exchange(&begun.challenge, tokens(&provider.id_token(&begun.nonce)))
+            .await;
+        let answer = browser
+            .get(
+                &app,
+                &format!("/auth/callback?code=synthetic-code&state={}", begun.state),
+            )
+            .await;
+        if signs_in {
+            assert_eq!(StatusCode::SEE_OTHER, answer.status, "{answer:?}");
+            assert!(browser.jar.contains_key("__Host-synthetic_console_session"));
+        } else {
+            assert_eq!(
+                (StatusCode::UNAUTHORIZED, "Rejected"),
+                (answer.status, answer.body.as_str())
+            );
+            assert!(!browser.jar.contains_key("__Host-synthetic_console_session"));
+        }
+    }
 }
