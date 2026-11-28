@@ -168,7 +168,9 @@ check() {
   local -a results logins
   while IFS=$'\t' read -r plan module result login issue reason; do
     named=false
-    if grep -qE '^[0-9]+(,[0-9]+)*$' <<< "$issue"; then named=true; fi
+    # A row names its issue, or `deviation`: a specification FerroSMART follows
+    # asks for the outcome, which its reason cites.
+    if grep -qE '^([0-9]+(,[0-9]+)*|deviation)$' <<< "$issue"; then named=true; fi
     # A module whose outcome races the suite lists each outcome it can end
     # in, `|` between them, the logins paired with the results by position.
     IFS='|' read -ra results <<< "$result"
@@ -293,11 +295,17 @@ start_suite() {
 # FerroSMART as the OpenID Provider, with Keycloak upstream. The person's
 # password is made for the run and handed to the suite's browser, which logs
 # in at Keycloak's form whenever a module's authorization request reaches it.
+# Beside the clinician, whom FerroSMART lets skip its consent page, the realm
+# holds a patient, who sees it and can refuse there.
 start_provider() {
   local password
   password=$(openssl rand -hex 16)
+  jq --arg patient "$issuer/fhir/Patient/example" \
+    '.users += [.users[0] | .id = "5d2e4f6a-7b8c-4d9e-8f0a-1b2c3d4e5f60" | .username = "patient"
+      | .email = "patient@example.org" | .lastName = "Patient" | .attributes.fhir_user = [$patient]]' \
+    "$root/app/ferrosmart/examples/keycloak/ferrosmart-realm.json" > "$LANE_DIR/ferrosmart-realm.json"
   docker run -d --name oidf-lane-keycloak --network host --add-host "$host:127.0.0.1" \
-    -v "$root/app/ferrosmart/examples/keycloak/ferrosmart-realm.json:/opt/keycloak/data/import/ferrosmart-realm.json:ro" \
+    -v "$LANE_DIR/ferrosmart-realm.json:/opt/keycloak/data/import/ferrosmart-realm.json:ro" \
     -v "$LANE_DIR/ca.crt:/opt/keycloak/lane-ca.pem:ro" \
     -e KC_HTTP_PORT=8180 -e KC_HTTP_HOST=127.0.0.1 \
     -e KC_TRUSTSTORE_PATHS=/opt/keycloak/lane-ca.pem \
@@ -324,7 +332,7 @@ start_provider() {
   [ -n "$one" ] && [ -n "$two" ] || fail "FerroSMART issued the suite's clients no secret"
   jq --arg one "$one" --arg two "$two" --arg password "$password" \
     '.client.client_secret = $one | .client2.client_secret = $two
-      | (.browser[].tasks[].commands[] | select(.[2] == "password")) |= (.[3] = $password)' \
+      | ((.. | objects | select(has("commands")) | .commands[]) | select(.[2] == "password")) |= (.[3] = $password)' \
     "$lane/op.json" > "$LANE_DIR/op.json"
   SSL_CERT_FILE="$LANE_DIR/trust.pem" "${op[@]}" serve > "$LANE_DIR/ferrosmart-op.log" 2>&1 &
   smart=$!
@@ -358,8 +366,8 @@ run_plan() {
       # The suite's own log of a module that did not pass, kept with the lane's artifact.
       if [ "$result" != PASSED ]; then
         get "$suite/api/log/$instance" > "$LANE_DIR/log-$plan-$module.json" || true
-        # Each failed condition with the two entries before it, in the job's log.
-        jq -r --arg module "$module" 'to_entries | map(select(.value.result == "FAILURE") | .key) as $failed
+        # Each failed or warned condition with the two entries before it, in the job's log.
+        jq -r --arg module "$module" 'to_entries | map(select(.value.result == "FAILURE" or .value.result == "WARNING") | .key) as $failed
           | .[] | select(.key as $k | any($failed[]; . - 2 <= $k and $k <= .)) | .value
           | "oidf-lane: \($module): " + (del(._id, .testId, .testOwner, .time, .blockId) | tostring | .[0:1500])' \
           "$LANE_DIR/log-$plan-$module.json" 2> /dev/null || true
@@ -373,8 +381,9 @@ run_plan() {
   done < <(jq -r '.modules[] | [.testModule, (.instances[-1] // "")] | @tsv' "$LANE_DIR/plan-$plan.json")
 }
 
-# Every verifier module the suite holds in REVIEW carries the screenshot
-# of FerroSMART's page and no placeholder left open; any other fails the lane.
+# Every module the suite holds in REVIEW carries the screenshot of
+# FerroSMART's page and no placeholder left open, uploaded by the lane or
+# filled by the suite's scripted browser; any other fails the lane.
 screenshots() {
   local plan=$1 module instance images failures=0
   local -a auth=()
@@ -384,8 +393,10 @@ screenshots() {
       continue
     images=$(curl -sS --cacert "$LANE_DIR/trust.pem" "${auth[@]}" "$suite/api/log/$instance/images")
     if ! jq -e 'any(.[]; (.img // "") | startswith("data:image/png;base64,")) and all(.[]; has("upload") | not)' \
-      <<< "$images" > /dev/null; then
+      <<< "$images" > /dev/null &&
+      ! get "$suite/api/log/$instance" | jq -e 'any(.[]; .src == "BROWSER" and .msg == "All placeholders filled by scripted browser")' > /dev/null; then
       echo "oidf-lane: $plan $module is in REVIEW without the screenshot of FerroSMART's page" >&2
+      jq -c '[.[] | {msg, upload, img: ((.img // "") | .[0:40])}]' <<< "$images" >&2 || true
       failures=$((failures + 1))
     fi
   done < <(jq -r '.modules[] | [.testModule, (.instances[-1] // "")] | @tsv' "$LANE_DIR/plan-$plan.json")
@@ -458,6 +469,10 @@ run() {
   done
   for plan in "${plans[@]}"; do
     if [ "${plan##* }" = fapi ]; then run_plan "${plan%% *}" fapi; fi
+  done
+  # A module the suite holds in REVIEW waits on the screenshot of FerroSMART's error page.
+  for plan in "${plans[@]}"; do
+    case "${plan##* }" in op | fapi) screenshots "$(plan_key "${plan%% *}")" ;; esac
   done
   compare
 }

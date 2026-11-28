@@ -2,9 +2,12 @@
   "client_id": "fapi-suite",
   "client_name": "OpenID Foundation conformance suite, FAPI 2.0 client 1",
   "token_endpoint_auth_method": "private_key_jwt",
-  "jwks": { "keys": [] },
+  "jwks": {
+    "keys": []
+  },
   "redirect_uris": [
-    "https://localhost.emobix.co.uk:8443/test/a/ferrosmart-fapi/callback"
+    "https://localhost.emobix.co.uk:8443/test/a/ferrosmart-fapi/callback",
+    "https://localhost.emobix.co.uk:8443/test/a/ferrosmart-fapi/callback?dummy1=lorem&dummy2=ipsum"
   ],
   "scope": "openid fhirUser profile email offline_access",
   "resources": [
