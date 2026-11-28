@@ -166,6 +166,10 @@ badge_count_color_self_test() {
       return 1
     fi
   done
+  if ! (set -u && badge_color_check < /dev/null); then
+    echo "badge colour: self-test FAILED: badge_color_check with no file does not pass under set -u" >&2
+    return 1
+  fi
   local work
   work="$(mktemp -d)"
   jq -cn '{message: "2/4", color: "yellowgreen"}' > "$work/b.json"
@@ -206,7 +210,7 @@ badge_color_check() {
       echo "badge logo: $file is $color, and its message '$message' asks for $want" >&2
       failures=$((failures + 1))
     fi
-  done < <(jq -r '[input_filename, .message, .color] | map(tostring) | join("\u001f")' "${files[@]}")
+  done < <(jq -r '[input_filename, .message, .color] | map(tostring) | join("\u001f")' ${files[@]+"${files[@]}"})
   [[ "$i" -eq "${#files[@]}" && "$failures" -eq 0 ]]
 }
 
