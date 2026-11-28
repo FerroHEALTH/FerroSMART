@@ -192,6 +192,22 @@ pub struct PresentedTls {
     certificate: Option<rustls::pki_types::CertificateDer<'static>>,
     unchecked_roots: Option<String>,
     kept: Option<Arc<dyn std::any::Any + Send + Sync>>,
+    clearance: Option<Arc<dyn Clearance>>,
+}
+
+/// What keeps the endpoints a [`PresentedTls`] connects to cleared for
+/// revocation, when its configuration admits only a cleared chain.
+///
+/// No specification governs the seam: our own design.
+pub trait Clearance: Send + Sync {
+    /// Clears the origin of `endpoint` and keeps it cleared for as long as
+    /// the clearance lives, resolving once the first check has answered.
+    /// A check that fails is logged, and the connection then fails closed at
+    /// its handshake.
+    fn clear<'a>(
+        &'a self,
+        endpoint: &'a Url,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 }
 
 impl PresentedTls {
@@ -207,6 +223,7 @@ impl PresentedTls {
             certificate,
             unchecked_roots: None,
             kept: None,
+            clearance: None,
         }
     }
 
@@ -219,12 +236,27 @@ impl PresentedTls {
         self
     }
 
-    /// Returns the configuration holding `kept` for as long as it lives,
-    /// such as the task that keeps its endpoints cleared for revocation.
+    /// Returns the configuration holding `kept` for as long as it lives.
     #[must_use]
     pub fn keeping(mut self, kept: Arc<dyn std::any::Any + Send + Sync>) -> Self {
         self.kept = Some(kept);
         self
+    }
+
+    /// Returns the configuration whose endpoints `clearance` keeps cleared
+    /// for revocation, each before the crate first connects to it.
+    #[must_use]
+    pub fn with_clearance(mut self, clearance: Arc<dyn Clearance>) -> Self {
+        self.clearance = Some(clearance);
+        self
+    }
+
+    /// Clears the origin of `endpoint` for revocation before a connection
+    /// to it, when the configuration has a [`Clearance`].
+    pub async fn clear(&self, endpoint: &Url) {
+        if let Some(clearance) = &self.clearance {
+            clearance.clear(endpoint).await;
+        }
     }
 
     /// Returns the line that names the roots the configuration trusts with
@@ -263,6 +295,7 @@ impl std::fmt::Debug for PresentedTls {
             .field("certificate", &self.certificate.is_some())
             .field("unchecked_roots", &self.unchecked_roots)
             .field("kept", &self.kept.is_some())
+            .field("clearance", &self.clearance.is_some())
             .finish_non_exhaustive()
     }
 }

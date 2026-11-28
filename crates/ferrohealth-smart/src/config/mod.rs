@@ -40,6 +40,8 @@ use crate::resource::Settings;
 use crate::sender::SenderConstraint;
 
 mod auth;
+#[cfg(feature = "server-tls")]
+mod clearance;
 pub mod credentials;
 pub mod endpoint;
 mod issuer;
@@ -704,19 +706,15 @@ pub(crate) fn build_tls(
 /// minimum version.
 ///
 /// A chain to a root of `trust_roots_file` opens a connection only once a
-/// revocation check cleared it, so the builder keeps the connection's
-/// endpoints cleared with a `revocation::Clearing` that lives as long as
-/// the configuration; it names the roots of
+/// revocation check cleared it, so the configuration carries a
+/// [`crate::client::Clearance`] that keeps each endpoint's origin cleared
+/// for as long as the configuration lives: the endpoints handed to the
+/// builder from the start, and any other the crate connects to before its
+/// first connection. It names the roots of
 /// `trust_roots_without_revocation_file` for the startup banner.
 #[cfg(feature = "server-tls")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ServerTls;
-
-/// How long one endpoint's revocation check may take, as
-/// `ferrohealth-server`'s telemetry clears its collector (no specification
-/// governs the bound: our own design).
-#[cfg(feature = "server-tls")]
-const CLEAR_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// A `trust_roots_file` table's endpoints cannot be kept cleared outside a
 /// Tokio runtime.
@@ -740,19 +738,25 @@ impl TlsBuilder for ServerTls {
     ) -> Result<crate::client::PresentedTls, Box<dyn std::error::Error + Send + Sync>> {
         let client = ferrohealth_server::tls_client::TlsClient::read(key, section)?;
         let platform = client.platform_config()?;
-        let clearing = match platform.check() {
-            Some(check) if !endpoints.is_empty() => {
-                let runtime = tokio::runtime::Handle::try_current().map_err(|_none| NoRuntime {
-                    key: key.to_owned(),
-                })?;
-                let _entered = runtime.enter();
-                Some(ferrohealth_server::revocation::Clearing::spawn(
+        let clearance = match platform.check() {
+            Some(check) => {
+                let runtime = match tokio::runtime::Handle::try_current() {
+                    Ok(runtime) => Some(runtime),
+                    Err(_none) if endpoints.is_empty() => None,
+                    Err(_none) => {
+                        return Err(NoRuntime {
+                            key: key.to_owned(),
+                        }
+                        .into());
+                    }
+                };
+                Some(clearance::Origins::new(
                     check.clone(),
-                    endpoints.to_vec(),
-                    CLEAR_WITHIN,
+                    runtime.as_ref(),
+                    endpoints,
                 ))
             }
-            _ => None,
+            None => None,
         };
         let unchecked = platform.unchecked_roots();
         let mut presented = crate::client::PresentedTls::new(
@@ -762,8 +766,8 @@ impl TlsBuilder for ServerTls {
         if let Some(roots) = unchecked {
             presented = presented.with_unchecked_roots(roots);
         }
-        if let Some(clearing) = clearing {
-            presented = presented.keeping(std::sync::Arc::new(clearing));
+        if let Some(clearance) = clearance {
+            presented = presented.with_clearance(clearance);
         }
         Ok(presented)
     }
