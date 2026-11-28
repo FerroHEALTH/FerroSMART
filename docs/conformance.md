@@ -105,11 +105,11 @@ carry the S256 PKCE challenge SMART App Launch 2.2.0 requires.
 
 | Result | Modules |
 |---|---|
-| PASSED | 42 |
-| WARNING | 1 |
-| FAILED | 5 |
-| REVIEW | 3 |
-| SKIPPED | 2 |
+| PASSED | 77 |
+| WARNING | 2 |
+| FAILED | 10 |
+| REVIEW | 6 |
+| SKIPPED | 3 |
 
 Open issues: [#966](https://github.com/FerroHEALTH/FerroSMART/issues/966).
 
@@ -123,12 +123,21 @@ Deviations, each a module whose outcome a specification FerroSMART follows asks 
 | `fapi2-security-profile-final-refresh-token` | FerroSMART rotates every client's refresh token, so the module's second refresh with the first token is refused as a reuse (OAuth 2.1 draft 17 §4.3.1); FAPI 2.0 Security Profile §5.3.2.1 has a server not rotate except in extraordinary circumstances, with the old token retryable (Note 1), and the decision is the owner's |
 | `fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds` | FerroSMART takes each request_uri once (RFC 9126 §4: one-time use SHOULD be enforced, a repeat MAY be allowed), so the second use before the login completes is refused |
 | `fapi2-security-profile-final-ensure-pkce-code-verifier-required` | FerroSMART answers a token request with no code_verifier invalid_request, the error OAuth 2.1 draft 17 §3.2.4 gives a request "missing a required parameter"; the suite expects invalid_grant |
+| `fapi2-security-profile-final-happy-flow` | the ID Token carries the fhirUser claim, which SMART App Launch 2.2.0 (Scopes for requesting identity data) has the server include for a grant of openid and fhirUser; the suite warns of a claim it does not know |
+| `fapi2-security-profile-final-ensure-authorization-request-without-state-success` | SMART App Launch 2.2.0 (Obtain authorization code) requires state, which the module leaves out of the pushed request, so FerroSMART refuses it with invalid_request |
+| `fapi2-security-profile-final-state-only-outside-request-object-not-used` | SMART App Launch 2.2.0 (Obtain authorization code) requires state, which the module leaves out of the pushed request, so FerroSMART refuses it with invalid_request |
+| `fapi2-security-profile-final-refresh-token` | FerroSMART rotates every client's refresh token, so the module's second refresh with the first token is refused as a reuse (OAuth 2.1 draft 17 §4.3.1); FAPI 2.0 Security Profile §5.3.2.1 has a server not rotate except in extraordinary circumstances, with the old token retryable (Note 1), and the decision is the owner's |
+| `fapi2-security-profile-final-par-ensure-reused-request-uri-prior-to-auth-completion-succeeds` | FerroSMART takes each request_uri once (RFC 9126 §4: one-time use SHOULD be enforced, a repeat MAY be allowed), so the second use before the login completes is refused |
+| `fapi2-security-profile-final-ensure-pkce-code-verifier-required` | FerroSMART answers a token request with no code_verifier invalid_request, the error OAuth 2.1 draft 17 §3.2.4 gives a request "missing a required parameter"; the suite expects invalid_grant |
 
 Awaiting review, each holding the screenshot of FerroSMART's page for the
 certification team; none counts as passed:
 
 | Module | Screenshot |
 |---|---|
+| `fapi2-security-profile-final-par-attempt-reuse-request_uri` | the suite holds the module for its certification team with the screenshot of FerroSMART's error page, which the suite's scripted browser takes and the lane checks |
+| `fapi2-security-profile-final-par-attempt-to-use-expired-request_uri` | the suite holds the module for its certification team with the screenshot of FerroSMART's error page, which the suite's scripted browser takes and the lane checks |
+| `fapi2-security-profile-final-par-attempt-to-use-request_uri-for-different-client` | the suite holds the module for its certification team with the screenshot of FerroSMART's error page, which the suite's scripted browser takes and the lane checks |
 | `fapi2-security-profile-final-par-attempt-reuse-request_uri` | the suite holds the module for its certification team with the screenshot of FerroSMART's error page, which the suite's scripted browser takes and the lane checks |
 | `fapi2-security-profile-final-par-attempt-to-use-expired-request_uri` | the suite holds the module for its certification team with the screenshot of FerroSMART's error page, which the suite's scripted browser takes and the lane checks |
 | `fapi2-security-profile-final-par-attempt-to-use-request_uri-for-different-client` | the suite holds the module for its certification team with the screenshot of FerroSMART's error page, which the suite's scripted browser takes and the lane checks |
