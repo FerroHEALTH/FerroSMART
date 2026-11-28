@@ -397,27 +397,31 @@ run_plan() {
   done < <(jq -r '.modules[] | [.testModule, (.instances[-1] // "")] | @tsv' "$LANE_DIR/plan-$plan.json")
 }
 
-# Every module the suite holds in REVIEW carries the screenshot of
-# FerroSMART's page and no placeholder left open, uploaded by the lane or
-# filled by the suite's scripted browser; any other fails the lane.
+# Every module the suite holds in REVIEW carries FerroSMART's page and no
+# placeholder left open: a PNG the lane uploaded through the suite's
+# ImageAPI, or the page source the suite's scripted browser writes into the
+# placeholder's own log entry (BrowserControl's update-image-placeholder,
+# which sets no `img`, so GET /api/log/{id}/images answers no entry for it);
+# any other fails the lane.
 screenshots() {
-  local plan=$1 module instance images failures=0
-  local -a auth=()
-  [ -z "${CONFORMANCE_TOKEN:-}" ] || auth=(-H "Authorization: Bearer $CONFORMANCE_TOKEN")
+  local plan=$1 module instance images log failures=0
   while IFS=$'\t' read -r module instance; do
     [ "$(awk -F'\t' -v plan="$plan" -v module="$module" '$1 == plan && $2 == module { print $3 }' "$LANE_DIR/actual.tsv")" = REVIEW ] ||
       continue
-    images=$(curl -sS --cacert "$LANE_DIR/trust.pem" "${auth[@]}" "$suite/api/log/$instance/images")
+    images=$(get "$suite/api/log/$instance/images")
+    log=$(get "$suite/api/log/$instance")
     if ! jq -e 'any(.[]; (.img // "") | startswith("data:image/png;base64,")) and all(.[]; has("upload") | not)' \
       <<< "$images" > /dev/null &&
-      ! get "$suite/api/log/$instance" | jq -e 'any(.[]; .src == "BROWSER" and .msg == "All placeholders filled by scripted browser")' > /dev/null; then
-      echo "oidf-lane: $plan $module is in REVIEW without the screenshot of FerroSMART's page" >&2
-      jq -c '[.[] | {msg, upload, img: ((.img // "") | .[0:40])}]' <<< "$images" >&2 || true
+      ! jq -e 'any(.[]; .result == "REVIEW" and ((.page_source // "") | length > 0)) and all(.[]; has("upload") | not)' \
+        <<< "$log" > /dev/null; then
+      echo "oidf-lane: $plan $module is in REVIEW without FerroSMART's page" >&2
+      jq -c '[.[] | select(.result == "REVIEW") | {msg, upload, img: ((.img // "") | .[0:40]), page_source: ((.page_source // "") | .[0:40])}]' \
+        <<< "$log" >&2 || true
       failures=$((failures + 1))
     fi
   done < <(jq -r '.modules[] | [.testModule, (.instances[-1] // "")] | @tsv' "$LANE_DIR/plan-$plan.json")
   [ "$failures" -eq 0 ] || return 1
-  echo "oidf-lane: every $plan module in REVIEW carries the screenshot of FerroSMART's page"
+  echo "oidf-lane: every $plan module in REVIEW carries FerroSMART's page"
 }
 
 # Every module's result against expected.tsv, in the log and the job
