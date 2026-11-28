@@ -11,7 +11,24 @@ and this project adheres to
 
 ## [Unreleased]
 
-## [0.38.0] - Unreleased
+## [0.38.0] - 2026-11-28
+
+The move to `ferrohealth-server` 0.14 and `ferrohealth-config` 0.5: every
+`trust_roots_file` endpoint is kept cleared for revocation.
+`ferrohealth-authz` 0.31.0 and `ferrohealth-session` 0.35.0 follow it.
+
+### Changed
+
+- Breaking: the `server-tls` feature requires `ferrohealth-server` 0.14 and
+  `ferrohealth-config` 0.5, which verify an outbound chain by its root: a
+  chain to a root of `trust_roots_file` opens a connection only once a
+  revocation check cleared its endpoint, failing closed when no CRL or OCSP
+  source answers, and a root of the new `trust_roots_without_revocation_file`
+  is trusted with no check and logged. `config::TlsBuilder::build` takes the
+  endpoints a connection reaches, and `config::ServerTls` keeps them cleared
+  with a `revocation::Clearing` held by the `client::PresentedTls` it builds,
+  which names the unchecked roots in `PresentedTls::unchecked_roots`; a
+  product's own builder takes the new `endpoints` parameter (#988).
 
 ## [0.37.0] - 2026-11-28
 
@@ -2710,7 +2727,8 @@ it issues no token and holds no key that signs one.
   `TODO(#N)` guards, the issue and pull request templates, the labels, the
   rulesets and the `crates-io` environment.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.37.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.38.0...HEAD
+[0.38.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.37.0...ferrohealth-smart-v0.38.0
 [0.37.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.36.0...ferrohealth-smart-v0.37.0
 [0.36.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.35.0...ferrohealth-smart-v0.36.0
 [0.35.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.34.0...ferrohealth-smart-v0.35.0
