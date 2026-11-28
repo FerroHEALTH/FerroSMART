@@ -11,6 +11,18 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-11-28
+
+### Fixed
+
+- Under `trust_roots_file`, every call the crate sends clears its endpoint for
+  revocation before it connects, so a `jwks_uri`, an introspection endpoint or
+  a token endpoint on another host under the same root connects as the issuer
+  does, whether the configuration or the issuer's metadata names it. The
+  endpoints handed to `config::ServerTls` are still cleared at once, and a
+  first call waits for their first round. `client::PresentedTls` carries the
+  new `client::Clearance` seam (`with_clearance`, `clear`) (#993).
+
 ## [0.38.0] - 2026-11-28
 
 The move to `ferrohealth-server` 0.14 and `ferrohealth-config` 0.5: every
@@ -2727,7 +2739,8 @@ it issues no token and holds no key that signs one.
   `TODO(#N)` guards, the issue and pull request templates, the labels, the
   rulesets and the `crates-io` environment.
 
-[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.38.0...HEAD
+[Unreleased]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.38.1...HEAD
+[0.38.1]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.38.0...ferrohealth-smart-v0.38.1
 [0.38.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.37.0...ferrohealth-smart-v0.38.0
 [0.37.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.36.0...ferrohealth-smart-v0.37.0
 [0.36.0]: https://github.com/FerroHEALTH/FerroSMART/compare/ferrohealth-smart-v0.35.0...ferrohealth-smart-v0.36.0
