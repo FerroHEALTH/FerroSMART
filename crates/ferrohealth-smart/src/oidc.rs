@@ -835,6 +835,7 @@ impl RelyingParty {
             url: endpoint.clone(),
             source,
         };
+        self.http.clear(endpoint).await;
         let mut response = self
             .http
             .client()
@@ -912,6 +913,7 @@ impl RelyingParty {
             url: endpoint.clone(),
             source,
         };
+        self.http.clear(endpoint).await;
         let body = {
             let mut encoded = url::form_urlencoded::Serializer::new(String::new());
             encoded.extend_pairs(form);

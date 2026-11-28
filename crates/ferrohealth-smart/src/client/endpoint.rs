@@ -214,6 +214,7 @@ async fn send(
     config: &ClientCredentials,
     fill: &impl Fn(&mut url::form_urlencoded::Serializer<'_, String>) -> Result<(), TokenError>,
 ) -> Result<Answer, TokenError> {
+    http.clear(endpoint).await;
     // NOTE: no specification governs this: our own design; the form encoder
     // is not `Sync`, so it is finished and dropped before the request awaits.
     let (mut request, body) = {
